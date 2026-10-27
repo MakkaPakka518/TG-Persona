@@ -2042,7 +2042,7 @@ SETTING_KEYS = ["tz", "log_keep_days", "cooldown", "delay", "ignore_bots", "api_
                 "ai_base", "ai_key", "ai_model", "ai_enabled", "ocr_enabled",
                 "flock_enabled", "flock_count", "flock_minutes", "flock_pool"]
 DEFAULTS = {"cooldown": "20", "delay": "1.0 3.0", "ignore_bots": "1", "theme": "dark",
-            "flock_count": "5", "flock_minutes": "5", "ocr_enabled": "1"}
+            "flock_count": "5", "flock_minutes": "5", "ocr_enabled": "1", "log_keep_days": "30"}
 
 
 @app.get("/api/settings")
