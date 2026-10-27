@@ -23,7 +23,10 @@ import os
 import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo      # Python 3.9+
+except ImportError:                     # 3.8 没有 zoneinfo,退化为固定偏移
+    ZoneInfo = None
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -182,16 +185,20 @@ def tz_valid(name: str) -> bool:
         return False
     if name in _TZ_FALLBACK:
         return True
-    try:
-        ZoneInfo(name)
-        return True
-    except Exception:
-        return bool(re.fullmatch(r"[+-]\d{1,2}(:\d{2})?", name))
+    if ZoneInfo is not None:
+        try:
+            ZoneInfo(name)
+            return True
+        except Exception:
+            pass
+    return bool(re.fullmatch(r"[+-]\d{1,2}(:\d{2})?", name))
 
 
 def tzinfo():
     name = tz_name()
     try:
+        if ZoneInfo is None:
+            raise RuntimeError("no zoneinfo")
         return ZoneInfo(name)
     except Exception:
         off = _TZ_FALLBACK.get(name)
