@@ -146,6 +146,11 @@ def db_init():
             conn.execute(f"ALTER TABLE rules ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
             pass
+    # 老记录没有 detail(这次才加的列),ok 默认 1 会显示成「成功」,改成 NULL 让前端显示「—」
+    try:
+        conn.execute("UPDATE hits SET ok=NULL WHERE (detail IS NULL OR detail='') AND ok=1")
+    except sqlite3.Error:
+        pass
     for col, ddl in (("content", "TEXT DEFAULT ''"), ("reply", "TEXT DEFAULT ''"), ("grp_name", "TEXT DEFAULT ''"),
                      ("ok", "INTEGER DEFAULT 1"), ("sender", "TEXT DEFAULT ''"), ("detail", "TEXT DEFAULT ''")):
         try:

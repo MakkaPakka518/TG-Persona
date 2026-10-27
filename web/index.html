@@ -162,6 +162,7 @@ h2{display:none}
 .logrow .st{font-size:11.5px;padding:2px 7px;border-radius:6px;flex:none;font-weight:600}
 .logrow .st.ok{background:rgba(34,197,94,.15);color:#16a34a}
 .logrow .st.no{background:rgba(224,49,49,.14);color:#e03131}
+.logrow .st.old{background:rgba(120,130,150,.16);color:var(--dim)}
 .logrow .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
 .logrow .tm{font-size:11.5px;color:var(--dim);flex:none}
 .logdetail{display:none;margin-top:9px;padding:10px 12px;background:var(--panel2);border-radius:10px;font-size:12.8px;line-height:1.6}
@@ -1493,7 +1494,8 @@ function pickLogKind(k){
   loadLogs();
 }
 function logRow(h){
-  const ok=(h.ok===undefined?1:h.ok)?'ok':'no';
+  const okv=(h.ok===undefined||h.ok===null)?-1:(h.ok?1:0);
+  const ok=okv===1?'ok':(okv===0?'no':'old');
   const d=h.detail||{};
   let title='';
   if(h.action==='signin') title=(d.task||'签到')+(d.bot?(' · '+d.bot):'');
@@ -1530,7 +1532,7 @@ function logRow(h){
     add('指令',d.probe);
   }
   return '<div class="logitem" onclick="this.classList.toggle(\'open\')">'+
-    '<div class="logrow"><span class="st '+ok+'">'+(ok==='ok'?'成功':'失败')+'</span>'+
+    '<div class="logrow"><span class="st '+ok+'">'+(ok==='ok'?'成功':(ok==='no'?'失败':'记录'))+'</span>'+
     '<span class="t">'+esc(title)+'</span><span class="tm">'+fmt(h.ts)+'</span></div>'+
     '<div class="logdetail">'+(lines.join('')||'<div class="line">无详情</div>')+'</div></div>';
 }
