@@ -69,6 +69,24 @@ def db_init():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ts INTEGER, chat_id TEXT, rule_id INTEGER, msg_id INTEGER, action TEXT
         );
+        CREATE TABLE IF NOT EXISTS automations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,                 -- signin | grabcodes | redpacket
+            name TEXT NOT NULL,
+            target TEXT DEFAULT '',             -- signin: @机器人 或 群ID
+            command TEXT DEFAULT '',            -- signin: 签到命令
+            win_start TEXT DEFAULT '08:00',     -- signin: 时间窗口开始 hh:mm
+            win_end TEXT DEFAULT '12:00',       -- signin: 时间窗口结束 hh:mm
+            click_btn INTEGER DEFAULT 0,        -- signin: 签到后自动点击回复按钮
+            groups TEXT DEFAULT '',             -- grabcodes/redpacket: 指定群(@群名或ID,逗号分隔;留空=全部监听群)
+            keywords TEXT DEFAULT '',           -- 触发关键词(逗号分隔)
+            action TEXT DEFAULT 'reply',        -- grabcodes: reply(回复消息) | send(发送命令)
+            reply_text TEXT DEFAULT '',         -- 回复/命令文本,{code} 替换为提取的邀请码
+            cooldown INTEGER DEFAULT 30,        -- 同群同任务冷却(秒)
+            enabled INTEGER DEFAULT 1,
+            last_at TEXT DEFAULT '',            -- 最近执行(签到存日期 YYYY-MM-DD,防当日重复)
+            created_at INTEGER
+        );
         """
     )
     conn.commit()
@@ -209,6 +227,202 @@ async def watcher_loop():
         except Exception as e:
             log.warning("监听连接断开: %s", e)
         await asyncio.sleep(5)
+
+
+# ---------------- 自动化:签到 / 抢注 / 抢红包 ----------------
+auto_last_ts = {}        # (chat_id, auto_id) -> 上次执行时刻
+signin_plans = {}        # (auto_id, YYYY-MM-DD) -> 今日计划执行分钟数(窗口内随机)
+signin_task = None
+
+
+def match_keywords(kws, text):
+    """逗号分隔关键词,任意命中即 True(忽略大小写)"""
+    if not text:
+        return False
+    low = text.lower()
+    return any(k.strip().lower() in low for k in re.split(r"[,，]", kws or "") if k.strip())
+
+
+def extract_code(text):
+    """从消息中提取疑似邀请码/注册码(≥5 位字母数字下划线组合)"""
+    m = re.search(r"[A-Za-z0-9_-]{5,}", text or "")
+    return m.group(0) if m else ""
+
+
+async def resolve_entity(peer):
+    """解析 @username / 数字ID -> entity;失败返回 None"""
+    if not peer or not str(peer).strip():
+        return None
+    try:
+        return await client.get_entity(str(peer).strip())
+    except Exception:
+        return None
+
+
+async def on_auto_event(event):
+    """抢注 / 抢红包:监控群出现触发关键词时自动行动"""
+    if _running["paused"] or not event.is_group or event.out:
+        return
+    autos = conn.execute(
+        "SELECT * FROM automations WHERE enabled=1 AND type IN ('grabcodes','redpacket')"
+    ).fetchall()
+    if not autos:
+        return
+    chat = str(event.chat_id)
+    text = (event.raw_text or "").strip()
+
+    watched = {r["chat_id"] for r in conn.execute("SELECT chat_id FROM watched_groups").fetchall()}
+    now = time.monotonic()
+    for a in autos:
+        groups = [g.strip() for g in str(a["groups"] or "").split(",") if g.strip()]
+        if groups:
+            in_scope = False
+            for g in groups:
+                if g == chat or (g.startswith("@") and str(getattr(await resolve_entity(g), "id", "")) == chat):
+                    in_scope = True
+                    break
+            if not in_scope:
+                continue
+        elif chat not in watched:
+            continue
+
+        # 红包消息可无文本(带按钮/贴纸);抢注必须有文本
+        if a["type"] == "grabcodes" and not match_keywords(a["keywords"], text):
+            continue
+        if a["type"] == "redpacket":
+            if text and not match_keywords(a["keywords"], text):
+                continue
+
+        key = (chat, a["id"])
+        cd = int(a["cooldown"] or 30)
+        if now - auto_last_ts.get(key, -1e9) < cd:
+            continue
+        auto_last_ts[key] = now
+
+        try:
+            if a["type"] == "grabcodes":
+                code = extract_code(text)
+                rt = str(a["reply_text"] or "").replace("{code}", code)
+                if not rt:
+                    continue
+                if a["action"] == "send":
+                    await event.respond(rt)
+                else:
+                    await event.reply(rt)
+            else:
+                buttons = await event.get_buttons()
+                target_btn = None
+                for row in buttons:
+                    for b in row:
+                        if re.search(r"打开|领取|收下|拆|红包|🎁|领", b.text or ""):
+                            target_btn = b
+                            break
+                    if target_btn:
+                        break
+                if not target_btn and buttons and buttons[0]:
+                    target_btn = buttons[0][0]
+                if target_btn:
+                    await target_btn.click()
+                    log.info("抢红包 群=%s 任务=%s", chat, a["name"])
+            conn.execute(
+                "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action) VALUES(?,?,?,?,?)",
+                (int(time.time()), chat, -a["id"], event.id, a["type"]),
+            )
+            conn.commit()
+        except errors.FloodWaitError as e:
+            log.warning("自动化触发限流,等待 %ss", e.seconds)
+            await asyncio.sleep(e.seconds + 1)
+        except errors.RPCError as e:
+            log.warning("自动化操作失败(群=%s): %s", chat, e)
+        except Exception:
+            log.exception("自动化执行异常")
+
+
+def _win_minutes(s):
+    """hh:mm -> 当天分钟数;非法返回 None"""
+    m = re.match(r"^(\d{1,2}):(\d{2})$", str(s).strip())
+    if not m:
+        return None
+    h, mi = int(m.group(1)), int(m.group(2))
+    if h > 23 or mi > 59:
+        return None
+    return h * 60 + mi
+
+
+async def run_signin(a):
+    """执行单条签到:发命令,可选点击回复按钮"""
+    target = str(a["target"] or "").strip()
+    cmd = str(a["command"] or "").strip()
+    if not target or not cmd:
+        return
+    ent = await resolve_entity(target)
+    if ent is None:
+        log.warning("签到目标解析失败: %s", target)
+        return
+    try:
+        await client.send_message(ent, cmd)
+        if a["click_btn"]:
+            await asyncio.sleep(1.6)
+            recent = await client.get_messages(ent, limit=3)
+            for m in recent:
+                if not m.out:
+                    continue
+                btns = await m.get_buttons()
+                for row in btns:
+                    for b in row:
+                        if re.search(r"签到|打卡|确认|领取|√|收下|完成", b.text or ""):
+                            await b.click()
+                            break
+                    else:
+                        continue
+                    break
+                break
+        conn.execute(
+            "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action) VALUES(?,?,?,?,?)",
+            (int(time.time()), target, -a["id"], 0, "signin"),
+        )
+        conn.commit()
+        log.info("签到完成 %s -> %s", a["name"], target)
+    except errors.FloodWaitError as e:
+        log.warning("签到限流,等待 %ss", e.seconds)
+        await asyncio.sleep(e.seconds + 1)
+    except errors.RPCError as e:
+        log.warning("签到失败(%s): %s", target, e)
+    except Exception:
+        log.exception("签到异常")
+
+
+async def signin_loop():
+    """每分钟检查一次:窗口内随机时刻执行当日签到"""
+    global signin_task
+    while True:
+        try:
+            if client is not None and tg_state["phase"] == "ready":
+                autos = conn.execute(
+                    "SELECT * FROM automations WHERE enabled=1 AND type='signin'"
+                ).fetchall()
+                today = time.strftime("%Y-%m-%d")
+                nowm = time.localtime().tm_hour * 60 + time.localtime().tm_min
+                for a in autos:
+                    if a["last_at"] == today:
+                        continue
+                    w0, w1 = _win_minutes(a["win_start"]), _win_minutes(a["win_end"])
+                    if w0 is None or w1 is None:
+                        continue
+                    if w0 > w1:
+                        w0, w1 = w1, w0
+                    plan_key = (a["id"], today)
+                    if plan_key not in signin_plans:
+                        signin_plans[plan_key] = random.randint(w0, w1)
+                    if nowm >= signin_plans[plan_key]:
+                        await run_signin(a)
+                        conn.execute("UPDATE automations SET last_at=? WHERE id=?", (today, a["id"]))
+                        conn.commit()
+                if len(signin_plans) > 500:
+                    signin_plans.clear()
+        except Exception as e:
+            log.warning("签到循环异常: %s", e)
+        await asyncio.sleep(60)
 
 
 # ---------------- 生命周期 ----------------
@@ -377,7 +591,7 @@ async def tg_verify_password(body: VerifyPassword):
 
 
 async def finish_login(me=None):
-    global watcher_task, handler_registered
+    global watcher_task, handler_registered, signin_task
     tg_state["phase"] = "ready"
     tg_state["err"] = None
     me = me or await client.get_me()
@@ -404,9 +618,12 @@ async def finish_login(me=None):
         pass
     if not handler_registered:
         client.add_event_handler(on_group_message, events.NewMessage(incoming=True))
+        client.add_event_handler(on_auto_event, events.NewMessage(incoming=True))
         handler_registered = True
     if watcher_task is None or watcher_task.done():
         watcher_task = asyncio.create_task(watcher_loop())
+    if signin_task is None or signin_task.done():
+        signin_task = asyncio.create_task(signin_loop())
     log.info("已登录: %s (id=%s)", tg_state["me"]["name"], me.id)
 
 
@@ -521,6 +738,106 @@ async def update_rule(rid: int, body: RuleIn):
         (body.keywords.strip(), body.regex, body.action, body.value.strip(), body.enabled, rid),
     )
     conn.commit()
+    return {"ok": True}
+
+
+# ---------- 自动化管理 (签到 / 抢注 / 抢红包) ----------
+class AutoIn(BaseModel):
+    type: str = "signin"          # signin | grabcodes | redpacket
+    name: str = ""
+    target: str = ""              # signin: @机器人 或 群ID
+    command: str = ""             # signin: 签到命令
+    win_start: str = "08:00"      # signin: 窗口开始
+    win_end: str = "12:00"        # signin: 窗口结束
+    click_btn: int = 0            # signin: 签到后自动点按钮
+    groups: str = ""              # grabcodes/redpacket: 指定群(留空=全部监听群)
+    keywords: str = ""            # 触发关键词
+    action: str = "reply"         # grabcodes: reply | send
+    reply_text: str = ""          # 回复/命令文本,{code} 提取邀请码
+    cooldown: int = 30
+    enabled: int = 1
+
+
+def _valid_auto(body: AutoIn):
+    if body.type not in ("signin", "grabcodes", "redpacket"):
+        raise HTTPException(400, "类型必须是 signin / grabcodes / redpacket")
+    if not body.name.strip():
+        raise HTTPException(400, "请填写任务名称")
+    if body.type == "signin":
+        if not body.target.strip() or not body.command.strip():
+            raise HTTPException(400, "签到需要填写目标(@机器人)和命令")
+        if _win_minutes(body.win_start) is None or _win_minutes(body.win_end) is None:
+            raise HTTPException(400, "时间窗口格式需为 hh:mm")
+    if body.type == "grabcodes" and not body.reply_text.strip():
+        raise HTTPException(400, "抢注需要填写动作文本(支持 {code} 占位符)")
+    if body.cooldown < 0 or body.cooldown > 86400:
+        raise HTTPException(400, "冷却秒数无效")
+
+
+@app.get("/api/autos")
+async def list_autos():
+    rows = conn.execute("SELECT * FROM automations ORDER BY id DESC").fetchall()
+    return {"autos": [dict(r) for r in rows]}
+
+
+@app.post("/api/autos")
+async def create_auto(body: AutoIn):
+    _valid_auto(body)
+    cur = conn.execute(
+        "INSERT INTO automations(type,name,target,command,win_start,win_end,click_btn,"
+        "groups,keywords,action,reply_text,cooldown,enabled,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (body.type, body.name.strip(), body.target.strip(), body.command.strip(),
+         body.win_start.strip(), body.win_end.strip(), body.click_btn,
+         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
+         body.cooldown, body.enabled, int(time.time())),
+    )
+    conn.commit()
+    return {"ok": True, "id": cur.lastrowid}
+
+
+@app.put("/api/autos/{aid}")
+async def update_auto(aid: int, body: AutoIn):
+    _valid_auto(body)
+    conn.execute(
+        "UPDATE automations SET type=?,name=?,target=?,command=?,win_start=?,win_end=?,click_btn=?,"
+        "groups=?,keywords=?,action=?,reply_text=?,cooldown=?,enabled=? WHERE id=?",
+        (body.type, body.name.strip(), body.target.strip(), body.command.strip(),
+         body.win_start.strip(), body.win_end.strip(), body.click_btn,
+         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
+         body.cooldown, body.enabled, aid),
+    )
+    conn.commit()
+    return {"ok": True}
+
+
+@app.post("/api/autos/{aid}/toggle")
+async def toggle_auto(aid: int):
+    r = conn.execute("SELECT enabled FROM automations WHERE id=?", (aid,)).fetchone()
+    if not r:
+        raise HTTPException(404, "任务不存在")
+    v = 0 if r["enabled"] else 1
+    conn.execute("UPDATE automations SET enabled=? WHERE id=?", (v, aid))
+    conn.commit()
+    return {"ok": True, "enabled": v}
+
+
+@app.delete("/api/autos/{aid}")
+async def delete_auto(aid: int):
+    conn.execute("DELETE FROM automations WHERE id=?", (aid,))
+    conn.commit()
+    return {"ok": True}
+
+
+@app.post("/api/autos/{aid}/run")
+async def run_auto_now(aid: int):
+    """手动立即执行一次签到任务"""
+    a = conn.execute("SELECT * FROM automations WHERE id=? AND type='signin'", (aid,)).fetchone()
+    if not a:
+        raise HTTPException(404, "签到任务不存在")
+    if client is None or tg_state["phase"] != "ready":
+        raise HTTPException(409, "TG 尚未登录")
+    asyncio.get_running_loop().create_task(run_signin(a))
     return {"ok": True}
 
 
