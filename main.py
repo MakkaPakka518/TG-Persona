@@ -534,7 +534,7 @@ async def get_settings():
 @app.post("/api/settings")
 async def update_settings(body: dict):
     for k, v in body.items():
-        if k in ("cooldown", "delay", "ignore_bots"):
+        if k in ("cooldown", "delay", "ignore_bots", "api_id", "api_hash"):
             set_setting(k, str(v))
     return {"ok": True}
 

@@ -142,15 +142,12 @@ button.danger:hover{background:rgba(255,93,108,.22)}
 </head>
 <body>
 
-<!-- 登录向导 -->
+<!-- 面板登录 -->
 <div id="loginGate" class="hidden">
   <div class="lg-wrap">
     <div class="lg-card">
       <div class="lg-logo"><span class="dot"></span>TG PERSONA <span style="font-size:11px;color:var(--dim);font-weight:400">人形分身</span></div>
-      <div class="lg-sub">登录你自己的 Telegram 账号 · 关键词自动回复 / 点表情</div>
-      <div class="steps" id="lgSteps">
-        <div class="st act"></div><div class="st"></div><div class="st"></div><div class="st"></div>
-      </div>
+      <div class="lg-sub">输入面板密码进入控制台</div>
       <div id="lgBody"></div>
       <div class="tgerr" id="lgErr"></div>
     </div>
@@ -170,6 +167,12 @@ button.danger:hover{background:rgba(255,93,108,.22)}
   <section id="tab-overview" class="act">
     <h2><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>总览</h2>
     <div class="sub">你的账号监听状态与命中统计</div>
+    <div class="card" id="ovNoTg" style="display:none;border:1px solid #d9a13b">
+      <div class="flex" style="gap:12px;align-items:center">
+        <div class="grow"><b>Telegram 账号未登录</b><div class="hint">配置 API 凭证并登录后,人形分身才会开始监听群消息</div></div>
+        <button class="btn" onclick="goTab('settings')">去设置页登录</button>
+      </div>
+    </div>
     <div class="card">
       <div class="flex" style="gap:14px">
         <div class="grow">
@@ -290,8 +293,7 @@ button.danger:hover{background:rgba(255,93,108,.22)}
     </div>
     <div class="card">
       <h3><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>Telegram 账号</span></h3>
-      <button class="danger" onclick="logoutTG()">退出 Telegram 账号(清除本地会话)</button>
-      <div class="hint" style="margin-top:8px">退出后需要重新通过手机号 + 验证码登录</div>
+      <div id="tgCard"><div class="empty">加载中...</div></div>
     </div>
   </section>
 </main>
@@ -314,7 +316,7 @@ const EMOJIS=["👍","❤","🔥","😂","🎉","😮","😢","😡","👏","�
 function toast(msg,err){const t=$('#toast');t.textContent=msg;t.classList.add('show');t.classList.toggle('err',!!err);setTimeout(()=>t.classList.remove('show'),2600)}
 async function api(path,opts={}){
   const r=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});
-  if(r.status===401){showLoginGate('pw');throw new Error('未登录面板')}
+  if(r.status===401){showLoginGate();throw new Error('未登录面板')}
   const d=await r.json().catch(()=>({}));
   if(!r.ok)throw new Error(d.error||('请求失败 '+r.status));
   return d;
@@ -330,76 +332,100 @@ function goTab(t){
   });
   if(t==='groups')loadDialogs();
   if(t==='logs')loadLogs();
+  if(t==='settings')renderTgCard();
 }
 
-// ---------- 登录向导 ----------
-let lgStep=0, lgPhase='idle';
-const LG_STEPS=['API 凭证','手机号','验证码','两步验证'];
-function showLoginGate(mode){
+// ---------- 面板登录 ----------
+function showLoginGate(){
   $('#loginGate').classList.remove('hidden');
-  lgStep=0; lgPhase=mode||'idle';
   $('#lgErr').style.display='none';
-  renderLoginGate();
+  $('#lgBody').innerHTML=`
+    <label>面板访问密码</label>
+    <input type="password" id="lgPw" placeholder="输入面板密码" onkeydown="if(event.key==='Enter')panelLogin()" autocomplete="off">
+    <button class="btn" style="width:100%;margin-top:16px" onclick="panelLogin()">进入面板</button>
+    <div class="hint">密码为部署时设置的面板密码(install.sh 询问项)</div>`;
+  setTimeout(()=>{const f=$('#lgPw');if(f)f.focus()},60);
 }
-function renderLoginGate(){
-  const st = Array.from($('#lgSteps').children);
-  st.forEach((el,i)=>{
-    el.className='st'+(i<lgStep?' done':i===lgStep?' act':'');
-  });
-  if(lgPhase==='pw'){
-    $('#lgBody').innerHTML=`
-      <label>面板访问密码</label>
-      <input type="password" id="lgPw" placeholder="输入面板密码" onkeydown="if(event.key==='Enter')panelLogin()" autocomplete="off">
-      <button class="btn" style="width:100%;margin-top:16px" onclick="panelLogin()">进入面板</button>
-      <div class="hint">密码在服务器上运行首次启动时打印,或查看 data/panel_password.txt</div>`;
-    return;
-  }
-  const row=(label,input,btn,on)=>`
-    <label>${label}</label>${input}
-    <button class="btn" style="width:100%;margin-top:16px" onclick="${on}()">${btn}</button>`;
-  if(lgStep===0){
-    $('#lgBody').innerHTML=row('API_ID','<input type="text" id="lgApiId" placeholder="12345678" inputmode="numeric">',lgPhase==='idle'?'下一步 : 保存凭证':'保存凭证','saveApi')
-    +'<div class="hint">在 my.telegram.org → API development tools 获取(登录 TG 后创建应用)</div>';
-  }else if(lgStep===1){
-    $('#lgBody').innerHTML=row('手机号(带国家码)','<input type="text" id="lgPhone" placeholder="8613800138000" inputmode="numeric">','发送验证码','sendCode')
-    +'<button class="ghost" style="width:100%;margin-top:8px" onclick="lgStep=0;renderLoginGate()">返回修改凭证</button>';
-  }else if(lgStep===2){
-    $('#lgBody').innerHTML=row('Telegram 验证码','<input type="text" id="lgCode" placeholder="6 位数字" inputmode="numeric">','验证并登录','verifyCode')
-    +'<button class="ghost" style="width:100%;margin-top:8px" onclick="lgStep=1;renderLoginGate()">返回</button>';
-  }else if(lgStep===3){
-    $('#lgBody').innerHTML=row('两步验证密码','<input type="password" id="lg2fa" placeholder="Cloud 密码">','完成登录','verify2fa')
-    +'<div class="hint">账号开启了两步验证(Cloud 密码)时需要</div>';
-  }
-  setTimeout(()=>{const f=$('#lgBody input');if(f)f.focus()},60);
-}
-async function saveApi(){
-  const id=$('#lgApiId').value.trim(),hash=prompt('请输入 API_HASH(my.telegram.org 应用页可复制)');
-  if(!id||!hash||!hash.trim())return toast('API_ID / API_HASH 不能为空',1);
-  try{await api('/api/tg/init',{method:'POST',body:JSON.stringify({api_id:+id,api_hash:hash.trim()})});lgStep=1;renderLoginGate()}
-  catch(e){showErr(e.message)}
-}
-async function sendCode(){
-  try{await api('/api/tg/send_code',{method:'POST',body:JSON.stringify({phone:$('#lgPhone').value.trim()})});lgStep=2;renderLoginGate()}
-  catch(e){showErr(e.message)}
-}
-async function verifyCode(){
-  try{const d=await api('/api/tg/verify_code',{method:'POST',body:JSON.stringify({code:$('#lgCode').value.trim()})});
-    if(d.need_password){lgStep=3;renderLoginGate()}else afterLogin()}
-  catch(e){showErr(e.message)}
-}
-async function verify2fa(){
-  try{await api('/api/tg/verify_password',{method:'POST',body:JSON.stringify({password:$('#lg2fa').value})});afterLogin()}
-  catch(e){showErr(e.message)}
-}
-function showErr(m){const e=$('#lgErr');e.textContent=m;e.style.display='block'}
 async function panelLogin(){
   try{await api('/api/panel/login',{method:'POST',body:JSON.stringify({password:$('#lgPw').value})});$('#loginGate').classList.add('hidden');bootstrap()}
-  catch(e){showErr(e.message)}
+  catch(e){const el=$('#lgErr');el.textContent=e.message;el.style.display='block'}
 }
-function afterLogin(){
-  $('#loginGate').classList.add('hidden');
-  toast('登录成功,人形分身已上线');
-  bootstrap();
+
+// ---------- Telegram 账号登录(设置页内) ----------
+let tgPhase='idle';
+async function renderTgCard(){
+  const el=$('#tgCard'); if(!el)return;
+  if(state.logged_in){
+    el.innerHTML=`
+      <div class="flex" style="gap:12px;align-items:center">
+        <div style="width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--acc),var(--acc2));display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;flex:none">${esc((state.tg.me.name||'?').charAt(0).toUpperCase())}</div>
+        <div class="grow"><div class="t">${esc(state.tg.me.name||'--')}</div><div class="s mono">@${esc(state.tg.me.username||state.tg.me.phone||'--')}</div></div>
+        <button class="danger" onclick="logoutTG()">退出登录</button>
+      </div>
+      <div class="hint" style="margin-top:10px">会话已保存在服务器 data/tg.session,重启不丢登录</div>`;
+    return;
+  }
+  const p=await api('/api/settings').catch(()=>({api_id:'',api_hash:''}));
+  el.innerHTML=`
+    <div id="tgS0">
+      <label>API_ID</label>
+      <input type="text" id="tgApiId" placeholder="12345678" inputmode="numeric" value="${esc(String(p.api_id||''))}">
+      <label>API_HASH</label>
+      <input type="text" id="tgApiHash" placeholder="在 my.telegram.org → API development tools 获取" value="${esc(p.api_hash||'')}">
+      <button class="btn" style="width:100%;margin-top:10px" onclick="saveTgApi()">保存凭证</button>
+      <div class="hint">在 my.telegram.org 登录后创建应用即可看到这两个值</div>
+    </div>
+    <div id="tgS1" style="display:${tgPhase==='code_sent'||tgPhase==='need_password'?'block':'none'};margin-top:16px">
+      <label>手机号(带国家码)</label>
+      <input type="text" id="tgPhone" placeholder="8613800138000" inputmode="numeric">
+      <button class="btn" style="width:100%;margin-top:10px" onclick="sendTgCode()">发送验证码</button>
+      <div class="hint">Telegram 会给该手机号发送登录验证码</div>
+    </div>
+    <div id="tgS2" style="display:${tgPhase==='code_sent'?'block':'none'};margin-top:16px">
+      <label>验证码</label>
+      <input type="text" id="tgCode" placeholder="6 位数字" inputmode="numeric">
+      <button class="btn" style="width:100%;margin-top:10px" onclick="verifyTgCode()">验证并登录</button>
+    </div>
+    <div id="tgS3" style="display:${tgPhase==='need_password'?'block':'none'};margin-top:16px">
+      <label>两步验证密码(Cloud 密码)</label>
+      <input type="password" id="tg2fa" placeholder="账号开启两步验证时需要">
+      <button class="btn" style="width:100%;margin-top:10px" onclick="verifyTg2fa()">完成登录</button>
+    </div>`;
+}
+async function saveTgApi(){
+  const id=$('#tgApiId').value.trim(), hash=$('#tgApiHash').value.trim();
+  if(!/^\d{4,9}$/.test(id)||hash.length<10)return toast('API_ID 或 API_HASH 无效(在 my.telegram.org 获取)',1);
+  try{
+    await api('/api/settings',{method:'POST',body:JSON.stringify({api_id:id,api_hash:hash})});
+    await api('/api/tg/init',{method:'POST',body:JSON.stringify({api_id:+id,api_hash:hash})});
+    tgPhase='code_sent'; toast('凭证已保存,下一步:发送验证码'); renderTgCard();
+    setTimeout(()=>{const f=$('#tgPhone');if(f)f.focus()},80);
+  }catch(e){toast(e.message,1)}
+}
+async function sendTgCode(){
+  const phone=$('#tgPhone').value.trim();
+  if(!phone)return toast('请填写手机号',1);
+  try{
+    await api('/api/tg/send_code',{method:'POST',body:JSON.stringify({phone})});
+    tgPhase='code_sent'; renderTgCard(); toast('验证码已发送,请在 Telegram 查收');
+    setTimeout(()=>{const f=$('#tgCode');if(f)f.focus()},80);
+  }catch(e){toast(e.message,1)}
+}
+async function verifyTgCode(){
+  try{
+    const d=await api('/api/tg/verify_code',{method:'POST',body:JSON.stringify({code:$('#tgCode').value.trim()})});
+    if(d.need_password){tgPhase='need_password';renderTgCard();return}
+    afterTgLogin();
+  }catch(e){toast(e.message,1)}
+}
+async function verifyTg2fa(){
+  try{
+    await api('/api/tg/verify_password',{method:'POST',body:JSON.stringify({password:$('#tg2fa').value})});
+    afterTgLogin();
+  }catch(e){toast(e.message,1)}
+}
+function afterTgLogin(){
+  tgPhase='ready'; toast('登录成功,人形分身已上线'); loadState();
 }
 
 // ---------- 状态 ----------
@@ -415,8 +441,9 @@ async function loadState(){
       $('#ovAvatar').textContent=(state.tg.me.name||'?').charAt(0).toUpperCase();
     }else{
       $('#hMe').textContent='未登录';$('#ovName').textContent='--';$('#ovUser').textContent='@--';$('#ovAvatar').textContent='?';
-      showLoginGate('idle');
     }
+    $('#ovNoTg').style.display=state.logged_in?'none':'flex';
+    if(state.logged_in!==window._prevLoggedIn){window._prevLoggedIn=state.logged_in;renderTgCard()}
     $('#ovGroups').textContent=state.stats.watched_groups;
     $('#ovRules').textContent=state.stats.rules;
     $('#ovHits').textContent=state.stats.hits;
@@ -439,8 +466,6 @@ async function loadSettings(){
     $('#ovCooldown').textContent=(s.cooldown||20)+'s';
     $('#ovDelay').textContent=(s.delay||'1.0 3.0').replace(' ','~')+'s';
     $('#ovIgnore').textContent=s.ignore_bots==='0'?'关':'开';
-    // 预填 API 凭证
-    if(s.api_id){const f=$('#lgApiId');if(f&&!f.value)f.value=s.api_id}
   }catch(e){}
 }
 async function saveSettings(){
@@ -461,11 +486,11 @@ async function changePw(){
 }
 async function logoutTG(){
   if(!confirm('确认退出 Telegram 账号?已保存的会话会被清除'))return;
-  try{await api('/api/tg/logout',{method:'POST'});toast('已退出 TG');bootstrap()}
+  try{await api('/api/tg/logout',{method:'POST'});tgPhase='idle';window._prevLoggedIn=null;toast('已退出 TG');loadState();renderTgCard()}
   catch(e){toast(e.message,1)}
 }
 async function btnPanelOut(){
-  try{await api('/api/panel/logout',{method:'POST'});showLoginGate('pw')}
+  try{await api('/api/panel/logout',{method:'POST'});showLoginGate()}
   catch(e){}
 }
 
@@ -572,7 +597,7 @@ async function bootstrap(){
   // 先探测是否需要面板密码
   try{
     const r=await fetch('/api/state');
-    if(r.status===401){showLoginGate('pw');return}
+    if(r.status===401){showLoginGate();return}
     await r.json();
   }catch(e){}
   renderEmojis();pickAction('reply');
