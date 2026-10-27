@@ -61,7 +61,7 @@ fi
 ask "安装 Python 依赖(telethon / fastapi / uvicorn)..."
 if ! python3 -m venv "$INSTALL_DIR/venv" 2>/dev/null; then
     warn "python3-venv 缺失,尝试安装..."
-    apt update -qq && apt install -y -qq python3-venv python3-full
+    apt update -qq && apt install -y -qq python3-venv
     python3 -m venv "$INSTALL_DIR/venv"
 fi
 "$INSTALL_DIR/venv/bin/pip" install -q --upgrade pip
