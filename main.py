@@ -78,6 +78,9 @@ def db_init():
             win_start TEXT DEFAULT '08:00',     -- signin: 时间窗口开始 hh:mm
             win_end TEXT DEFAULT '12:00',       -- signin: 时间窗口结束 hh:mm
             click_btn INTEGER DEFAULT 0,        -- signin: 签到后自动点击回复按钮
+            btn_text TEXT DEFAULT '',           -- signin: 按钮文字(留空自动匹配签到/确认/领取等)
+            success_kw TEXT DEFAULT '',         -- signin: 成功关键词(机器人回复含它才算成功)
+            retries INTEGER DEFAULT 2,          -- signin: 发送失败重试次数
             groups TEXT DEFAULT '',             -- grabcodes/redpacket: 指定群(@群名或ID,逗号分隔;留空=全部监听群)
             keywords TEXT DEFAULT '',           -- 触发关键词(逗号分隔)
             action TEXT DEFAULT 'reply',        -- grabcodes: reply(回复消息) | send(发送命令)
@@ -89,6 +92,12 @@ def db_init():
         );
         """
     )
+    # 兼容旧库:补充新增列
+    for col, ddl in (("btn_text", "TEXT DEFAULT ''"), ("success_kw", "TEXT DEFAULT ''"), ("retries", "INTEGER DEFAULT 2")):
+        try:
+            conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
 
 
@@ -349,47 +358,102 @@ def _win_minutes(s):
     return h * 60 + mi
 
 
+def render_placeholders(s):
+    """命令占位符:{num:N} 随机N位数字 / {word:N} 随机N位小写字母 / {alpha:N} 随机N位大小写字母数字 / {uuid}"""
+    def rep(m):
+        n = max(1, int(m.group(m.lastindex) or 6))
+        if m.group(1):   # word
+            return "".join(random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(n))
+        if m.group(2):   # num
+            return "".join(random.choice("0123456789") for _ in range(n))
+        return "".join(random.choice("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") for _ in range(n))  # alpha
+    s = re.sub(r"\{word:(\d+)\}|\{num:(\d+)\}|\{alpha:(\d+)\}", rep, s, flags=re.I)
+    return s.replace("{uuid}", secrets.token_hex(8))
+
+
+def _find_btn(btns, btn_text):
+    """按文字找按钮;btn_text 留空则自动匹配签到/打卡/确认等"""
+    texts = [x.strip() for x in re.split(r"[,，]", str(btn_text or "")) if x.strip()]
+    for row in btns:
+        for b in row:
+            t = b.text or ""
+            if texts:
+                if any(k.lower() in t.lower() for k in texts):
+                    return b
+            elif re.search(r"签到|打卡|确认|领取|√|收下|完成", t):
+                return b
+    return None
+
+
 async def run_signin(a):
-    """执行单条签到:发命令,可选点击回复按钮"""
+    """执行单条签到:发命令(支持占位符),可选点按钮,按成功关键词判定"""
     target = str(a["target"] or "").strip()
-    cmd = str(a["command"] or "").strip()
+    cmd = render_placeholders(str(a["command"] or "").strip())
     if not target or not cmd:
         return
     ent = await resolve_entity(target)
     if ent is None:
         log.warning("签到目标解析失败: %s", target)
         return
-    try:
-        await client.send_message(ent, cmd)
-        if a["click_btn"]:
+    retries = max(1, min(int(a["retries"] or 2), 5))
+    sent = False
+    for attempt in range(retries):
+        try:
+            await client.send_message(ent, cmd)
+            sent = True
+            break
+        except errors.FloodWaitError as e:
+            log.warning("签到限流,等待 %ss", e.seconds)
+            await asyncio.sleep(e.seconds + 1)
+        except errors.RPCError as e:
+            log.warning("签到发送失败(尝试 %s/%s): %s", attempt + 1, retries, e)
+            await asyncio.sleep(2)
+        except Exception:
+            log.exception("签到发送异常")
+            await asyncio.sleep(2)
+    if not sent:
+        log.warning("签到最终失败(重试 %s 次): %s", retries, target)
+        return
+
+    # 可选:点击回复按钮
+    if a["click_btn"]:
+        try:
             await asyncio.sleep(1.6)
             recent = await client.get_messages(ent, limit=3)
             for m in recent:
                 if not m.out:
                     continue
                 btns = await m.get_buttons()
-                for row in btns:
-                    for b in row:
-                        if re.search(r"签到|打卡|确认|领取|√|收下|完成", b.text or ""):
-                            await b.click()
-                            break
-                    else:
-                        continue
-                    break
+                b = _find_btn(btns, a["btn_text"])
+                if b:
+                    await b.click()
                 break
-        conn.execute(
-            "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action) VALUES(?,?,?,?,?)",
-            (int(time.time()), target, -a["id"], 0, "signin"),
-        )
-        conn.commit()
-        log.info("签到完成 %s -> %s", a["name"], target)
-    except errors.FloodWaitError as e:
-        log.warning("签到限流,等待 %ss", e.seconds)
-        await asyncio.sleep(e.seconds + 1)
-    except errors.RPCError as e:
-        log.warning("签到失败(%s): %s", target, e)
-    except Exception:
-        log.exception("签到异常")
+        except errors.FloodWaitError as e:
+            log.warning("点按钮限流,等待 %ss", e.seconds)
+            await asyncio.sleep(e.seconds + 1)
+        except Exception:
+            log.exception("签到点按钮异常")
+
+    # 成功关键词判定:机器人回复含关键词才算成功
+    ok = True
+    skw = str(a["success_kw"] or "").strip()
+    if skw:
+        try:
+            await asyncio.sleep(1.5)
+            recent = await client.get_messages(ent, limit=4)
+            bot_reply = next((m for m in recent if not m.out), None)
+            reply_txt = (bot_reply.raw_text or "") if bot_reply else ""
+            ok = skw.lower() in reply_txt.lower()
+            if not ok:
+                log.warning("签到未达成功条件(未找到「%s」),目标=%s", skw, target)
+        except Exception:
+            pass
+    conn.execute(
+        "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action) VALUES(?,?,?,?,?)",
+        (int(time.time()), target, -a["id"], 0, "signin"),
+    )
+    conn.commit()
+    log.info("签到%s 任务=%s 目标=%s", "成功" if ok else "(结果未知)", a["name"], target)
 
 
 async def signin_loop():
@@ -746,10 +810,13 @@ class AutoIn(BaseModel):
     type: str = "signin"          # signin | grabcodes | redpacket
     name: str = ""
     target: str = ""              # signin: @机器人 或 群ID
-    command: str = ""             # signin: 签到命令
+    command: str = ""             # signin: 签到命令(支持 {num:N}/{word:N}/{alpha:N}/{uuid})
     win_start: str = "08:00"      # signin: 窗口开始
     win_end: str = "12:00"        # signin: 窗口结束
     click_btn: int = 0            # signin: 签到后自动点按钮
+    btn_text: str = ""            # signin: 按钮文字(留空自动匹配)
+    success_kw: str = ""          # signin: 成功关键词
+    retries: int = 2              # signin: 发送失败重试次数
     groups: str = ""              # grabcodes/redpacket: 指定群(留空=全部监听群)
     keywords: str = ""            # 触发关键词
     action: str = "reply"         # grabcodes: reply | send
@@ -768,6 +835,8 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "签到需要填写目标(@机器人)和命令")
         if _win_minutes(body.win_start) is None or _win_minutes(body.win_end) is None:
             raise HTTPException(400, "时间窗口格式需为 hh:mm")
+        if body.retries < 0 or body.retries > 5:
+            raise HTTPException(400, "重试次数需在 0-5 之间")
     if body.type == "grabcodes" and not body.reply_text.strip():
         raise HTTPException(400, "抢注需要填写动作文本(支持 {code} 占位符)")
     if body.cooldown < 0 or body.cooldown > 86400:
@@ -784,11 +853,12 @@ async def list_autos():
 async def create_auto(body: AutoIn):
     _valid_auto(body)
     cur = conn.execute(
-        "INSERT INTO automations(type,name,target,command,win_start,win_end,click_btn,"
+        "INSERT INTO automations(type,name,target,command,win_start,win_end,click_btn,btn_text,success_kw,retries,"
         "groups,keywords,action,reply_text,cooldown,enabled,created_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (body.type, body.name.strip(), body.target.strip(), body.command.strip(),
          body.win_start.strip(), body.win_end.strip(), body.click_btn,
+         body.btn_text.strip(), body.success_kw.strip(), body.retries,
          body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
          body.cooldown, body.enabled, int(time.time())),
     )
@@ -800,10 +870,11 @@ async def create_auto(body: AutoIn):
 async def update_auto(aid: int, body: AutoIn):
     _valid_auto(body)
     conn.execute(
-        "UPDATE automations SET type=?,name=?,target=?,command=?,win_start=?,win_end=?,click_btn=?,"
+        "UPDATE automations SET type=?,name=?,target=?,command=?,win_start=?,win_end=?,click_btn=?,btn_text=?,success_kw=?,retries=?,"
         "groups=?,keywords=?,action=?,reply_text=?,cooldown=?,enabled=? WHERE id=?",
         (body.type, body.name.strip(), body.target.strip(), body.command.strip(),
          body.win_start.strip(), body.win_end.strip(), body.click_btn,
+         body.btn_text.strip(), body.success_kw.strip(), body.retries,
          body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
          body.cooldown, body.enabled, aid),
     )

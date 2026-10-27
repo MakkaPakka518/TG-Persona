@@ -264,13 +264,21 @@ button.btn,button.ghost,button.danger{min-height:44px}
           <input type="text" id="sName" placeholder="如: 某站每日签到">
           <label>目标机器人(@username 或群ID)</label>
           <input type="text" id="sTarget" placeholder="如: @checkin_bot">
-          <label>签到命令</label>
-          <input type="text" id="sCmd" placeholder="如: /checkin">
+          <label>签到命令(支持 {num:N} {word:N} {alpha:N} {uuid} 随机占位符)</label>
+          <input type="text" id="sCmd" placeholder="如: /checkin {num:4}">
           <div class="flex">
             <div><label>每天时间窗口(开始)</label><input type="text" id="sWinStart" placeholder="08:00" value="08:00"></div>
             <div><label>窗口(结束)</label><input type="text" id="sWinEnd" placeholder="12:00" value="12:00"></div>
           </div>
-          <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="sClickBtn" style="width:auto"> 签到后自动点击回复里的按钮(部分机器人需点「签到/确认」)</label>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="sClickBtn" style="width:auto"> 签到后自动点击回复里的按钮</label>
+          <div id="sBtnWrap" class="hidden">
+            <label>按钮文字(留空自动匹配 签到/确认/领取;可逗号分隔多个)</label>
+            <input type="text" id="sBtnText" placeholder="如: 签到,确认">
+          </div>
+          <div class="flex">
+            <div><label>成功关键词(选填,机器人回复含它才算成功)</label><input type="text" id="sKw" placeholder="如: 成功,已签到"></div>
+            <div><label>发送失败重试(0-5)</label><input type="number" id="sRetries" value="2" min="0" max="5"></div>
+          </div>
           <div class="flex" style="margin-top:14px">
             <button class="btn" type="submit">保存</button>
             <button class="ghost" type="button" onclick="cancelAutoEdit('signin')" id="sCancel" style="display:none">取消编辑</button>
@@ -499,7 +507,7 @@ function renderAutoList(type){
     </div>`).join('');
 }
 function autoDesc(a){
-  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · 每天 ${esc(a.win_start)}~${esc(a.win_end)}${a.click_btn?' · 点按钮':''}${a.last_at?' · 今日已签':''}`;
+  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · 每天 ${esc(a.win_start)}~${esc(a.win_end)}${a.click_btn?' · 点按钮':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.last_at?' · 今日已签':''}`;
   if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}`;
   return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
 }
@@ -510,7 +518,12 @@ function editAutoItem(id){
   if(t==='signin'){
     $('#sName').value=a.name;$('#sTarget').value=a.target;$('#sCmd').value=a.command;
     $('#sWinStart').value=a.win_start;$('#sWinEnd').value=a.win_end;
-    $('#sClickBtn').checked=!!a.click_btn;$('#sCancel').style.display='inline-block';
+    $('#sClickBtn').checked=!!a.click_btn;
+    $('#sBtnWrap').classList.toggle('hidden',!a.click_btn);
+    $('#sBtnText').value=a.btn_text||'';
+    $('#sKw').value=a.success_kw||'';
+    $('#sRetries').value=a.retries!=null?a.retries:2;
+    $('#sCancel').style.display='inline-block';
   }else if(t==='grabcodes'){
     $('#gName').value=a.name;$('#gGroups').value=a.groups;$('#gKeywords').value=a.keywords;
     $('#gText').value=a.reply_text;$('#gCd').value=a.cooldown;
@@ -524,7 +537,7 @@ function editAutoItem(id){
 }
 function cancelAutoEdit(t){
   editAuto=null;
-  ({signin:()=>{$('#sName').value='';$('#sTarget').value='';$('#sCmd').value='';$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sClickBtn').checked=false;$('#sCancel').style.display='none'},
+  ({signin:()=>{$('#sName').value='';$('#sTarget').value='';$('#sCmd').value='';$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sKw').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';$('#gGroups').value='';$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';pickGrabAct('reply');$('#gCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';$('#pGroups').value='';$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'}})[t]();
 }
@@ -537,7 +550,8 @@ async function saveAuto(type){
   let body,url='/api/autos';
   if(type==='signin'){
     body={type,name:$('#sName').value.trim(),target:$('#sTarget').value.trim(),command:$('#sCmd').value.trim(),
-      win_start:$('#sWinStart').value.trim(),win_end:$('#sWinEnd').value.trim(),click_btn:$('#sClickBtn').checked?1:0};
+      win_start:$('#sWinStart').value.trim(),win_end:$('#sWinEnd').value.trim(),click_btn:$('#sClickBtn').checked?1:0,
+      btn_text:$('#sBtnText').value.trim(),success_kw:$('#sKw').value.trim(),retries:+$('#sRetries').value||2};
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
   }else if(type==='grabcodes'){
     body={type,name:$('#gName').value.trim(),groups:$('#gGroups').value.trim(),keywords:$('#gKeywords').value.trim(),
@@ -557,6 +571,7 @@ async function saveAuto(type){
 async function toggleAuto(id){
   try{await api('/api/autos/'+id+'/toggle',{method:'POST'});loadAutos()}catch(e){toast(e.message,1)}
 }
+$('#sClickBtn').addEventListener('change',function(){$('#sBtnWrap').classList.toggle('hidden',!this.checked)});
 async function delAuto(id){
   const a=autos.find(x=>x.id===id);
   if(!a||!confirm('删除任务「'+a.name+'」?'))return;
