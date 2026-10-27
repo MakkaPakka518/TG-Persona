@@ -1,0 +1,15 @@
+[Unit]
+Description=TG Persona - Telegram 人形分身监听
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tg-persona
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8090
+Restart=always
+RestartSec=5
+# 可选:设置面板密码(不设置则首次启动自动生成并写入 data/panel_password.txt)
+# Environment=PANEL_PASSWORD=你的面板密码
+
+[Install]
+WantedBy=multi-user.target

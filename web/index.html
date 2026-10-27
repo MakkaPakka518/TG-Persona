@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>TG Persona · 人形分身面板</title>
+<style>
+:root{
+  --bg:#0b0f1a; --panel:#111828; --panel2:#151d30; --line:#22304e;
+  --txt:#e7edf7; --sub:#8b98b5; --dim:#5c6b8a;
+  --acc:#3ea6ff; --acc2:#7c5cff; --ok:#2ee6a8; --warn:#ffb454; --err:#ff5d6c;
+  --r:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--txt);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px}
+body{min-height:100vh}
+a{color:var(--acc);text-decoration:none}
+.hidden{display:none!important}
+
+/* ---------- 顶栏 ---------- */
+header{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:12px;padding:12px 18px;
+  background:rgba(11,15,26,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px;letter-spacing:.5px}
+.logo .dot{width:9px;height:9px;border-radius:50%;background:var(--acc);box-shadow:0 0 12px var(--acc)}
+.logo .dot.on{background:var(--ok);box-shadow:0 0 12px var(--ok)}
+.logo small{color:var(--dim);font-weight:400;font-size:11px;letter-spacing:1.5px}
+.spacer{flex:1}
+.hstatus{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sub)}
+.hstatus b{color:var(--txt)}
+.pill{padding:5px 12px;border:1px solid var(--line);border-radius:999px;font-size:12px;color:var(--sub);cursor:pointer;background:var(--panel)}
+.pill:hover{border-color:var(--acc);color:var(--acc)}
+.pill.ok{color:var(--ok);border-color:rgba(46,230,168,.4)}
+
+/* ---------- 主体 ---------- */
+main{max-width:980px;margin:0 auto;padding:20px 16px 96px}
+.tabbar{position:fixed;bottom:0;left:0;right:0;z-index:50;display:flex;background:rgba(11,15,26,.96);
+  border-top:1px solid var(--line);backdrop-filter:blur(10px)}
+.tabbar .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 0 12px;
+  color:var(--dim);cursor:pointer;font-size:11px;user-select:none}
+.tabbar .tb svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabbar .tb.act{color:var(--acc)}
+@media(min-width:760px){
+  .tabbar{position:static;flex-direction:row;gap:4px;background:transparent;border:0;border-bottom:1px solid var(--line);border-radius:0;margin-bottom:16px}
+  .tabbar .tb{flex-direction:row;gap:7px;padding:9px 16px;font-size:13px;border-radius:10px}
+  .tabbar .tb.act{background:rgba(62,166,255,.12)}
+  main{padding-bottom:30px}
+}
+
+section{display:none}
+section.act{display:block;animation:fade .25s ease}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+h2{font-size:17px;margin-bottom:4px;display:flex;align-items:center;gap:8px}
+h2 svg{width:18px;height:18px;stroke:var(--acc);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.sub{color:var(--sub);font-size:12px;margin-bottom:16px}
+
+/* ---------- 卡片 ---------- */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.card h3{font-size:14px;margin-bottom:10px;color:var(--txt);display:flex;align-items:center;justify-content:space-between}
+.card h3 .lbl{display:flex;align-items:center;gap:7px}
+.card h3 .lbl svg{width:15px;height:15px;stroke:var(--acc);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.row{display:flex;gap:14px;flex-wrap:wrap}
+.stat{flex:1;min-width:140px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px}
+.stat .v{font-size:24px;font-weight:700;color:var(--acc)}
+.stat .k{font-size:11px;color:var(--dim);margin-top:3px;letter-spacing:1px}
+
+/* ---------- 表单 ---------- */
+label{display:block;font-size:12px;color:var(--sub);margin:12px 0 5px}
+input[type=text],input[type=password],input[type=number],select,textarea{
+  width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+  color:var(--txt);padding:10px 12px;font-size:14px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(62,166,255,.15)}
+textarea{resize:vertical;min-height:64px}
+select{appearance:none;-webkit-appearance:none}
+.flex{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.flex>div{flex:1;min-width:130px}
+button.btn{background:linear-gradient(135deg,var(--acc),var(--acc2));border:0;color:#fff;padding:11px 20px;
+  border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:.15s}
+button.btn:hover{filter:brightness(1.12)}
+button.btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
+button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--sub);padding:10px 18px;border-radius:10px;font-size:13px;cursor:pointer}
+button.ghost:hover{border-color:var(--acc);color:var(--acc)}
+button.danger{background:rgba(255,93,108,.12);border:1px solid rgba(255,93,108,.4);color:var(--err);padding:9px 14px;border-radius:10px;font-size:12px;cursor:pointer}
+button.danger:hover{background:rgba(255,93,108,.22)}
+.switch{position:relative;width:42px;height:24px;border-radius:999px;background:var(--line);cursor:pointer;transition:.2s;flex-shrink:0}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#889;transition:.2s}
+.switch.on{background:var(--ok)}
+.switch.on::after{left:21px;background:#fff}
+.hint{font-size:11px;color:var(--dim);margin-top:5px;line-height:1.5}
+
+/* ---------- 列表 ---------- */
+.item{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;background:var(--panel2)}
+.item .grow{flex:1;min-width:0}
+.item .t{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .s{font-size:11px;color:var(--dim);margin-top:2px}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;background:rgba(62,166,255,.12);color:var(--acc)}
+.tag.react{background:rgba(124,92,255,.14);color:#a48dff}
+.tag.reply{background:rgba(46,230,168,.12);color:var(--ok)}
+.tag.off{background:rgba(92,107,138,.15);color:var(--dim)}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--dim)}
+.empty{color:var(--dim);font-size:13px;text-align:center;padding:26px 0}
+.search{position:relative}
+.search input{padding-left:34px}
+.search svg{position:absolute;left:11px;top:11px;width:15px;height:15px;stroke:var(--dim);fill:none;stroke-width:1.8;stroke-linecap:round}
+
+/* ---------- 登录向导 ---------- */
+#loginGate{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px}
+.lg-wrap{width:100%;max-width:400px}
+.lg-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:28px 24px}
+.lg-logo{display:flex;align-items:center;justify-content:center;gap:10px;font-size:20px;font-weight:800;margin-bottom:6px;letter-spacing:.5px}
+.lg-logo .dot{width:10px;height:10px;border-radius:50%;background:var(--acc);box-shadow:0 0 16px var(--acc)}
+.lg-sub{text-align:center;color:var(--sub);font-size:12px;margin-bottom:20px}
+.steps{display:flex;gap:6px;margin-bottom:20px}
+.steps .st{flex:1;height:3px;border-radius:3px;background:var(--line)}
+.steps .st.act{background:var(--acc)}
+.steps .st.done{background:var(--ok)}
+.tgerr{background:rgba(255,93,108,.1);border:1px solid rgba(255,93,108,.35);color:var(--err);
+  padding:10px 12px;border-radius:10px;font-size:12px;margin-top:10px;display:none}
+
+/* ---------- 日志 ---------- */
+.logitem{display:flex;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line);font-size:12px}
+.logitem:last-child{border-bottom:0}
+.logitem .tm{color:var(--dim);white-space:nowrap}
+.logitem .msg{color:var(--txt);word-break:break-all}
+.badge{display:inline-flex;padding:1px 7px;border-radius:5px;font-size:10px;margin-right:6px}
+.badge.reply{background:rgba(46,230,168,.14);color:var(--ok)}
+.badge.react{background:rgba(124,92,255,.18);color:#a48dff}
+.badge.both{background:rgba(62,166,255,.15);color:var(--acc)}
+
+/* 表情选择 */
+.emojis{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.emojis span{width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-size:20px;
+  border:1px solid var(--line);border-radius:9px;cursor:pointer;background:var(--panel2);transition:.12s;user-select:none}
+.emojis span:hover{border-color:var(--acc);transform:scale(1.08)}
+.emojis span.sel{border-color:var(--acc);background:rgba(62,166,255,.15);box-shadow:0 0 0 2px rgba(62,166,255,.3)}
+.toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:200;background:var(--panel2);
+  border:1px solid var(--acc);color:var(--txt);padding:11px 20px;border-radius:12px;font-size:13px;
+  box-shadow:0 8px 30px rgba(0,0,0,.5);transition:.25s;opacity:0;pointer-events:none}
+.toast.show{opacity:1}
+.toast.err{border-color:var(--err)}
+</style>
+</head>
+<body>
+
+<!-- 登录向导 -->
+<div id="loginGate" class="hidden">
+  <div class="lg-wrap">
+    <div class="lg-card">
+      <div class="lg-logo"><span class="dot"></span>TG PERSONA <span style="font-size:11px;color:var(--dim);font-weight:400">人形分身</span></div>
+      <div class="lg-sub">登录你自己的 Telegram 账号 · 关键词自动回复 / 点表情</div>
+      <div class="steps" id="lgSteps">
+        <div class="st act"></div><div class="st"></div><div class="st"></div><div class="st"></div>
+      </div>
+      <div id="lgBody"></div>
+      <div class="tgerr" id="lgErr"></div>
+    </div>
+  </div>
+</div>
+
+<header>
+  <div class="logo"><span class="dot" id="dotHead"></span>TG PERSONA <small>人形分身</small></div>
+  <div class="spacer"></div>
+  <div class="hstatus"><span id="hMe">未登录</span></div>
+  <button class="pill" id="btnLogout">退出 TG</button>
+  <button class="pill" id="btnPanelOut">退出面板</button>
+</header>
+
+<main>
+  <!-- 总览 -->
+  <section id="tab-overview" class="act">
+    <h2><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>总览</h2>
+    <div class="sub">你的账号监听状态与命中统计</div>
+    <div class="card">
+      <div class="flex" style="gap:14px">
+        <div class="grow">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,var(--acc),var(--acc2));display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:#fff" id="ovAvatar">?</div>
+            <div>
+              <div style="font-weight:700;font-size:16px" id="ovName">--</div>
+              <div class="mono" id="ovUser">@--</div>
+            </div>
+          </div>
+        </div>
+        <div class="flex" style="flex:1.4">
+          <div class="stat"><div class="v" id="ovGroups">0</div><div class="k">监听群</div></div>
+          <div class="stat"><div class="v" id="ovRules">0</div><div class="k">启用规则</div></div>
+          <div class="stat"><div class="v" id="ovHits">0</div><div class="k">累计命中</div></div>
+        </div>
+      </div>
+      <div class="flex" style="margin-top:14px;gap:10px">
+        <div class="flex" style="gap:9px;flex:1">
+          <div class="switch" id="swPause" onclick="togglePause()"></div>
+          <div><div style="font-size:13px">监听开关</div><div class="hint" id="hPause">运行中</div></div>
+        </div>
+        <button class="btn" onclick="goTab('groups')">管理监听群</button>
+        <button class="btn" onclick="goTab('rules')">配置关键词</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 8v4l3 3M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>运行参数</span></h3>
+      <div class="flex">
+        <div class="stat"><div class="v" id="ovCooldown">20s</div><div class="k">同群同规则冷却</div></div>
+        <div class="stat"><div class="v" id="ovDelay">1~3s</div><div class="k">命中后随机延迟</div></div>
+        <div class="stat"><div class="v" id="ovIgnore">开</div><div class="k">忽略机器人</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 群管理 -->
+  <section id="tab-groups">
+    <h2><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>监听群</h2>
+    <div class="sub">勾选要监听的群 · 群成员发了命中关键词的消息才会触发</div>
+    <div class="card">
+      <h3><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>监听中</span><span class="mono" id="gCnt">0</span></h3>
+      <div id="gWatched"></div>
+    </div>
+    <div class="card">
+      <h3><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 21l-4.35-4.35M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/></svg>全部群</span></h3>
+      <div class="search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+        <input type="text" placeholder="搜索群名..." id="gSearch" oninput="loadDialogs()">
+      </div>
+      <div style="margin-top:12px" id="gAll"></div>
+      <div class="empty hidden" id="gLoading">拉取群列表中...</div>
+    </div>
+  </section>
+
+  <!-- 规则 -->
+  <section id="tab-rules">
+    <h2><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12a9 9 0 1 1-9-9"/></svg>关键词规则</h2>
+    <div class="sub">命中即行动 · 回复文本 / 点表情 / 两者同时</div>
+    <div id="rList"></div>
+    <div class="card" style="margin-top:4px">
+      <h3><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新增规则</span></h3>
+      <label>关键词</label>
+      <div class="flex">
+        <div style="flex:2"><input type="text" id="rKw" placeholder="多个用逗号分隔,任意命中;如: 求推荐,有没有"></div>
+        <div style="flex:1"><label style="margin-top:0;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);cursor:pointer">
+          <input type="checkbox" id="rRegex" style="width:auto"> 用正则匹配</label></div>
+      </div>
+      <label>触发动作</label>
+      <div class="flex" style="gap:8px">
+        <button class="ghost" id="actReply" onclick="pickAction('reply')">回复文本</button>
+        <button class="ghost" id="actReact" onclick="pickAction('react')">点表情</button>
+        <button class="ghost" id="actBoth" onclick="pickAction('both')">回复+表情</button>
+      </div>
+      <div id="rValueWrap" class="hidden">
+        <label>回复内容(多条用 || 分隔,随机选一条)</label>
+        <textarea id="rValue" placeholder="好的我看看||来了来了,稍等"></textarea>
+      </div>
+      <div id="rEmojiWrap" class="hidden">
+        <label>选择表情</label>
+        <div class="emojis" id="rEmojis"></div>
+      </div>
+      <div class="flex" style="margin-top:14px">
+        <button class="btn" onclick="saveRule()">保存规则</button>
+        <span class="hint" style="margin:0">规则可随时开关或删除</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 日志 -->
+  <section id="tab-logs">
+    <h2><svg viewBox="0 0 24 24"><path d="M1 8h22M4 16h10M8 4v16M16 4v16"/></svg>命中日志</h2>
+    <div class="sub">最近触发的关键词动作记录</div>
+    <div class="card" id="logList"></div>
+  </section>
+
+  <!-- 设置 -->
+  <section id="tab-settings">
+    <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</h2>
+    <div class="sub">触发行为与面板安全</div>
+    <div class="card">
+      <h3><span class="lbl"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>触发行为</span></h3>
+      <div class="flex">
+        <div><label>同群同规则冷却(秒)</label><input type="number" id="sCooldown" min="0"></div>
+        <div><label>命中后随机延迟(秒,最小 最大)</label><input type="text" id="sDelay" placeholder="1.0 3.0"></div>
+        <div><label style="display:flex;align-items:center;gap:8px;margin-top:14px"><input type="checkbox" id="sIgnore" style="width:auto"> 忽略机器人消息</label></div>
+      </div>
+      <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+    </div>
+    <div class="card">
+      <h3><span class="lbl"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>面板安全</span></h3>
+      <label>修改面板访问密码(至少 6 位)</label>
+      <div class="flex">
+        <div style="flex:2"><input type="password" id="sNewPw" placeholder="新面板密码"></div>
+        <button class="btn" onclick="changePw()">修改</button>
+      </div>
+      <div class="hint">通过 http://IP:端口 访问时需输入此密码</div>
+    </div>
+    <div class="card">
+      <h3><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>Telegram 账号</span></h3>
+      <button class="danger" onclick="logoutTG()">退出 Telegram 账号(清除本地会话)</button>
+      <div class="hint" style="margin-top:8px">退出后需要重新通过手机号 + 验证码登录</div>
+    </div>
+  </section>
+</main>
+
+<div class="tabbar">
+  <div class="tb act" id="t-overview" onclick="goTab('overview')"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>总览</div>
+  <div class="tb" id="t-groups" onclick="goTab('groups')"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg>群组</div>
+  <div class="tb" id="t-rules" onclick="goTab('rules')"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12a9 9 0 1 1-9-9"/></svg>规则</div>
+  <div class="tb" id="t-logs" onclick="goTab('logs')"><svg viewBox="0 0 24 24"><path d="M1 8h22M4 16h10M8 4v16M16 4v16"/></svg>日志</div>
+  <div class="tb" id="t-settings" onclick="goTab('settings')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ---------- 工具 ----------
+const $=s=>document.querySelector(s);
+let state={tg:{},logged_in:false,running:true};
+const EMOJIS=["👍","❤","🔥","😂","🎉","😮","😢","😡","👏","🙏","💯","🤔","😎","🥳","😴","💪","✌","🙃","😅","🤝","✨","😍","😭","🫡","☕"];
+function toast(msg,err){const t=$('#toast');t.textContent=msg;t.classList.add('show');t.classList.toggle('err',!!err);setTimeout(()=>t.classList.remove('show'),2600)}
+async function api(path,opts={}){
+  const r=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});
+  if(r.status===401){showLoginGate('pw');throw new Error('未登录面板')}
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(d.error||('请求失败 '+r.status));
+  return d;
+}
+const esc=s=>(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function fmt(ts){const d=new Date(ts*1000);return (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
+
+// ---------- Tab ----------
+function goTab(t){
+  ['overview','groups','rules','logs','settings'].forEach(x=>{
+    $('#tab-'+x).classList.toggle('act',x===t);
+    $('#t-'+x).classList.toggle('act',x===t);
+  });
+  if(t==='groups')loadDialogs();
+  if(t==='logs')loadLogs();
+}
+
+// ---------- 登录向导 ----------
+let lgStep=0, lgPhase='idle';
+const LG_STEPS=['API 凭证','手机号','验证码','两步验证'];
+function showLoginGate(mode){
+  $('#loginGate').classList.remove('hidden');
+  lgStep=0; lgPhase=mode||'idle';
+  $('#lgErr').style.display='none';
+  renderLoginGate();
+}
+function renderLoginGate(){
+  const st = Array.from($('#lgSteps').children);
+  st.forEach((el,i)=>{
+    el.className='st'+(i<lgStep?' done':i===lgStep?' act':'');
+  });
+  if(lgPhase==='pw'){
+    $('#lgBody').innerHTML=`
+      <label>面板访问密码</label>
+      <input type="password" id="lgPw" placeholder="输入面板密码" onkeydown="if(event.key==='Enter')panelLogin()" autocomplete="off">
+      <button class="btn" style="width:100%;margin-top:16px" onclick="panelLogin()">进入面板</button>
+      <div class="hint">密码在服务器上运行首次启动时打印,或查看 data/panel_password.txt</div>`;
+    return;
+  }
+  const row=(label,input,btn,on)=>`
+    <label>${label}</label>${input}
+    <button class="btn" style="width:100%;margin-top:16px" onclick="${on}()">${btn}</button>`;
+  if(lgStep===0){
+    $('#lgBody').innerHTML=row('API_ID','<input type="text" id="lgApiId" placeholder="12345678" inputmode="numeric">',lgPhase==='idle'?'下一步 : 保存凭证':'保存凭证','saveApi')
+    +'<div class="hint">在 my.telegram.org → API development tools 获取(登录 TG 后创建应用)</div>';
+  }else if(lgStep===1){
+    $('#lgBody').innerHTML=row('手机号(带国家码)','<input type="text" id="lgPhone" placeholder="8613800138000" inputmode="numeric">','发送验证码','sendCode')
+    +'<button class="ghost" style="width:100%;margin-top:8px" onclick="lgStep=0;renderLoginGate()">返回修改凭证</button>';
+  }else if(lgStep===2){
+    $('#lgBody').innerHTML=row('Telegram 验证码','<input type="text" id="lgCode" placeholder="6 位数字" inputmode="numeric">','验证并登录','verifyCode')
+    +'<button class="ghost" style="width:100%;margin-top:8px" onclick="lgStep=1;renderLoginGate()">返回</button>';
+  }else if(lgStep===3){
+    $('#lgBody').innerHTML=row('两步验证密码','<input type="password" id="lg2fa" placeholder="Cloud 密码">','完成登录','verify2fa')
+    +'<div class="hint">账号开启了两步验证(Cloud 密码)时需要</div>';
+  }
+  setTimeout(()=>{const f=$('#lgBody input');if(f)f.focus()},60);
+}
+async function saveApi(){
+  const id=$('#lgApiId').value.trim(),hash=prompt('请输入 API_HASH(my.telegram.org 应用页可复制)');
+  if(!id||!hash||!hash.trim())return toast('API_ID / API_HASH 不能为空',1);
+  try{await api('/api/tg/init',{method:'POST',body:JSON.stringify({api_id:+id,api_hash:hash.trim()})});lgStep=1;renderLoginGate()}
+  catch(e){showErr(e.message)}
+}
+async function sendCode(){
+  try{await api('/api/tg/send_code',{method:'POST',body:JSON.stringify({phone:$('#lgPhone').value.trim()})});lgStep=2;renderLoginGate()}
+  catch(e){showErr(e.message)}
+}
+async function verifyCode(){
+  try{const d=await api('/api/tg/verify_code',{method:'POST',body:JSON.stringify({code:$('#lgCode').value.trim()})});
+    if(d.need_password){lgStep=3;renderLoginGate()}else afterLogin()}
+  catch(e){showErr(e.message)}
+}
+async function verify2fa(){
+  try{await api('/api/tg/verify_password',{method:'POST',body:JSON.stringify({password:$('#lg2fa').value})});afterLogin()}
+  catch(e){showErr(e.message)}
+}
+function showErr(m){const e=$('#lgErr');e.textContent=m;e.style.display='block'}
+async function panelLogin(){
+  try{await api('/api/panel/login',{method:'POST',body:JSON.stringify({password:$('#lgPw').value})});$('#loginGate').classList.add('hidden');bootstrap()}
+  catch(e){showErr(e.message)}
+}
+function afterLogin(){
+  $('#loginGate').classList.add('hidden');
+  toast('登录成功,人形分身已上线');
+  bootstrap();
+}
+
+// ---------- 状态 ----------
+async function loadState(){
+  try{
+    state=await api('/api/state');
+    const on=state.logged_in&&state.running;
+    $('#dotHead').classList.toggle('on',on);
+    if(state.logged_in){
+      $('#hMe').innerHTML='<b>'+esc(state.tg.me.name)+'</b> · '+esc(state.tg.me.username||state.tg.me.phone);
+      $('#ovName').textContent=state.tg.me.name;
+      $('#ovUser').textContent='@'+(state.tg.me.username||state.tg.me.phone||'--');
+      $('#ovAvatar').textContent=(state.tg.me.name||'?').charAt(0).toUpperCase();
+    }else{
+      $('#hMe').textContent='未登录';$('#ovName').textContent='--';$('#ovUser').textContent='@--';$('#ovAvatar').textContent='?';
+      showLoginGate('idle');
+    }
+    $('#ovGroups').textContent=state.stats.watched_groups;
+    $('#ovRules').textContent=state.stats.rules;
+    $('#ovHits').textContent=state.stats.hits;
+    $('#swPause').classList.toggle('on',!state.paused);
+    $('#hPause').textContent=state.paused?'已暂停':'运行中';
+  }catch(e){}
+}
+async function togglePause(){
+  try{
+    const d=await api('/api/toggle',{method:'POST',body:JSON.stringify({paused:!state.paused})});
+    state.paused=d.paused;loadState();
+  }catch(e){toast(e.message,1)}
+}
+async function loadSettings(){
+  try{
+    const s=await api('/api/settings');
+    $('#sCooldown').value=s.cooldown||20;
+    $('#sDelay').value=s.delay||'1.0 3.0';
+    $('#sIgnore').checked=s.ignore_bots!=='0';
+    $('#ovCooldown').textContent=(s.cooldown||20)+'s';
+    $('#ovDelay').textContent=(s.delay||'1.0 3.0').replace(' ','~')+'s';
+    $('#ovIgnore').textContent=s.ignore_bots==='0'?'关':'开';
+    // 预填 API 凭证
+    if(s.api_id){const f=$('#lgApiId');if(f&&!f.value)f.value=s.api_id}
+  }catch(e){}
+}
+async function saveSettings(){
+  try{
+    await api('/api/settings',{method:'POST',body:JSON.stringify({
+      cooldown:+$('#sCooldown').value,
+      delay:$('#sDelay').value.trim(),
+      ignore_bots:$('#sIgnore').checked?'1':'0'
+    })});
+    toast('设置已保存');loadSettings();
+  }catch(e){toast(e.message,1)}
+}
+async function changePw(){
+  const pw=$('#sNewPw').value.trim();
+  if(pw.length<6)return toast('密码至少 6 位',1);
+  try{await api('/api/panel/password',{method:'POST',body:JSON.stringify({password:pw})});$('#sNewPw').value='';toast('面板密码已修改')}
+  catch(e){toast(e.message,1)}
+}
+async function logoutTG(){
+  if(!confirm('确认退出 Telegram 账号?已保存的会话会被清除'))return;
+  try{await api('/api/tg/logout',{method:'POST'});toast('已退出 TG');bootstrap()}
+  catch(e){toast(e.message,1)}
+}
+async function btnPanelOut(){
+  try{await api('/api/panel/logout',{method:'POST'});showLoginGate('pw')}
+  catch(e){}
+}
+
+// ---------- 群 ----------
+async function loadDialogs(){
+  const q=$('#gSearch').value.trim();
+  $('#gLoading').classList.remove('hidden');
+  try{
+    const d=await api('/api/dialogs?q='+encodeURIComponent(q));
+    $('#gLoading').classList.add('hidden');
+    const watched=d.groups.filter(g=>g.watched);
+    const all=d.groups.filter(g=>!g.watched);
+    $('#gCnt').textContent=watched.length+' 个';
+    $('#gWatched').innerHTML=watched.length?watched.map(g=>`
+      <div class="item">
+        <div class="grow"><div class="t">${esc(g.name)}</div>
+        <div class="s mono">${g.chat_id}${g.members?' · '+g.members+' 成员':''}</div></div>
+        <button class="danger" onclick="removeGroup('${g.chat_id}')">取消监听</button>
+      </div>`).join(''):'<div class="empty">还没有监听任何群</div>';
+    $('#gAll').innerHTML=all.length?all.map(g=>`
+      <div class="item">
+        <div class="grow"><div class="t">${esc(g.name)}</div>
+        <div class="s mono">${g.chat_id}${g.members?' · '+g.members+' 成员':''}</div></div>
+        <button class="ghost" onclick="addGroup('${g.chat_id}','${esc(g.name).replace(/'/g,"\\'")}')">加入监听</button>
+      </div>`).join(''):'<div class="empty">没有更多群'+(q?'(换个关键词)':'')+'</div>';
+  }catch(e){$('#gLoading').classList.add('hidden');toast(e.message,1)}
+}
+async function addGroup(id,name){try{await api('/api/groups',{method:'POST',body:JSON.stringify({chat_id:id,name})});toast('已加入监听');loadDialogs()}catch(e){toast(e.message,1)}}
+async function removeGroup(id){try{await api('/api/groups/'+id,{method:'DELETE'});toast('已取消监听');loadDialogs()}catch(e){toast(e.message,1)}}
+
+// ---------- 规则 ----------
+let editingRule=null, actType='reply';
+function pickAction(a){
+  actType=a;
+  ['reply','react','both'].forEach(x=>$('#act'+x[0].toUpperCase()+x.slice(1)).style.borderColor=x===a?'var(--acc)':'');
+  $('#rValueWrap').classList.toggle('hidden',a==='react');
+  $('#rEmojiWrap').classList.toggle('hidden',a==='reply');
+}
+function renderEmojis(){
+  $('#rEmojis').innerHTML=EMOJIS.map(e=>`<span data-e="${e}" onclick="pickEmoji(this,'${e}')">${e}</span>`).join('');
+}
+function pickEmoji(el,e){
+  $('#rEmojis span').forEach(s=>s.classList.remove('sel'));
+  el.classList.add('sel');
+  $('#rValue').value=e;
+}
+async function loadRules(){
+  try{
+    const d=await api('/api/rules');
+    $('#rList').innerHTML=d.rules.length?d.rules.map(r=>`
+      <div class="item">
+        <div class="switch ${r.enabled?'on':''}" onclick="toggleRule(${r.id},${r.enabled?0:1})"></div>
+        <div class="grow">
+          <div class="t">${esc(r.keywords)}${r.regex?' <span class="tag">正则</span>':''}</div>
+          <div class="s">#${r.id} · ${r.action==='react'?'点表情':r.action==='both'?'回复+表情':'回复文本'} · ${esc(r.value)}</div>
+        </div>
+        <button class="ghost" onclick="editRule(${r.id})">编辑</button>
+        <button class="danger" onclick="delRule(${r.id})">删除</button>
+      </div>`).join(''):'<div class="empty">还没有关键词规则,在下方添加第一条</div>';
+  }catch(e){toast(e.message,1)}
+}
+async function toggleRule(id,en){try{await api('/api/rules/'+id,{method:'PUT',body:JSON.stringify(getRulePatch(en))});loadRules()}catch(e){toast(e.message,1)}}
+function getRulePatch(en){
+  const r=state._rules?.find(x=>x.id===editingRule);
+  return {keywords:r?r.keywords:'',regex:r?r.regex:0,action:r?r.action:'reply',value:r?r.value:'',enabled:en};
+}
+function editRule(id){
+  const r=state._rules.find(x=>x.id===id);
+  if(!r)return;
+  editingRule=id;
+  $('#rKw').value=r.keywords; $('#rRegex').checked=!!r.regex;
+  pickAction(r.action); $('#rValue').value=r.value;
+  if(r.action!=='reply'){const t=$('#rEmojis span[data-e="'+r.value+'"]');if(t)t.classList.add('sel')}
+  $('#rKw').scrollIntoView({behavior:'smooth'});
+  toast('编辑规则 #'+id+' 中,改完点保存');
+}
+async function saveRule(){
+  const body={keywords:$('#rKw').value.trim(),regex:$('#rRegex').checked?1:0,action:actType,value:$('#rValue').value.trim(),enabled:1};
+  if(!body.keywords)return toast('关键词不能为空',1);
+  try{
+    if(editingRule){await api('/api/rules/'+editingRule,{method:'PUT',body:JSON.stringify({...body,enabled:1})});editingRule=null}
+    else await api('/api/rules',{method:'POST',body:JSON.stringify(body)});
+    $('#rKw').value='';$('#rRegex').checked=false;$('#rValue').value='';pickAction('reply');
+    toast('规则已保存');loadRules();
+  }catch(e){toast(e.message,1)}
+}
+async function delRule(id){if(!confirm('删除规则 #'+id+'?'))return;try{await api('/api/rules/'+id,{method:'DELETE'});toast('已删除');loadRules()}catch(e){toast(e.message,1)}}
+
+// ---------- 日志 ----------
+async function loadLogs(){
+  try{
+    const d=await api('/api/logs?n=60');
+    $('#logList').innerHTML=d.hits.length?d.hits.map(h=>`
+      <div class="logitem">
+        <span class="tm">${fmt(h.ts)}</span>
+        <span class="msg"><span class="badge ${h.action}">${h.action==='react'?'表情':h.action==='both'?'回复+表情':'回复'}</span>
+        群 ${h.chat_id} · 规则 #${h.rule_id} · 消息 ${h.msg_id}</span>
+      </div>`).join(''):'<div class="empty">还没有命中记录</div>';
+  }catch(e){toast(e.message,1)}
+}
+
+// ---------- 启动 ----------
+async function bootstrap(){
+  // 先探测是否需要面板密码
+  try{
+    const r=await fetch('/api/state');
+    if(r.status===401){showLoginGate('pw');return}
+    await r.json();
+  }catch(e){}
+  renderEmojis();pickAction('reply');
+  loadState();loadSettings();loadRules();
+  setInterval(()=>{loadState();loadLogs()},5000);
+}
+bootstrap();
+</script>
+</body>
+</html>

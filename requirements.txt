@@ -1,0 +1,4 @@
+telethon>=1.36
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.5
