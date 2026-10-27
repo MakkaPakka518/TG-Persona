@@ -151,7 +151,7 @@ def match_rule(rule, text):
     if not text:
         return False
     kws = rule["keywords"]
-    if rule.get("regex"):
+    if rule["regex"]:
         try:
             return re.search(kws, text, re.I) is not None
         except re.error:
