@@ -69,7 +69,12 @@ fi
 ok "依赖安装完成"
 
 # ---------- 5. 生成 systemd 服务 ----------
+# 面板密码不再写进 unit 文件(unit 是 0644,任何本地用户都能读)。
+# 这里只放进 data/panel_password.txt(600),首次启动后会转成 scrypt 哈希并删除明文。
 SERVICE_FILE="/etc/systemd/system/tg-persona.service"
+mkdir -p "$INSTALL_DIR/data" && chmod 700 "$INSTALL_DIR/data"
+printf '%s' "$PANEL_PW" > "$INSTALL_DIR/data/panel_password.txt"
+chmod 600 "$INSTALL_DIR/data/panel_password.txt"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=TG Persona - Telegram 人形分身监听
@@ -78,7 +83,6 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=$INSTALL_DIR
-Environment=PANEL_PASSWORD=$PANEL_PW
 ExecStart=$INSTALL_DIR/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port $PORT
 Restart=always
 RestartSec=5
@@ -112,6 +116,6 @@ echo "  常用命令:"
 echo "    查看状态:  systemctl status tg-persona"
 echo "    实时日志:  journalctl -u tg-persona -f"
 echo "    停止服务:  systemctl stop tg-persona"
-echo "    修改密码:  编辑 $SERVICE_FILE 里的 PANEL_PASSWORD 后"
-echo "               systemctl daemon-reload && systemctl restart tg-persona"
+echo "    修改密码:  面板 → 设置 → 面板安全"
+echo "    忘记密码:  systemctl stop tg-persona 后用 PANEL_PASSWORD 环境变量启动一次"
 echo "=============================================================="

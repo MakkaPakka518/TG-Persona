@@ -150,7 +150,12 @@ h2{display:none}
   transition:background .22s;flex-shrink:0}
 .switch::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
   background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.3);transition:transform .22s cubic-bezier(.3,.8,.3,1)}
-.switch.on{background:var(--ok)}
+.switch.on{background:#22c55e;box-shadow:0 0 0 1px rgba(34,197,94,.25)}
+.grp-pick{display:flex;flex-wrap:wrap;gap:8px;max-height:210px;overflow:auto;padding:2px}
+.grp-pick .gp{display:flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid var(--hair2);
+  border-radius:999px;font-size:12.5px;color:var(--sub);cursor:pointer;background:var(--panel2);user-select:none}
+.grp-pick .gp.on{border-color:#22c55e;color:#16a34a;background:rgba(34,197,94,.12)}
+html[data-theme="light"] .grp-pick .gp.on{color:#15803d}
 .switch.on::after{transform:translateX(18px)}
 .switch.acc.on{background:var(--acc)}
 
@@ -590,6 +595,9 @@ input[readonly]:focus{border-color:var(--acc)}
         <div class="emojis" id="rEmojis"></div>
       </div>
       <input type="hidden" id="rReact">
+      <label style="margin-top:14px">生效群聊</label>
+      <div class="hint" style="margin:0 0 8px">一个都不勾 = 所有监听群生效</div>
+      <div id="rGroups" class="grp-pick"><div class="empty" style="padding:6px">加载中...</div></div>
       <div class="flex" style="margin-top:14px">
         <button class="btn" onclick="saveRule()">保存规则</button>
         <span class="hint" style="margin:0">规则可随时开关或删除</span>
@@ -621,14 +629,28 @@ input[readonly]:focus{border-color:var(--acc)}
       </div>
     </div>
     <div class="card fold">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>时区 / 服务器时间</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <label>时区</label>
+        <select id="sTz"></select>
+        <div class="hint" id="tzNow" style="margin-top:8px">服务器时间加载中...</div>
+        <button class="btn" style="margin-top:12px" onclick="saveTz()">保存时区</button>
+        <div class="hint">签到任务的「时间窗口」和「今天已签」都按这个时区计算;VPS 系统是 UTC 时也只需在这里选对</div>
+      </div>
+    </div>
+    <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>面板安全</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-      <label>修改面板访问密码(至少 6 位)</label>
+      <label>修改面板访问密码(至少 8 位)</label>
       <div class="flex">
-        <div style="flex:2"><input type="password" id="sNewPw" placeholder="新面板密码"></div>
-        <button class="btn" onclick="changePw()">修改</button>
+        <div><input type="password" id="sOldPw" placeholder="原密码(可留空)" autocomplete="current-password"></div>
+        <div><input type="password" id="sNewPw" placeholder="新面板密码" autocomplete="new-password"></div>
       </div>
-      <div class="hint">通过 http://IP:端口 访问时需输入此密码</div>
+      <button class="btn" style="margin-top:12px" onclick="changePw()">修改密码</button>
+      <div class="hint">密码已改为 scrypt 哈希存储,明文文件不存在;改完其它设备会被强制下线</div>
+      <div class="hint" style="margin-top:14px" id="sessInfo">登录设备:-</div>
+      <button class="ghost" style="margin-top:8px" onclick="logoutAll()">退出所有设备</button>
+      <div class="hint">面板对外暴露时建议只监听 127.0.0.1 并用反向代理 + HTTPS</div>
       </div>
     </div>
     <div class="card fold" id="foldTg">
@@ -917,7 +939,7 @@ function showLoginGate(){
       <div style="flex:1"><img id="lgCapImg" alt="验证码" style="height:44px;border-radius:8px;display:block" onclick="reloadCaptcha()" title="点击刷新"></div>
     </div>
     <button class="btn" style="width:100%;margin-top:16px" onclick="panelLogin()">进入面板</button>
-    <div class="hint">密码为部署时设置的面板密码(install.sh 询问项);验证码可点击图片刷新</div>`;
+    <div class="hint">密码为部署时设置的面板密码;验证码在连续输错 3 次后才需要,可点图片刷新</div>`;
   reloadCaptcha();
   setTimeout(()=>{const f=$('#lgPw');if(f)f.focus()},60);
 }
@@ -933,6 +955,7 @@ async function panelLogin(){
     await api('/api/panel/login',{method:'POST',body:JSON.stringify({password:$('#lgPw').value,captcha:$('#lgCap').value.trim()})});
     $('#loginGate').classList.add('hidden');bootstrap();
   }catch(e){
+    reloadCaptcha();
     const el=$('#lgErr');el.textContent=e.message;el.style.display='block';
     reloadCaptcha();
   }
@@ -1113,6 +1136,7 @@ async function loadSettings(){
     $('#sFlMin').value=s.flock_minutes||5;
     $('#sFlPool').value=s.flock_pool||'';
     if(s.theme)applyTheme(s.theme);  // 后端主题为准(跨设备同步)
+    loadTz();loadSessions();
   }catch(e){}
 }
 async function saveSettings(){
@@ -1141,8 +1165,33 @@ async function saveSettings(){
 }
 async function changePw(){
   const pw=$('#sNewPw').value.trim();
-  if(pw.length<6)return toast('密码至少 6 位',1);
-  try{await api('/api/panel/password',{method:'POST',body:JSON.stringify({password:pw})});$('#sNewPw').value='';toast('面板密码已修改')}
+  const old=$('#sOldPw').value;
+  if(pw.length<8)return toast('密码至少 8 位',1);
+  try{await api('/api/panel/password',{method:'POST',body:JSON.stringify({password:pw,old})});$('#sNewPw').value='';$('#sOldPw').value='';toast('面板密码已修改,其它设备已下线');loadSessions()}
+  catch(e){toast(e.message,1)}
+}
+async function logoutAll(){
+  if(!confirm('退出所有设备?包括当前这台,需要重新登录'))return;
+  try{await api('/api/panel/logout-all',{method:'POST'});toast('已退出全部设备');showLoginGate()}
+  catch(e){toast(e.message,1)}
+}
+async function loadSessions(){
+  try{const d=await api('/api/panel/sessions');$('#sessInfo').textContent='登录设备:'+d.count+' 台'}
+  catch(e){}
+}
+async function loadTz(){
+  try{
+    const d=await api('/api/time');
+    const sel=$('#sTz'); if(!sel)return;
+    sel.innerHTML=(d.tzlist||[]).map(z=>`<option value="${z}">${z}</option>`).join('');
+    if(!(d.tzlist||[]).includes(d.tz)){const o=document.createElement('option');o.value=d.tz;o.textContent=d.tz+' (当前)';sel.appendChild(o)}
+    sel.value=d.tz;
+    $('#tzNow').textContent='服务器当前时间:'+d.now+' ('+d.tz+')';
+  }catch(e){}
+}
+async function saveTz(){
+  const tz=$('#sTz').value;
+  try{await api('/api/settings',{method:'POST',body:JSON.stringify({tz})});toast('时区已保存:'+tz);loadTz();loadSettings()}
   catch(e){toast(e.message,1)}
 }
 async function logoutTG(){
@@ -1243,10 +1292,11 @@ async function loadRules(){
     $('#rList').innerHTML=d.rules.length?d.rules.map(r=>{
       const val=r.action==='both'?(r.reaction?`${esc(r.value)} + ${r.reaction}`:esc(r.value)):(r.action==='react'?esc(r.reaction||r.value):esc(r.value));
       return `<div class="item">
-        <div class="switch ${r.enabled?'on':''}" onclick="toggleRule(${r.id},${r.enabled?0:1})"></div>
+        <div class="switch ${r.enabled?'on':''}" onclick="toggleRule(${r.id})"></div>
         <div class="grow">
           <div class="t">${esc(r.keywords)}${r.regex?' <span class="tag">正则</span>':''}</div>
           <div class="s">#${r.id} · ${r.action==='react'?'点表情':r.action==='both'?'回复+表情':'回复文本'} · ${val}</div>
+          <div class="s">${groupScopeText(r)}</div>
         </div>
         <button class="ghost" onclick="editRule(${r.id})">编辑</button>
         <button class="danger" onclick="delRule(${r.id})">删除</button>
@@ -1254,11 +1304,29 @@ async function loadRules(){
     }).join(''):'<div class="empty">还没有关键词规则,在下方添加第一条</div>';
   }catch(e){toast(e.message,1)}
 }
-async function toggleRule(id,en){try{await api('/api/rules/'+id,{method:'PUT',body:JSON.stringify(getRulePatch(en))});loadRules()}catch(e){toast(e.message,1)}}
-function getRulePatch(en){
-  const r=allRules.find(x=>x.id===editingRule);
-  return {keywords:r?r.keywords:'',regex:r?r.regex:0,action:r?r.action:'reply',value:r?r.value:'',reaction:r?(r.reaction||''):'',enabled:en};
+let ruleGroupSel=new Set();
+let watchedGroups=[];
+async function loadRuleGroups(){
+  try{
+    const d=await api('/api/watched');watchedGroups=d.groups||[];renderRuleGroups();
+    if(allRules.length)loadRules();   // 群名到位后刷新规则列表的「范围」文案
+  }catch(e){}
 }
+function renderRuleGroups(){
+  const box=$('#rGroups');if(!box)return;
+  if(!watchedGroups.length){box.innerHTML='<div class="empty" style="padding:6px">还没有监听群,先去「群组」页添加</div>';return}
+  box.innerHTML=watchedGroups.map(g=>`<div class="gp ${ruleGroupSel.has(String(g.chat_id))?'on':''}" onclick="toggleRuleGroup('${g.chat_id}')">${esc(g.name||g.chat_id)}</div>`).join('');
+}
+function toggleRuleGroup(id){id=String(id);ruleGroupSel.has(id)?ruleGroupSel.delete(id):ruleGroupSel.add(id);renderRuleGroups()}
+function groupScopeText(r){
+  const ids=(r.groups||'').split(/[,，]/).map(x=>x.trim()).filter(Boolean);
+  if(!ids.length)return '范围:全部监听群';
+  const names=ids.map(id=>{const g=watchedGroups.find(x=>String(x.chat_id)===id);return g?g.name:id});
+  return '范围:'+names.slice(0,3).join('、')+(names.length>3?` 等 ${names.length} 个群`:(ids.length>1?` 共 ${ids.length} 个群`:''));
+}
+function resetRuleForm(){ruleGroupSel.clear();renderRuleGroups()}
+
+async function toggleRule(id){try{const d=await api('/api/rules/'+id+'/toggle',{method:'POST'});toast(d.enabled?'规则已开启':'规则已关闭');loadRules()}catch(e){toast(e.message,1)}}
 function editRule(id){
   const r=allRules.find(x=>x.id===id);
   if(!r)return toast('规则数据未加载,刷新页面',1);
@@ -1266,6 +1334,8 @@ function editRule(id){
   const formFold=$('#rKw').closest('.fold');
   if(formFold&&!formFold.classList.contains('open'))formFold.classList.add('open');
   $('#rKw').value=r.keywords; $('#rRegex').checked=!!r.regex;
+  ruleGroupSel=new Set((r.groups||'').split(/[,，]/).map(x=>x.trim()).filter(Boolean));
+  renderRuleGroups();
   pickAction(r.action);
   $('#rValue').value=r.value;
   $('#rReact').value=r.action==='react'?r.value:(r.reaction||'');
@@ -1277,12 +1347,13 @@ async function saveRule(){
   const text=$('#rValue').value.trim();
   const emo=$('#rReact').value.trim();
   const body={keywords:$('#rKw').value.trim(),regex:$('#rRegex').checked?1:0,action:actType,
-    value:actType==='react'?emo:text,reaction:actType==='both'?emo:'',enabled:1};
+    value:actType==='react'?emo:text,reaction:actType==='both'?emo:'',
+    groups:[...ruleGroupSel].join(','),enabled:1};
   if(!body.keywords)return toast('关键词不能为空',1);
   try{
     if(editingRule){await api('/api/rules/'+editingRule,{method:'PUT',body:JSON.stringify({...body,enabled:1})});editingRule=null}
     else await api('/api/rules',{method:'POST',body:JSON.stringify(body)});
-    $('#rKw').value='';$('#rRegex').checked=false;$('#rValue').value='';$('#rReact').value='';pickAction('reply');
+    $('#rKw').value='';$('#rRegex').checked=false;$('#rValue').value='';$('#rReact').value='';pickAction('reply');resetRuleForm();
     toast('规则已保存');loadRules();
   }catch(e){toast(e.message,1)}
 }
@@ -1318,7 +1389,7 @@ async function bootstrap(){
     await r.json();
   }catch(e){}
   renderEmojis();pickAction('reply');pickGrabAct('reply');
-  loadState();loadSettings();loadRules();loadAutos();
+  loadState();loadSettings();loadRules();loadAutos();loadRuleGroups();
   applyTheme((localStorage.getItem('tgp_theme'))||'dark');  // 主题初始:本地优先,后端在 loadSettings 后对齐
   setInterval(()=>{loadState();loadLogs()},5000);
 }

@@ -20,6 +20,10 @@ import sqlite3
 import sys
 import time
 import os
+import hashlib
+import hmac
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -52,14 +56,23 @@ logging.getLogger("telethon").setLevel(logging.WARNING)
 log = logging.getLogger("persona")
 
 # ---------------- 配置存储 (SQLite) ----------------
-conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
 conn.row_factory = sqlite3.Row
+try:  # 并发读写更稳,减少 database is locked
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=8000")
+except sqlite3.Error:
+    pass
 
 
 def db_init():
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+        CREATE TABLE IF NOT EXISTS panel_sessions (
+            token TEXT PRIMARY KEY, created INTEGER, ip TEXT, ua TEXT, last_seen INTEGER
+        );
         CREATE TABLE IF NOT EXISTS watched_groups (chat_id TEXT PRIMARY KEY, name TEXT, added_at INTEGER);
         CREATE TABLE IF NOT EXISTS rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,10 +135,11 @@ def db_init():
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
             pass
-    try:
-        conn.execute("ALTER TABLE rules ADD COLUMN reaction TEXT DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass
+    for col, ddl in (("reaction", "TEXT DEFAULT ''"), ("groups", "TEXT DEFAULT ''")):
+        try:
+            conn.execute(f"ALTER TABLE rules ADD COLUMN {col} {ddl}")
+        except sqlite3.OperationalError:
+            pass
     for col, ddl in (("content", "TEXT DEFAULT ''"), ("reply", "TEXT DEFAULT ''"), ("grp_name", "TEXT DEFAULT ''")):
         try:
             conn.execute(f"ALTER TABLE hits ADD COLUMN {col} {ddl}")
@@ -149,6 +163,69 @@ def set_setting(key, value):
 
 db_init()
 
+# ---------------- 时区 ----------------
+def tz_name() -> str:
+    return get_setting("tz") or os.environ.get("TZ") or "Asia/Shanghai"
+
+
+# 系统缺 tzdata(精简镜像)时的固定偏移兜底
+_TZ_FALLBACK = {
+    "Asia/Shanghai": 8, "Asia/Hong_Kong": 8, "Asia/Taipei": 8, "Asia/Singapore": 8,
+    "Asia/Tokyo": 9, "Asia/Seoul": 9, "Asia/Bangkok": 7, "Asia/Kolkata": 5.5,
+    "UTC": 0, "Europe/London": 0, "Europe/Berlin": 1, "Europe/Moscow": 3,
+    "America/New_York": -5, "America/Los_Angeles": -8,
+}
+
+
+def tz_valid(name: str) -> bool:
+    if not name:
+        return False
+    if name in _TZ_FALLBACK:
+        return True
+    try:
+        ZoneInfo(name)
+        return True
+    except Exception:
+        return bool(re.fullmatch(r"[+-]\d{1,2}(:\d{2})?", name))
+
+
+def tzinfo():
+    name = tz_name()
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        off = _TZ_FALLBACK.get(name)
+        if off is None:
+            m = re.fullmatch(r"([+-])(\d{1,2})(?::(\d{2}))?", name or "")
+            off = 8
+            if m:
+                off = int(m.group(2)) + (int(m.group(3) or 0) / 60)
+                off = -off if m.group(1) == "-" else off
+        return timezone(timedelta(hours=off))
+
+
+def now_local():
+    """当前时间(按面板设置的时区),签到窗口/日期一律用它"""
+    return datetime.now(tzinfo())
+
+
+# ---------------- 监听群/规则内存缓存 ----------------
+_cache = {"at": 0.0, "watched": set(), "rules": []}
+
+
+def invalidate_cache():
+    _cache["at"] = 0.0
+
+
+def cache_snapshot():
+    """5 秒内复用缓存,避免每条群消息都查一次 SQLite 阻塞事件循环"""
+    if time.monotonic() - _cache["at"] > 5:
+        _cache["watched"] = {r["chat_id"] for r in conn.execute("SELECT chat_id FROM watched_groups").fetchall()}
+        _cache["rules"] = conn.execute("SELECT * FROM rules WHERE enabled=1 ORDER BY id").fetchall()
+        _cache["at"] = time.monotonic()
+    return _cache["watched"], _cache["rules"]
+
+
 # ---------------- 全局状态 ----------------
 client = None              # Telethon TelegramClient (登录后持活)
 tg_state = {"phase": "idle", "phone": "", "api_ok": False, "me": None, "err": None}
@@ -161,7 +238,6 @@ _running = {"paused": False}
 
 # 通知 / 验证码 / 水群 / AI 状态
 flock_buf = {}             # (chat_id, text) -> [ts1, ts2, ...] 相同消息时间戳(水群从众)
-captcha_holder = {"code": "", "ts": 0.0}   # 面板登录验证码
 _ocr = None                # ddddocr 实例(惰性加载)
 _ai_cfg = {}               # AI 验证码配置缓存
 
@@ -280,45 +356,155 @@ async def recognize_image_text(image_bytes, length=0):
     return ""   # 两个开关都关
 
 
-def gen_captcha():
-    """生成面板登录图形验证码(SVG),答案存内存"""
+# ---------------- 面板鉴权:密码哈希 / 会话令牌 / 限速 / 验证码 ----------------
+_captcha = {}        # ip -> (code, ts)
+_login_fail = {}     # ip -> {"n": 连续失败, "first": 窗口起点, "blocked_until": 解封时间}
+RL_WINDOW = 600      # 失败统计窗口:10 分钟
+RL_MAX = 10          # 窗口内失败上限,超过封 10 分钟
+RL_BLOCK = 600
+
+
+def hash_password(pw: str) -> str:
+    salt = secrets.token_hex(16)
+    dk = hashlib.scrypt(pw.encode(), salt=salt.encode(), n=2 ** 14, r=8, p=1, dklen=32)
+    return "scrypt$%s$%s" % (salt, dk.hex())
+
+
+def verify_password(pw: str) -> bool:
+    stored = get_setting("panel_pw_hash", "") or ""
+    if not stored.startswith("scrypt$"):
+        return False
+    try:
+        _, salt, want = stored.split("$", 2)
+        dk = hashlib.scrypt(pw.encode(), salt=salt.encode(), n=2 ** 14, r=8, p=1, dklen=32)
+        return hmac.compare_digest(dk.hex(), want)
+    except Exception:
+        return False
+
+
+def init_panel_password():
+    """把 env PANEL_PASSWORD / 旧的明文文件迁移成 scrypt 哈希,并删掉明文副本"""
+    if get_setting("panel_pw_hash"):
+        try:
+            if PW_FILE.exists():
+                PW_FILE.unlink()
+        except Exception:
+            pass
+        return
+    src = os.environ.get("PANEL_PASSWORD") or ""
+    if not src and PW_FILE.exists():
+        try:
+            src = PW_FILE.read_text().strip()
+        except Exception:
+            src = ""
+    generated = False
+    if len(src) < 6:
+        src = secrets.token_urlsafe(9)
+        generated = True
+    set_setting("panel_pw_hash", hash_password(src))
+    try:
+        if PW_FILE.exists():
+            PW_FILE.unlink()
+    except Exception:
+        pass
+    if generated:
+        log.warning("已生成面板密码(只显示这一次,请立刻记录): %s", src)
+    else:
+        log.info("面板密码已改为哈希存储,明文文件已删除(改密码用面板或 PANEL_PASSWORD 环境变量)")
+
+
+def create_session(ip: str, ua: str) -> str:
+    tok = secrets.token_urlsafe(32)
+    ts = int(time.time())
+    conn.execute("DELETE FROM panel_sessions WHERE created < ?", (ts - 30 * 86400,))
+    conn.execute("INSERT INTO panel_sessions(token,created,ip,ua,last_seen) VALUES(?,?,?,?,?)",
+                 (tok, ts, ip[:64], (ua or "")[:160], ts))
+    conn.commit()
+    return tok
+
+
+def session_ok(tok: str) -> bool:
+    if not tok:
+        return False
+    return conn.execute("SELECT 1 FROM panel_sessions WHERE token=?", (tok,)).fetchone() is not None
+
+
+def drop_session(tok: str):
+    if tok:
+        conn.execute("DELETE FROM panel_sessions WHERE token=?", (tok,))
+        conn.commit()
+
+
+def drop_all_sessions():
+    conn.execute("DELETE FROM panel_sessions")
+    conn.commit()
+
+
+def client_ip(request) -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
+def rl_state(ip: str):
+    now = time.time()
+    st = _login_fail.get(ip)
+    if not st or now - st["first"] > RL_WINDOW:
+        st = {"n": 0, "first": now, "blocked_until": 0}
+        _login_fail[ip] = st
+    return st
+
+
+def rl_blocked(ip: str) -> int:
+    st = rl_state(ip)
+    return int(st["blocked_until"] - time.time()) if st["blocked_until"] > time.time() else 0
+
+
+def rl_need_captcha(ip: str) -> bool:
+    return rl_state(ip)["n"] >= CAPTCHA_AFTER
+
+
+def rl_fail(ip: str) -> int:
+    st = rl_state(ip)
+    st["n"] += 1
+    if st["n"] >= RL_MAX:
+        st["blocked_until"] = time.time() + RL_BLOCK
+    return st["n"]
+
+
+def rl_ok(ip: str):
+    _login_fail.pop(ip, None)
+
+
+def gen_captcha(ip: str) -> str:
+    """图形验证码:答案绑定 IP,3 分钟内有效,用过即失效"""
     import random as _r
     code = "".join(_r.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=4))
-    captcha_holder["code"] = code
-    captcha_holder["ts"] = time.time()
-    # 简单 SVG:旋转字符 + 干扰线
+    _captcha[ip] = (code, time.time())
     chars = "".join(
-        f'<text x="{28+i*26}" y="{42}" font-size="30" font-family="Arial" font-weight="bold" fill="#{_r.choice(["4af","a4d","5ad","6cf","8e8"])}" transform="rotate({_r.randint(-18,18)} {28+i*26} 42)">{c}</text>'
+        f'<text x="{28 + i * 26}" y="{42}" font-size="30" font-family="Arial" font-weight="bold" '
+        f'fill="#{_r.choice(["4af", "a4d", "5ad", "6cf", "8e8"])}" '
+        f'transform="rotate({_r.randint(-18, 18)} {28 + i * 26} 42)">{c}</text>'
         for i, c in enumerate(code)
     )
     lines = "".join(
-        f'<line x1="{_r.randint(0,120)}" y1="{_r.randint(0,50)}" x2="{_r.randint(0,120)}" y2="{_r.randint(0,50)}" stroke="#666" stroke-width="1"/>'
+        f'<line x1="{_r.randint(0, 120)}" y1="{_r.randint(0, 50)}" '
+        f'x2="{_r.randint(0, 120)}" y2="{_r.randint(0, 50)}" stroke="#666" stroke-width="1"/>'
         for _ in range(6)
     )
-    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="140" height="50" viewBox="0 0 140 50">'
-           f'<rect width="140" height="50" fill="#1b1e28" rx="8"/>{lines}{chars}</svg>')
-    return svg
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="140" height="50" viewBox="0 0 140 50">'
+            f'<rect width="140" height="50" fill="#1b1e28" rx="8"/>{lines}{chars}</svg>')
 
 
-def check_captcha(ans):
-    if captcha_holder["code"] and ans.strip().upper() == captcha_holder["code"] and time.time() - captcha_holder["ts"] < 300:
-        captcha_holder["code"] = ""
-        return True
-    return False
+def check_captcha(ip: str, ans: str) -> bool:
+    code, ts = _captcha.pop(ip, ("", 0.0))
+    if not code or time.time() - ts > 300:
+        return False
+    return ans.strip().upper() == code
 
 
-def panel_password():
-    """面板密码:env PANEL_PASSWORD > data/panel_password.txt(首次自动生成)> 打印日志"""
-    env = os.environ.get("PANEL_PASSWORD")
-    if env:
-        return env
-    if PW_FILE.exists():
-        return PW_FILE.read_text().strip()
-    pw = secrets.token_urlsafe(8)
-    PW_FILE.write_text(pw)
-    PW_FILE.chmod(0o600)
-    log.info("面板密码已生成(写入 data/panel_password.txt): %s", pw)
-    return pw
+init_panel_password()
 
 
 # ---------------- 关键词匹配 ----------------
@@ -339,8 +525,7 @@ def match_rule(rule, text):
 async def on_group_message(event):
     if _running["paused"] or not event.is_group or event.out:
         return
-    rows = conn.execute("SELECT chat_id FROM watched_groups").fetchall()
-    watched = {r["chat_id"] for r in rows}
+    watched, rules = cache_snapshot()
     if not watched or str(event.chat_id) not in watched:
         return
     text = (event.raw_text or "").strip()
@@ -367,11 +552,12 @@ async def on_group_message(event):
         except Exception:
             pass
 
-    rules = conn.execute(
-        "SELECT * FROM rules WHERE enabled=1 ORDER BY id"
-    ).fetchall()
     rule = next((r for r in rules if match_rule(r, text)), None)
     if rule is None:
+        return
+    # 规则可以只对部分群生效(留空 = 全部监听群)
+    rgroups = {x.strip() for x in re.split(r"[,，]", (rule["groups"] or "")) if x.strip()}
+    if rgroups and str(event.chat_id) not in rgroups:
         return
 
     cooldown = int(get_setting("cooldown", "20"))
@@ -438,15 +624,36 @@ async def on_group_message(event):
 
 
 async def watcher_loop():
-    """后台监听:登录成功后启动;断线自动重连"""
-    global watcher_task
+    """后台监听:登录成功后启动;断线自动重建连接(而不是空转)"""
+    global client, handler_registered
+    backoff = 0
     while True:
         try:
+            if client is None:
+                await ensure_client()
             if client is not None:
                 await client.run_until_disconnected()
         except Exception as e:
             log.warning("监听连接断开: %s", e)
-        await asyncio.sleep(5)
+        # 走到这里说明连接已经没了:清理 → 退避 → 重新建连并注册事件
+        try:
+            if client is not None:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+            client = None
+            handler_registered = False   # finish_login 会重新注册事件处理器
+            backoff = min(backoff + 1, 12)
+            await asyncio.sleep(min(60, 5 * backoff))
+            await ensure_client()
+            if client is not None and await client.is_user_authorized():
+                backoff = 0
+                log.info("监听连接已恢复")
+                continue
+        except Exception as e:
+            log.warning("重连失败: %s", e)
+            await asyncio.sleep(5)
 
 
 # ---------------- 自动化:签到 / 抢注 / 抢红包 ----------------
@@ -994,8 +1201,9 @@ async def signin_loop():
                 autos = conn.execute(
                     "SELECT * FROM automations WHERE enabled=1 AND type='signin'"
                 ).fetchall()
-                today = time.strftime("%Y-%m-%d")
-                nowm = time.localtime().tm_hour * 60 + time.localtime().tm_min
+                _now = now_local()
+                today = _now.strftime("%Y-%m-%d")
+                nowm = _now.hour * 60 + _now.minute
                 for a in autos:
                     if a["last_at"] == today:
                         continue
@@ -1049,12 +1257,12 @@ app = FastAPI(title="TG Persona", docs_url=None, redoc_url=None, lifespan=lifesp
 
 @app.middleware("http")
 async def panel_auth(request: Request, call_next):
-    """除登录/静态资源外,面板需要密码鉴权"""
+    """除登录接口与首页外,面板和头像都要已登录的会话令牌"""
     path = request.url.path
-    if path.startswith("/api/panel/") or path.startswith("/static/") or path in ("/",):
+    if path in ("/", "/api/panel/login") or path.startswith("/static/") or path.startswith("/api/panel/captcha"):
         return await call_next(request)
-    if path.startswith("/api/"):
-        if request.cookies.get("panel_token") == panel_password():
+    if path.startswith("/api/") or path == "/avatar":
+        if session_ok(request.cookies.get("panel_token", "")):
             return await call_next(request)
         return JSONResponse({"error": "未登录面板"}, status_code=401)
     return await call_next(request)
@@ -1067,26 +1275,55 @@ class PanelLogin(BaseModel):
 
 
 @app.get("/api/panel/captcha")
-async def panel_captcha():
-    return {"svg": gen_captcha()}
+async def panel_captcha(request: Request):
+    ip = client_ip(request)
+    return {"svg": gen_captcha(ip), "required": rl_need_captcha(ip)}
 
 
 @app.post("/api/panel/login")
-async def panel_login(body: PanelLogin):
-    if body.password != panel_password():
-        raise HTTPException(403, "密码错误")
-    if not check_captcha(body.captcha):
-        raise HTTPException(400, "验证码错误或已过期,请刷新")
+async def panel_login(body: PanelLogin, request: Request):
+    ip = client_ip(request)
+    left = rl_blocked(ip)
+    if left:
+        raise HTTPException(429, f"尝试次数过多,请 {left // 60 + 1} 分钟后再试")
+    if rl_need_captcha(ip) and not check_captcha(ip, body.captcha):
+        raise HTTPException(400, "验证码错误或已过期,点图片刷新后重试")
+    if not verify_password(body.password):
+        n = rl_fail(ip)
+        msg = "密码错误" if n < CAPTCHA_AFTER else f"密码错误(连续 {n} 次,之后需要验证码)"
+        if n >= RL_MAX:
+            msg = "尝试次数过多,已暂时锁定 10 分钟"
+        raise HTTPException(403, msg)
+    rl_ok(ip)
+    tok = create_session(ip, request.headers.get("user-agent", ""))
     resp = JSONResponse({"ok": True})
-    resp.set_cookie("panel_token", panel_password(), max_age=86400 * 30, httponly=True)
+    resp.set_cookie("panel_token", tok, max_age=30 * 86400, httponly=True, samesite="lax")
     return resp
 
 
 @app.post("/api/panel/logout")
-async def panel_logout():
+async def panel_logout(request: Request):
+    drop_session(request.cookies.get("panel_token", ""))
     resp = JSONResponse({"ok": True})
     resp.delete_cookie("panel_token")
     return resp
+
+
+@app.post("/api/panel/logout-all")
+async def panel_logout_all():
+    """退出所有设备(改完密码后建议点一次)"""
+    drop_all_sessions()
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("panel_token")
+    return resp
+
+
+@app.get("/api/panel/sessions")
+async def panel_sessions(request: Request):
+    cur = request.cookies.get("panel_token", "")
+    rows = conn.execute("SELECT created, ip, ua, token FROM panel_sessions ORDER BY created DESC").fetchall()
+    return {"count": len(rows), "now": sum(1 for r in rows if r["token"] == cur),
+            "list": [{"created": r["created"], "ip": r["ip"], "ua": (r["ua"] or "")[:60]} for r in rows[:20]]}
 
 
 # ---------- TG 登录 ----------
@@ -1308,6 +1545,7 @@ async def add_group(body: dict):
         (chat_id, name, int(time.time()), name),
     )
     conn.commit()
+    invalidate_cache()
     return {"ok": True}
 
 
@@ -1315,6 +1553,7 @@ async def add_group(body: dict):
 async def remove_group(chat_id: str):
     conn.execute("DELETE FROM watched_groups WHERE chat_id=?", (chat_id,))
     conn.commit()
+    invalidate_cache()
     return {"ok": True}
 
 
@@ -1325,6 +1564,7 @@ class RuleIn(BaseModel):
     action: str = "reply"       # reply | react | both
     value: str = ""
     reaction: str = ""          # 表情(both 时独立存,react 时用 value)
+    groups: str = ""            # 只在这些群里生效(逗号分隔 chat_id,留空=全部监听群)
     enabled: int = 1
 
 
@@ -1352,21 +1592,38 @@ async def create_rule(body: RuleIn):
     if body.action == "both" and not body.value.strip():
         raise HTTPException(400, "回复内容不能为空")
     cur = conn.execute(
-        "INSERT INTO rules(keywords,regex,action,value,reaction,enabled,created_at) VALUES(?,?,?,?,?,?,?)",
-        (body.keywords.strip(), body.regex, body.action, body.value.strip(), body.reaction.strip(), body.enabled, int(time.time())),
+        "INSERT INTO rules(keywords,regex,action,value,reaction,groups,enabled,created_at) VALUES(?,?,?,?,?,?,?,?)",
+        (body.keywords.strip(), body.regex, body.action, body.value.strip(), body.reaction.strip(),
+         (body.groups or "").strip(), body.enabled, int(time.time())),
     )
     conn.commit()
+    invalidate_cache()
     return {"ok": True, "id": cur.lastrowid}
 
 
 @app.put("/api/rules/{rid}")
 async def update_rule(rid: int, body: RuleIn):
     conn.execute(
-        "UPDATE rules SET keywords=?,regex=?,action=?,value=?,reaction=?,enabled=? WHERE id=?",
-        (body.keywords.strip(), body.regex, body.action, body.value.strip(), body.reaction.strip(), body.enabled, rid),
+        "UPDATE rules SET keywords=?,regex=?,action=?,value=?,reaction=?,groups=?,enabled=? WHERE id=?",
+        (body.keywords.strip(), body.regex, body.action, body.value.strip(), body.reaction.strip(),
+         (body.groups or "").strip(), body.enabled, rid),
     )
     conn.commit()
+    invalidate_cache()
     return {"ok": True}
+
+
+@app.post("/api/rules/{rid}/toggle")
+async def toggle_rule(rid: int):
+    """面板开关:翻转启用状态(不必回传整条规则)"""
+    r = conn.execute("SELECT enabled FROM rules WHERE id=?", (rid,)).fetchone()
+    if not r:
+        raise HTTPException(404, "规则不存在")
+    en = 0 if r["enabled"] else 1
+    conn.execute("UPDATE rules SET enabled=? WHERE id=?", (en, rid))
+    conn.commit()
+    invalidate_cache()
+    return {"ok": True, "enabled": en}
 
 
 # ---------- 自动化管理 (签到 / 抢注 / 抢红包 / 自定义) ----------
@@ -1524,11 +1781,12 @@ async def run_auto_now(aid: int):
 async def delete_rule(rid: int):
     conn.execute("DELETE FROM rules WHERE id=?", (rid,))
     conn.commit()
+    invalidate_cache()
     return {"ok": True}
 
 
 # ---------- 设置 ----------
-SETTING_KEYS = ["cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar",
+SETTING_KEYS = ["tz", "cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar",
                 "notify_bark", "notify_bt", "notify_bc", "notify_on_success", "notify_on_fail",
                 "ai_base", "ai_key", "ai_model", "ai_enabled", "ocr_enabled",
                 "flock_enabled", "flock_count", "flock_minutes", "flock_pool"]
@@ -1543,6 +1801,10 @@ async def get_settings():
 
 @app.post("/api/settings")
 async def update_settings(body: dict):
+    if "tz" in body:
+        name = str(body.get("tz") or "").strip()
+        if name and not tz_valid(name):
+            raise HTTPException(400, f"时区无效:{name}(例: Asia/Shanghai)")
     for k, v in body.items():
         if k in SETTING_KEYS:
             set_setting(k, str(v))
@@ -1552,13 +1814,20 @@ async def update_settings(body: dict):
 
 
 @app.post("/api/panel/password")
-async def change_panel_password(body: dict):
+async def change_panel_password(body: dict, request: Request):
     pw = str(body.get("password", "")).strip()
-    if len(pw) < 6:
-        raise HTTPException(400, "面板密码至少 6 位")
-    PW_FILE.write_text(pw)
-    PW_FILE.chmod(0o600)
-    return {"ok": True}
+    old = str(body.get("old", "") or "")
+    if len(pw) < 8:
+        raise HTTPException(400, "面板密码至少 8 位")
+    if old and not verify_password(old):
+        raise HTTPException(403, "原密码不对")
+    set_setting("panel_pw_hash", hash_password(pw))
+    drop_all_sessions()
+    # 当前设备自动续一个会话,其它设备会被踢下线
+    tok = create_session(client_ip(request), request.headers.get("user-agent", ""))
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie("panel_token", tok, max_age=30 * 86400, httponly=True, samesite="lax")
+    return resp
 
 
 @app.post("/api/toggle")
@@ -1568,6 +1837,17 @@ async def toggle_paused(body: dict):
 
 
 # ---------- 状态 & 日志 ----------
+@app.get("/api/time")
+async def get_time():
+    """面板显示服务器时间 / 时区,用来核对签到窗口"""
+    return {"tz": tz_name(), "now": now_local().strftime("%Y-%m-%d %H:%M:%S"),
+            "epoch": int(time.time()), "tzlist": [
+                "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei", "Asia/Tokyo", "Asia/Seoul",
+                "Asia/Singapore", "Asia/Bangkok", "Asia/Kolkata", "UTC", "Europe/London",
+                "Europe/Berlin", "Europe/Moscow", "America/New_York", "America/Los_Angeles",
+            ]}
+
+
 @app.get("/api/state")
 async def get_state():
     rules = conn.execute("SELECT COUNT(*) c FROM rules WHERE enabled=1").fetchone()["c"]
@@ -1583,7 +1863,10 @@ async def get_state():
             "hits": hits_count["total"],
             "uptime_since": get_setting("uptime_since", str(int(time.time()))),
         },
-        "panel_need_change": not os.environ.get("PANEL_PASSWORD") and PW_FILE.exists(),
+        "panel_need_change": False,
+        "sessions": conn.execute("SELECT COUNT(*) c FROM panel_sessions").fetchone()["c"],
+        "tz": tz_name(),
+        "now": now_local().strftime("%Y-%m-%d %H:%M"),
     }
 
 
