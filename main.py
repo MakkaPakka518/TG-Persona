@@ -61,7 +61,8 @@ def db_init():
             keywords TEXT NOT NULL,
             regex INTEGER DEFAULT 0,
             action TEXT NOT NULL DEFAULT 'reply',        -- reply | react | both
-            value TEXT NOT NULL,                          -- 回复内容(||分隔多条) 或 表情
+            value TEXT NOT NULL,                          -- 回复内容(||分隔多条) 或 表情(react)
+            reaction TEXT DEFAULT '',                     -- 表情(both 时使用,react 时留空)
             enabled INTEGER DEFAULT 1,
             created_at INTEGER
         );
@@ -98,6 +99,10 @@ def db_init():
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
             pass
+    try:
+        conn.execute("ALTER TABLE rules ADD COLUMN reaction TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
 
 
@@ -201,7 +206,7 @@ async def on_group_message(event):
             reply = random.choice([s.strip() for s in rule["value"].split("||") if s.strip()])
             await event.reply(reply)
         if action in ("react", "both"):
-            emo = rule["value"].replace("\ufe0f", "")
+            emo = (rule["reaction"] or rule["value"]).replace("\ufe0f", "")
             if emo:
                 await client(
                     SendReactionRequest(
@@ -763,6 +768,7 @@ class RuleIn(BaseModel):
     regex: int = 0
     action: str = "reply"       # reply | react | both
     value: str = ""
+    reaction: str = ""          # 表情(both 时独立存,react 时用 value)
     enabled: int = 1
 
 
@@ -783,13 +789,15 @@ async def create_rule(body: RuleIn):
             raise HTTPException(400, "正则表达式无效")
     if body.action in ("reply", "both") and not body.value.strip():
         raise HTTPException(400, "回复内容不能为空")
+    if body.action == "react" and not body.value.strip():
+        raise HTTPException(400, "请选择表情")
     if body.action == "react" and (len(body.value.replace("\ufe0f", "")) > 8):
         raise HTTPException(400, "表情只能填一个 emoji")
-    if body.action == "react" and not body.value.strip():
-        raise HTTPException(400, "表情不能为空")
+    if body.action == "both" and not body.value.strip():
+        raise HTTPException(400, "回复内容不能为空")
     cur = conn.execute(
-        "INSERT INTO rules(keywords,regex,action,value,enabled,created_at) VALUES(?,?,?,?,?,?)",
-        (body.keywords.strip(), body.regex, body.action, body.value.strip(), body.enabled, int(time.time())),
+        "INSERT INTO rules(keywords,regex,action,value,reaction,enabled,created_at) VALUES(?,?,?,?,?,?,?)",
+        (body.keywords.strip(), body.regex, body.action, body.value.strip(), body.reaction.strip(), body.enabled, int(time.time())),
     )
     conn.commit()
     return {"ok": True, "id": cur.lastrowid}
@@ -798,8 +806,8 @@ async def create_rule(body: RuleIn):
 @app.put("/api/rules/{rid}")
 async def update_rule(rid: int, body: RuleIn):
     conn.execute(
-        "UPDATE rules SET keywords=?,regex=?,action=?,value=?,enabled=? WHERE id=?",
-        (body.keywords.strip(), body.regex, body.action, body.value.strip(), body.enabled, rid),
+        "UPDATE rules SET keywords=?,regex=?,action=?,value=?,reaction=?,enabled=? WHERE id=?",
+        (body.keywords.strip(), body.regex, body.action, body.value.strip(), body.reaction.strip(), body.enabled, rid),
     )
     conn.commit()
     return {"ok": True}

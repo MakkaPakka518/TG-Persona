@@ -389,6 +389,7 @@ button.btn,button.ghost,button.danger{min-height:44px}
         <label>选择表情</label>
         <div class="emojis" id="rEmojis"></div>
       </div>
+      <input type="hidden" id="rReact">
       <div class="flex" style="margin-top:14px">
         <button class="btn" onclick="saveRule()">保存规则</button>
         <span class="hint" style="margin:0">规则可随时开关或删除</span>
@@ -458,7 +459,7 @@ async function api(path,opts={}){
   const r=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});
   if(r.status===401){showLoginGate();throw new Error('未登录面板')}
   const d=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(d.error||('请求失败 '+r.status));
+  if(!r.ok)throw new Error(d.error||d.detail||('请求失败 '+r.status));
   return d;
 }
 const esc=s=>(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -825,54 +826,67 @@ function pickAction(a){
   ['reply','react','both'].forEach(x=>$('#act'+x[0].toUpperCase()+x.slice(1)).style.borderColor=x===a?'var(--acc)':'');
   $('#rValueWrap').classList.toggle('hidden',a==='react');
   $('#rEmojiWrap').classList.toggle('hidden',a==='reply');
+  if(editingRule)return;   // 编辑模式由 editRule 回填
+  $('#rValue').value='';$('#rReact').value='';
+  document.querySelectorAll('#rEmojis span').forEach(s=>s.classList.remove('sel'));
 }
 function renderEmojis(){
   $('#rEmojis').innerHTML=EMOJIS.map(e=>`<span data-e="${e}" onclick="pickEmoji(this,'${e}')">${e}</span>`).join('');
 }
 function pickEmoji(el,e){
-  $('#rEmojis span').forEach(s=>s.classList.remove('sel'));
+  document.querySelectorAll('#rEmojis span').forEach(s=>s.classList.remove('sel'));
   el.classList.add('sel');
-  $('#rValue').value=e;
+  $('#rReact').value=e;
+  if(actType==='react')$('#rValue').value=e;
 }
+let allRules=[];
 async function loadRules(){
   try{
     const d=await api('/api/rules');
-    $('#rList').innerHTML=d.rules.length?d.rules.map(r=>`
-      <div class="item">
+    allRules=d.rules||[];
+    $('#rList').innerHTML=d.rules.length?d.rules.map(r=>{
+      const val=r.action==='both'?(r.reaction?`${esc(r.value)} + ${r.reaction}`:esc(r.value)):(r.action==='react'?esc(r.reaction||r.value):esc(r.value));
+      return `<div class="item">
         <div class="switch ${r.enabled?'on':''}" onclick="toggleRule(${r.id},${r.enabled?0:1})"></div>
         <div class="grow">
           <div class="t">${esc(r.keywords)}${r.regex?' <span class="tag">正则</span>':''}</div>
-          <div class="s">#${r.id} · ${r.action==='react'?'点表情':r.action==='both'?'回复+表情':'回复文本'} · ${esc(r.value)}</div>
+          <div class="s">#${r.id} · ${r.action==='react'?'点表情':r.action==='both'?'回复+表情':'回复文本'} · ${val}</div>
         </div>
         <button class="ghost" onclick="editRule(${r.id})">编辑</button>
         <button class="danger" onclick="delRule(${r.id})">删除</button>
-      </div>`).join(''):'<div class="empty">还没有关键词规则,在下方添加第一条</div>';
+      </div>`;
+    }).join(''):'<div class="empty">还没有关键词规则,在下方添加第一条</div>';
   }catch(e){toast(e.message,1)}
 }
 async function toggleRule(id,en){try{await api('/api/rules/'+id,{method:'PUT',body:JSON.stringify(getRulePatch(en))});loadRules()}catch(e){toast(e.message,1)}}
 function getRulePatch(en){
-  const r=state._rules?.find(x=>x.id===editingRule);
-  return {keywords:r?r.keywords:'',regex:r?r.regex:0,action:r?r.action:'reply',value:r?r.value:'',enabled:en};
+  const r=allRules.find(x=>x.id===editingRule);
+  return {keywords:r?r.keywords:'',regex:r?r.regex:0,action:r?r.action:'reply',value:r?r.value:'',reaction:r?(r.reaction||''):'',enabled:en};
 }
 function editRule(id){
-  const r=state._rules.find(x=>x.id===id);
-  if(!r)return;
+  const r=allRules.find(x=>x.id===id);
+  if(!r)return toast('规则数据未加载,刷新页面',1);
   editingRule=id;
   const formFold=$('#rKw').closest('.fold');
   if(formFold&&!formFold.classList.contains('open'))formFold.classList.add('open');
   $('#rKw').value=r.keywords; $('#rRegex').checked=!!r.regex;
-  pickAction(r.action); $('#rValue').value=r.value;
-  if(r.action!=='reply'){const t=$('#rEmojis span[data-e="'+r.value+'"]');if(t)t.classList.add('sel')}
+  pickAction(r.action);
+  $('#rValue').value=r.value;
+  $('#rReact').value=r.action==='react'?r.value:(r.reaction||'');
+  if(r.action!=='reply'){const t=$('#rEmojis span[data-e="'+$('#rReact').value+'"]');if(t)t.classList.add('sel')}
   $('#rKw').scrollIntoView({behavior:'smooth'});
   toast('编辑规则 #'+id+' 中,改完点保存');
 }
 async function saveRule(){
-  const body={keywords:$('#rKw').value.trim(),regex:$('#rRegex').checked?1:0,action:actType,value:$('#rValue').value.trim(),enabled:1};
+  const text=$('#rValue').value.trim();
+  const emo=$('#rReact').value.trim();
+  const body={keywords:$('#rKw').value.trim(),regex:$('#rRegex').checked?1:0,action:actType,
+    value:actType==='react'?emo:text,reaction:actType==='both'?emo:'',enabled:1};
   if(!body.keywords)return toast('关键词不能为空',1);
   try{
     if(editingRule){await api('/api/rules/'+editingRule,{method:'PUT',body:JSON.stringify({...body,enabled:1})});editingRule=null}
     else await api('/api/rules',{method:'POST',body:JSON.stringify(body)});
-    $('#rKw').value='';$('#rRegex').checked=false;$('#rValue').value='';pickAction('reply');
+    $('#rKw').value='';$('#rRegex').checked=false;$('#rValue').value='';$('#rReact').value='';pickAction('reply');
     toast('规则已保存');loadRules();
   }catch(e){toast(e.message,1)}
 }
