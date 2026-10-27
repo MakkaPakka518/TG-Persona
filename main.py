@@ -1214,6 +1214,78 @@ async def run_custom(a):
 # 抢注轮询(开注探测):每间隔给机器人发探测命令,回复含开注关键词即注册
 poll_last = {}
 poll_task = None
+keepalive_task = None
+
+
+async def run_keepalive(a, reason="定时"):
+    """在指定群发一条内容,可选 N 秒后删除(Emby 保号用)"""
+    if client is None or tg_state["phase"] != "ready":
+        return False
+    target = str(a["target"] or "").strip()
+    parts = [x.strip() for x in str(a["reply_text"] or "").split("||") if x.strip()]
+    if not target or not parts:
+        return False
+    txt = render_placeholders(random.choice(parts))
+    delay = max(0, min(int(a["cooldown"] or 0), 86400))
+    try:
+        ent = await resolve_entity(target)
+        msg = await client.send_message(ent, txt)
+    except errors.FloodWaitError as e:
+        log.warning("保号发言限流,等待 %ss", e.seconds)
+        await asyncio.sleep(e.seconds + 1)
+        return False
+    except Exception as e:
+        add_hit("keepalive", False, chat_id=target, rule_id=-a["id"], grp_name=target, content=txt,
+                detail={"kind": "keepalive", "task": a["name"], "group": target, "message": txt,
+                        "error": str(e)[:200], "reason": reason})
+        notify_event("fail", a["name"], f"发言失败: {e}")
+        return False
+    conn.execute("UPDATE automations SET last_at=? WHERE id=?", (str(int(time.time())), a["id"]))
+    conn.commit()
+    add_hit("keepalive", True, chat_id=target, rule_id=-a["id"], grp_name=target, content=txt,
+            detail={"kind": "keepalive", "task": a["name"], "group": target, "message": txt,
+                    "delete_after": delay, "reason": reason})
+    notify_event("success", a["name"],
+                 f"已在 {target} 发言" + (f",{delay} 秒后删除" if delay else " (不删除)"))
+    log.info("保号发言 群=%s 任务=%s 删除=%ss", target, a["name"], delay)
+    if delay:
+        async def _del(group_ent=ent, mid=msg.id, name=a["name"]):
+            await asyncio.sleep(delay)
+            try:
+                await client.delete_messages(group_ent, [mid])
+                log.info("保号消息已删除 群=%s 任务=%s", target, name)
+            except Exception as e:
+                log.warning("删除保号消息失败: %s", e)
+        asyncio.get_running_loop().create_task(_del())
+    return True
+
+
+async def keepalive_loop():
+    """每分钟检查一次:到点的保号任务去群里发一条"""
+    while True:
+        try:
+            if client is not None and tg_state["phase"] == "ready":
+                autos = conn.execute(
+                    "SELECT * FROM automations WHERE enabled=1 AND type='keepalive' AND target!=''"
+                ).fetchall()
+                now = int(time.time())
+                for a in autos:
+                    interval = max(60, int(a["poll_interval"] or 0))
+                    last = int(str(a["last_at"] or "0").strip() or 0)
+                    if last == 0:
+                        # 新建的任务先落一个时间点,首次发送等一个间隔;想立刻发用「执行」按钮
+                        conn.execute("UPDATE automations SET last_at=? WHERE id=?", (str(now), a["id"]))
+                        conn.commit()
+                        continue
+                    if now - last < interval:
+                        continue
+                    # 先占住时间点,避免同一分钟重复发
+                    conn.execute("UPDATE automations SET last_at=? WHERE id=?", (str(now), a["id"]))
+                    conn.commit()
+                    await run_keepalive(a, "定时")
+        except Exception as e:
+            log.warning("保号循环异常: %s", e)
+        await asyncio.sleep(60)
 
 
 async def poll_loop():
@@ -1501,7 +1573,7 @@ async def tg_verify_password(body: VerifyPassword):
 
 
 async def finish_login(me=None):
-    global watcher_task, handler_registered, signin_task, poll_task
+    global watcher_task, handler_registered, signin_task, poll_task, keepalive_task
     tg_state["phase"] = "ready"
     tg_state["err"] = None
     me = me or await client.get_me()
@@ -1536,6 +1608,9 @@ async def finish_login(me=None):
         signin_task = asyncio.create_task(signin_loop())
     if poll_task is None or poll_task.done():
         poll_task = asyncio.create_task(poll_loop())
+    global keepalive_task
+    if keepalive_task is None or keepalive_task.done():
+        keepalive_task = asyncio.create_task(keepalive_loop())
     log.info("已登录: %s (id=%s)", tg_state["me"]["name"], me.id)
 
 
@@ -1729,7 +1804,7 @@ class AutoIn(BaseModel):
 
 
 def _valid_auto(body: AutoIn):
-    if body.type not in ("signin", "grabcodes", "redpacket", "custom"):
+    if body.type not in ("signin", "grabcodes", "redpacket", "custom", "keepalive"):
         raise HTTPException(400, "类型必须是 signin / grabcodes / redpacket / custom")
     if not body.name.strip():
         raise HTTPException(400, "请填写任务名称")
@@ -1744,6 +1819,15 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "连点次数需在 1-20 之间")
         if body.click_interval < 50 or body.click_interval > 3000:
             raise HTTPException(400, "连点间隔需在 50-3000 毫秒之间")
+    if body.type == "keepalive":
+        if not body.target.strip():
+            raise HTTPException(400, "保号任务需要填写群(@用户名 或群ID)")
+        if not body.reply_text.strip():
+            raise HTTPException(400, "保号任务需要填写要发送的内容")
+        if body.poll_interval < 60 or body.poll_interval > 90 * 86400:
+            raise HTTPException(400, "发送间隔需在 60 秒 - 90 天之间")
+        if body.cooldown < 0 or body.cooldown > 86400:
+            raise HTTPException(400, "删除延迟需在 0-86400 秒之间")
     if body.type == "grabcodes" and not body.reply_text.strip():
         raise HTTPException(400, "抢注需要填写动作文本(支持 {code} 占位符)")
     if body.type == "grabcodes" and body.poll_interval:
@@ -1846,13 +1930,15 @@ async def delete_auto(aid: int):
 @app.post("/api/autos/{aid}/run")
 async def run_auto_now(aid: int):
     """手动立即执行:signin/custom"""
-    a = conn.execute("SELECT * FROM automations WHERE id=? AND type IN ('signin','custom')", (aid,)).fetchone()
+    a = conn.execute("SELECT * FROM automations WHERE id=? AND type IN ('signin','custom','keepalive')", (aid,)).fetchone()
     if not a:
         raise HTTPException(404, "该类型任务不可手动执行或不存在")
     if client is None or tg_state["phase"] != "ready":
         raise HTTPException(409, "TG 尚未登录")
     if a["type"] == "signin":
         asyncio.get_running_loop().create_task(run_signin(a))
+    elif a["type"] == "keepalive":
+        asyncio.get_running_loop().create_task(run_keepalive(a, "手动"))
     else:
         asyncio.get_running_loop().create_task(run_custom(a))
     return {"ok": True}
@@ -1957,7 +2043,7 @@ async def get_logs(n: int = 60, kind: str = ""):
     kind = (kind or "").strip()
     if kind == "reply":
         where, params = "action IN ('reply','react','both')", []
-    elif kind in ("signin", "grabcodes", "redpacket", "custom"):
+    elif kind in ("signin", "grabcodes", "redpacket", "custom", "keepalive"):
         where, params = "action=?", [kind]
     else:
         where, params = "1=1", []
@@ -1974,7 +2060,7 @@ async def get_logs(n: int = 60, kind: str = ""):
         except Exception:
             d["detail"] = {}
         out.append(d)
-    counts = {"reply": 0, "signin": 0, "grabcodes": 0, "redpacket": 0, "custom": 0}
+    counts = {"reply": 0, "signin": 0, "grabcodes": 0, "redpacket": 0, "custom": 0, "keepalive": 0}
     for r in conn.execute("SELECT action, COUNT(*) c FROM hits GROUP BY action").fetchall():
         k = "reply" if r["action"] in ("reply", "react", "both") else r["action"]
         if k in counts:
