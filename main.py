@@ -68,7 +68,8 @@ def db_init():
         );
         CREATE TABLE IF NOT EXISTS hits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts INTEGER, chat_id TEXT, rule_id INTEGER, msg_id INTEGER, action TEXT
+            ts INTEGER, chat_id TEXT, rule_id INTEGER, msg_id INTEGER, action TEXT,
+            content TEXT DEFAULT '', reply TEXT DEFAULT '', grp_name TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS automations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,6 +104,11 @@ def db_init():
         conn.execute("ALTER TABLE rules ADD COLUMN reaction TEXT DEFAULT ''")
     except sqlite3.OperationalError:
         pass
+    for col, ddl in (("content", "TEXT DEFAULT ''"), ("reply", "TEXT DEFAULT ''"), ("grp_name", "TEXT DEFAULT ''")):
+        try:
+            conn.execute(f"ALTER TABLE hits ADD COLUMN {col} {ddl}")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
 
 
@@ -201,13 +207,16 @@ async def on_group_message(event):
     await asyncio.sleep(random.uniform(min(dmin, dmax), max(dmin, dmax)))
 
     action = rule["action"]
+    reply_desc = ""
     try:
         if action in ("reply", "both") and rule["value"]:
             reply = random.choice([s.strip() for s in rule["value"].split("||") if s.strip()])
+            reply_desc = reply
             await event.reply(reply)
         if action in ("react", "both"):
             emo = (rule["reaction"] or rule["value"]).replace("\ufe0f", "")
             if emo:
+                reply_desc = (reply_desc + " + " + emo) if reply_desc else emo
                 await client(
                     SendReactionRequest(
                         peer=await event.get_input_chat(),
@@ -215,10 +224,17 @@ async def on_group_message(event):
                         reaction=[ReactionEmoji(emoticon=emo)],
                     )
                 )
+        grp_name = ""
+        try:
+            g = conn.execute("SELECT name FROM watched_groups WHERE chat_id=?", (str(event.chat_id),)).fetchone()
+            if g:
+                grp_name = g["name"]
+        except Exception:
+            pass
         hits_count["total"] += 1
         conn.execute(
-            "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action) VALUES(?,?,?,?,?)",
-            (int(time.time()), str(event.chat_id), rule["id"], event.id, action),
+            "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name) VALUES(?,?,?,?,?,?,?,?)",
+            (int(time.time()), str(event.chat_id), rule["id"], event.id, action, text[:200], reply_desc[:200], grp_name),
         )
         conn.commit()
         log.info("命中 #%s 群=%s 动作=%s", rule["id"], event.chat_id, action)
@@ -314,6 +330,13 @@ async def on_auto_event(event):
         auto_last_ts[key] = now
 
         try:
+            grp_name = ""
+            try:
+                g = conn.execute("SELECT name FROM watched_groups WHERE chat_id=?", (str(chat),)).fetchone()
+                if g:
+                    grp_name = g["name"]
+            except Exception:
+                pass
             if a["type"] == "grabcodes":
                 code = extract_code(text)
                 rt = str(a["reply_text"] or "").replace("{code}", code)
@@ -323,24 +346,28 @@ async def on_auto_event(event):
                     await event.respond(rt)
                 else:
                     await event.reply(rt)
+                reply_desc = rt
             else:
+                reply_desc = ""
                 buttons = await event.get_buttons()
                 target_btn = None
                 for row in buttons:
                     for b in row:
                         if re.search(r"打开|领取|收下|拆|红包|🎁|领", b.text or ""):
                             target_btn = b
+                            reply_desc = "点击红包按钮"
                             break
                     if target_btn:
                         break
                 if not target_btn and buttons and buttons[0]:
                     target_btn = buttons[0][0]
+                    reply_desc = "点击第一个按钮"
                 if target_btn:
                     await target_btn.click()
                     log.info("抢红包 群=%s 任务=%s", chat, a["name"])
             conn.execute(
-                "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action) VALUES(?,?,?,?,?)",
-                (int(time.time()), chat, -a["id"], event.id, a["type"]),
+                "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name) VALUES(?,?,?,?,?,?,?,?)",
+                (int(time.time()), chat, -a["id"], event.id, a["type"], text[:200], reply_desc[:200], grp_name),
             )
             conn.commit()
         except errors.FloodWaitError as e:
@@ -453,9 +480,14 @@ async def run_signin(a):
                 log.warning("签到未达成功条件(未找到「%s」),目标=%s", skw, target)
         except Exception:
             pass
+    desc = f"发送命令: {cmd}"
+    if a["click_btn"]:
+        desc += " + 点击按钮"
+    if not ok:
+        desc += " (未达成功条件)"
     conn.execute(
-        "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action) VALUES(?,?,?,?,?)",
-        (int(time.time()), target, -a["id"], 0, "signin"),
+        "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name) VALUES(?,?,?,?,?,?,?,?)",
+        (int(time.time()), target, -a["id"], 0, "signin", cmd[:200], desc[:200], target),
     )
     conn.commit()
     log.info("签到%s 任务=%s 目标=%s", "成功" if ok else "(结果未知)", a["name"], target)
@@ -981,7 +1013,8 @@ async def get_state():
 @app.get("/api/logs")
 async def get_logs(n: int = 60):
     rows = conn.execute(
-        "SELECT ts,chat_id,rule_id,msg_id,action FROM hits ORDER BY id DESC LIMIT ?", (min(n, 200),)
+        "SELECT ts,chat_id,rule_id,msg_id,action,content,reply,grp_name FROM hits ORDER BY id DESC LIMIT ?",
+        (min(n, 200),),
     ).fetchall()
     return {"hits": [dict(r) for r in rows]}
 

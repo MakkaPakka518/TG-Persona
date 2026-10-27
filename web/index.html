@@ -139,6 +139,8 @@ button.danger:hover{background:rgba(255,93,108,.22)}
 .logitem:last-child{border-bottom:0}
 .logitem .tm{color:var(--dim);white-space:nowrap}
 .logitem .msg{color:var(--txt);word-break:break-all}
+.logitem .lc{color:var(--dim);font-size:11px;word-break:break-all;margin-top:3px;padding-left:2px}
+.logitem .lr{color:var(--ok);font-size:11px;word-break:break-all;margin-top:2px;padding-left:2px}
 .badge{display:inline-flex;padding:1px 7px;border-radius:5px;font-size:10px;margin-right:6px}
 .badge.reply{background:rgba(46,230,168,.14);color:var(--ok)}
 .badge.react{background:rgba(124,92,255,.18);color:#a48dff}
@@ -897,13 +899,17 @@ async function loadLogs(){
   try{
     const d=await api('/api/logs?n=60');
     $('#logList').innerHTML=d.hits.length?d.hits.map(h=>{
-      const src=h.rule_id<0
-        ? `自动化 · ${({signin:'签到',grabcodes:'抢注',redpacket:'抢红包'})[h.action]||h.action}`
-        : `规则 #${h.rule_id} · ${h.action==='react'?'表情':h.action==='both'?'回复+表情':'回复'}`;
+      const actN={signin:'签到',grabcodes:'抢注',redpacket:'抢红包'}[h.action]||(h.action==='react'?'表情':h.action==='both'?'回复+表情':'回复');
+      const isAuto=h.rule_id<0;
+      const grp=h.grp_name?esc(h.grp_name):(isAuto?'':`群 ${esc(h.chat_id)}`);
+      const who=isAuto
+        ? `自动化 · ${actN}${h.chat_id&&h.chat_id!=='0'?` → ${esc(h.chat_id)}`:''}`
+        : `${grp} · 规则 #${h.rule_id}`;
       return `<div class="logitem">
         <span class="tm">${fmt(h.ts)}</span>
-        <span class="msg"><span class="badge ${h.action}">${({signin:'签到',grabcodes:'抢注',redpacket:'抢红包'})[h.action]||(h.action==='react'?'表情':h.action==='both'?'回复+表情':'回复')}</span>
-        ${h.rule_id<0?'':`群 ${h.chat_id} · `}${src}${h.msg_id&&h.rule_id<0?` · 消息 ${h.msg_id}`:''}</span>
+        <span class="msg"><span class="badge ${h.action}">${actN}</span> ${who}</span>
+        ${h.content?`<div class="lc">💬 ${esc(h.content.length>60?h.content.slice(0,60)+'…':h.content)}</div>`:''}
+        ${h.reply?`<div class="lr">⚡ ${esc(h.reply.length>60?h.reply.slice(0,60)+'…':h.reply)}</div>`:''}
       </div>`;
     }).join(''):'<div class="empty">还没有命中记录</div>';
   }catch(e){toast(e.message,1)}
