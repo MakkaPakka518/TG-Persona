@@ -227,10 +227,12 @@ def load_ai_cfg():
 
 
 async def recognize_image_text(image_bytes, length=0):
-    """验证码识别:优先 OpenAI 兼容视觉 API,未配置则本地 ddddocr;返回识别文本或 ''"""
+    """验证码识别:ai_enabled / ocr_enabled 双开关;都开启时 AI 优先,失败自动兜底本地 OCR"""
     if not _ai_cfg:
         load_ai_cfg()
-    if _ai_cfg.get("base") and _ai_cfg.get("key"):
+    ai_on = get_setting("ai_enabled", "0") == "1"
+    ocr_on = get_setting("ocr_enabled", "1") == "1"
+    if ai_on and _ai_cfg.get("base") and _ai_cfg.get("key"):
         try:
             import base64 as _b64
             if httpx is None:
@@ -254,20 +256,27 @@ async def recognize_image_text(image_bytes, length=0):
                 )
                 d = r.json()
                 txt = (d["choices"][0]["message"]["content"] or "").strip()
-                return "".join(ch for ch in txt if ch.isalnum())[:16]
+                txt = "".join(ch for ch in txt if ch.isalnum())[:16]
+            if txt:
+                return txt
+            log.warning("AI 识别结果为空")
         except Exception as e:
             log.warning("AI 识别失败: %s", e)
-    # 本地 ddddocr
-    try:
-        global _ocr
-        if _ocr is None:
-            import ddddocr
-            _ocr = ddddocr.DdddOcr(show_ad=False)
-        res = _ocr.classification(image_bytes)
-        return "".join(ch for ch in (res or "") if ch.isalnum())[:16]
-    except Exception as e:
-        log.warning("本地 OCR 不可用(可配置 AI 接口): %s", e)
-        return ""
+        if not ocr_on:
+            return ""   # AI 开但失败,且本地关 → 不再兜底
+    if ocr_on:
+        # 本地 ddddocr
+        try:
+            global _ocr
+            if _ocr is None:
+                import ddddocr
+                _ocr = ddddocr.DdddOcr(show_ad=False)
+            res = _ocr.classification(image_bytes)
+            return "".join(ch for ch in (res or "") if ch.isalnum())[:16]
+        except Exception as e:
+            log.warning("本地 OCR 不可用(可开启 AI 识别): %s", e)
+            return ""
+    return ""   # 两个开关都关
 
 
 def gen_captcha():
@@ -711,10 +720,10 @@ async def run_signin(a):
 
 
 async def _select_btn_ai(btns, hint):
-    """AI 从按钮列表中选择应点击的按钮,返回按钮对象;无 AI 配置返回 None"""
+    """AI 从按钮列表中选择应点击的按钮,返回按钮对象;AI 未开启或无配置返回 None"""
     if not _ai_cfg:
         load_ai_cfg()
-    if not (_ai_cfg.get("base") and _ai_cfg.get("key")):
+    if get_setting("ai_enabled", "0") != "1" or not (_ai_cfg.get("base") and _ai_cfg.get("key")):
         return None
     flat = [b.text for row in btns for b in row]
     if not flat:
@@ -1453,10 +1462,10 @@ async def delete_rule(rid: int):
 # ---------- 设置 ----------
 SETTING_KEYS = ["cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar",
                 "notify_bark", "notify_bt", "notify_bc", "notify_on_success", "notify_on_fail",
-                "ai_base", "ai_key", "ai_model",
+                "ai_base", "ai_key", "ai_model", "ai_enabled", "ocr_enabled",
                 "flock_enabled", "flock_count", "flock_minutes", "flock_pool"]
 DEFAULTS = {"cooldown": "20", "delay": "1.0 3.0", "ignore_bots": "1", "theme": "dark",
-            "flock_count": "5", "flock_minutes": "5"}
+            "flock_count": "5", "flock_minutes": "5", "ocr_enabled": "1"}
 
 
 @app.get("/api/settings")

@@ -498,16 +498,20 @@ button.btn,button.ghost,button.danger{min-height:44px}
       </div>
     </div>
     <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M7 21h10M12 17a5 5 0 0 0 5-5V5a2 2 0 0 0-4 0v6M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7"/></svg>AI 验证码识别</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M7 21h10M12 17a5 5 0 0 0 5-5V5a2 2 0 0 0-4 0v6M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7"/></svg>验证码识别</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <label>API 地址(OpenAI 兼容,如 https://api.openai.com/v1)</label>
+        <div class="flex" style="gap:18px">
+          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sAiOn" style="width:auto"> 启用 AI 识别</label>
+          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sOcrOn" style="width:auto"> 启用本地 OCR</label>
+        </div>
+        <label style="margin-top:12px">AI API 地址(OpenAI 兼容,如 https://api.openai.com/v1)</label>
         <input type="text" id="sAiBase" placeholder="https://api.openai.com/v1">
-        <label>API Key</label>
+        <label>AI API Key</label>
         <input type="text" id="sAiKey" placeholder="sk-...">
-        <label>模型名</label>
+        <label>AI 模型名</label>
         <input type="text" id="sAiModel" placeholder="gpt-4o-mini">
         <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
-        <div class="hint">自定义任务里的「验证码」步骤用它识别;不配置则用服务器本地 OCR(ddddocr),VPS 已自动安装</div>
+        <div class="hint">两个开关独立可选:都开启时 AI 优先,识别失败自动兜底本地 OCR;只开一个则只走该通道;全关时验证码步骤会提示未启用。AI 需填 API 地址 + Key + 模型</div>
       </div>
     </div>
     <div class="card fold">
@@ -908,6 +912,8 @@ async function loadSettings(){
     $('#sBc').value=s.notify_bc||'';
     $('#sNok').checked=s.notify_on_success==='1';
     $('#sNof').checked=s.notify_on_fail==='1';
+    $('#sAiOn').checked=s.ai_enabled==='1';
+    $('#sOcrOn').checked=s.ocr_enabled!=='0';
     $('#sAiBase').value=s.ai_base||'';
     $('#sAiKey').value=s.ai_key||'';
     $('#sAiModel').value=s.ai_model||'';
@@ -929,6 +935,8 @@ async function saveSettings(){
       notify_bc:$('#sBc').value.trim(),
       notify_on_success:$('#sNok').checked?'1':'0',
       notify_on_fail:$('#sNof').checked?'1':'0',
+      ai_enabled:$('#sAiOn').checked?'1':'0',
+      ocr_enabled:$('#sOcrOn').checked?'1':'0',
       ai_base:$('#sAiBase').value.trim(),
       ai_key:$('#sAiKey').value.trim(),
       ai_model:$('#sAiModel').value.trim(),
