@@ -133,6 +133,9 @@ def db_init():
         ("custom_steps", "TEXT DEFAULT ''"),
         ("chain_retry", "INTEGER DEFAULT 1"),
         ("signin_captcha", "INTEGER DEFAULT 0"),
+        ("btn_emoji", "TEXT DEFAULT ''"),
+        ("click_times", "INTEGER DEFAULT 1"),
+        ("click_interval", "INTEGER DEFAULT 300"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -842,17 +845,32 @@ def render_placeholders(s):
     return s.replace("{uuid}", secrets.token_hex(8))
 
 
-def _find_btn(btns, btn_text):
-    """按文字找按钮;btn_text 留空则自动匹配签到/打卡/确认等"""
+def _norm_emoji(x):
+    return str(x or "").replace("\ufe0f", "").replace("\ufe0e", "").strip()
+
+
+def _find_btn(btns, btn_text, btn_emoji=""):
+    """找按钮:先看表情(文字会变、图标不变),再看文字;都没配就自动匹配"""
+    emojis = [_norm_emoji(x) for x in re.split(r"[,，\s]", str(btn_emoji or "")) if _norm_emoji(x)]
     texts = [x.strip() for x in re.split(r"[,，]", str(btn_text or "")) if x.strip()]
-    for row in btns:
-        for b in row:
-            t = b.text or ""
-            if texts:
-                if any(k.lower() in t.lower() for k in texts):
-                    return b
-            elif re.search(r"签到|打卡|确认|领取|√|收下|完成", t):
+    rows = [b for row in btns for b in row]
+    if emojis:
+        for b in rows:
+            t = _norm_emoji(b.text or "")
+            if any(e and e in t for e in emojis):
                 return b
+    if texts:
+        for b in rows:
+            t = b.text or ""
+            if any(k.lower() in t.lower() for k in texts):
+                return b
+        return None
+    if emojis:
+        return None
+    for b in rows:
+        t = b.text or ""
+        if re.search(r"签到|打卡|确认|领取|√|收下|完成|🧧|🎁|📅", t):
+            return b
     return None
 
 
@@ -914,12 +932,25 @@ async def run_signin(a):
         try:
             await asyncio.sleep(1.6)
             _, btns = await _find_latest_buttons(ent)
-            b = _find_btn(btns, a["btn_text"])
+            b = _find_btn(btns, a["btn_text"], a["btn_emoji"])
             if b:
-                await b.click()
+                times = max(1, min(int(a["click_times"] or 1), 20))
+                gap = max(50, min(int(a["click_interval"] or 300), 3000)) / 1000.0
+                for i in range(times):
+                    if i:
+                        await asyncio.sleep(gap)
+                        # 每点一次消息会更新,重新取最新按钮再点
+                        try:
+                            _, btns2 = await _find_latest_buttons(ent)
+                            nb = _find_btn(btns2, a["btn_text"], a["btn_emoji"])
+                            if nb:
+                                b = nb
+                        except Exception:
+                            pass
+                    await b.click()
                 clicked_btn = True
                 btn_text_clicked = getattr(b, "text", "") or ""
-                log.info("签到点击按钮: %s", b.text)
+                log.info("签到点击按钮: %s ×%s", b.text, times)
         except errors.FloodWaitError as e:
             log.warning("点按钮限流,等待 %ss", e.seconds)
             await asyncio.sleep(e.seconds + 1)
@@ -985,7 +1016,8 @@ async def run_signin(a):
     add_hit("signin", not (fail or ok is False), chat_id=target, rule_id=-a["id"], grp_name=a["name"],
             content=cmd, reply=reply_txt or desc, sender="",
             detail={"kind": "signin", "task": a["name"], "bot": target, "command": cmd,
-                    "reply": reply_txt, "button": btn_text_clicked, "captcha": cap_ans,
+                    "reply": reply_txt, "button": btn_text_clicked,
+                    "clicks": (int(a["click_times"] or 1) if a["click_btn"] else 0), "captcha": cap_ans,
                     "points": points, "note": desc})
     log.info("签到%s 任务=%s 目标=%s", "失败" if fail or ok is False else "成功", a["name"], target)
 
@@ -1676,6 +1708,9 @@ class AutoIn(BaseModel):
     win_end: str = "12:00"        # signin: 窗口结束
     click_btn: int = 0            # signin: 签到后自动点按钮
     btn_text: str = ""            # signin: 按钮文字(留空自动匹配)
+    btn_emoji: str = ""           # signin: 按钮里的表情(文字会变、图标不变时用它)
+    click_times: int = 1          # signin: 连点次数
+    click_interval: int = 300     # signin: 连点间隔(毫秒)
     success_kw: str = ""          # signin: 成功关键词
     fail_kw: str = ""             # signin: 失败关键词(回复含它判失败)
     points_pat: str = ""          # signin: 积分提取正则
@@ -1705,6 +1740,10 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "时间窗口格式需为 hh:mm")
         if body.retries < 0 or body.retries > 5:
             raise HTTPException(400, "重试次数需在 0-5 之间")
+        if body.click_times < 1 or body.click_times > 20:
+            raise HTTPException(400, "连点次数需在 1-20 之间")
+        if body.click_interval < 50 or body.click_interval > 3000:
+            raise HTTPException(400, "连点间隔需在 50-3000 毫秒之间")
     if body.type == "grabcodes" and not body.reply_text.strip():
         raise HTTPException(400, "抢注需要填写动作文本(支持 {code} 占位符)")
     if body.type == "grabcodes" and body.poll_interval:
@@ -1724,7 +1763,8 @@ def _valid_auto(body: AutoIn):
         raise HTTPException(400, "冷却秒数无效")
 
 
-_AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
+_AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
+              "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
               "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled")
 
 
@@ -1732,7 +1772,8 @@ def _auto_vals(body: AutoIn, extra=None):
     return [
         body.type, body.name.strip(), body.target.strip(), body.command.strip(),
         body.win_start.strip(), body.win_end.strip(), body.click_btn,
-        body.btn_text.strip(), body.success_kw.strip(), body.fail_kw.strip(),
+        body.btn_text.strip(), body.btn_emoji.strip(), body.click_times, body.click_interval,
+        body.success_kw.strip(), body.fail_kw.strip(),
         body.points_pat.strip(), body.is_chat, body.retries, body.signin_captcha,
         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
         body.poll_interval, body.custom_steps.strip(), body.chain_retry,
