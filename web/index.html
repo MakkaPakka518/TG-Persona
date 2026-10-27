@@ -254,7 +254,7 @@ button.btn,button.ghost,button.danger{min-height:44px}
   <!-- 自动化 -->
   <section id="tab-autos">
     <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>自动化</h2>
-    <div class="sub">定时签到 · 抢注邀请码 · 抢红包</div>
+    <div class="sub">定时签到 · 抢注邀请码 · 抢红包 · 自定义多步任务</div>
 
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12a9 9 0 1 1-9-9"/></svg>签到任务</span><span class="mono" id="aCntSign">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
@@ -266,8 +266,9 @@ button.btn,button.ghost,button.danger{min-height:44px}
           <input type="text" id="sName" placeholder="如: 某站每日签到">
           <label>目标机器人(@username 或群ID)</label>
           <input type="text" id="sTarget" placeholder="如: @checkin_bot">
-          <label>签到命令(支持 {num:N} {word:N} {alpha:N} {uuid} 随机占位符)</label>
-          <input type="text" id="sCmd" placeholder="如: /checkin {num:4}">
+          <label style="display:flex;align-items:center;gap:8px;margin-top:4px"><input type="checkbox" id="sIsChat" style="width:auto"> 目标是群组(命令发到群里)</label>
+          <label>签到命令(多条用 | 分隔随机选一条;支持 {num:N} {word:N} {alpha:N} {uuid} 随机占位符)</label>
+          <input type="text" id="sCmd" placeholder="如: /checkin {num:4} | /daily">
           <div class="flex">
             <div><label>每天时间窗口(开始)</label><input type="text" id="sWinStart" placeholder="08:00" value="08:00"></div>
             <div><label>窗口(结束)</label><input type="text" id="sWinEnd" placeholder="12:00" value="12:00"></div>
@@ -279,6 +280,10 @@ button.btn,button.ghost,button.danger{min-height:44px}
           </div>
           <div class="flex">
             <div><label>成功关键词(选填,机器人回复含它才算成功)</label><input type="text" id="sKw" placeholder="如: 成功,已签到"></div>
+            <div><label>失败关键词(选填,回复含它判失败并通知)</label><input type="text" id="sFw" placeholder="如: 失败,已签到过"></div>
+          </div>
+          <div class="flex">
+            <div><label>积分提取正则(选填,展示积分)</label><input type="text" id="sPts" placeholder="如: 积分[:：](\d+)"></div>
             <div><label>发送失败重试(0-5)</label><input type="number" id="sRetries" value="2" min="0" max="5"></div>
           </div>
           <div class="flex" style="margin-top:14px">
@@ -311,9 +316,49 @@ button.btn,button.ghost,button.danger{min-height:44px}
           <div class="flex">
             <div><label>同群冷却(秒)</label><input type="number" id="gCd" value="30" min="0"></div>
           </div>
+          <div style="border-top:1px dashed var(--line);margin:12px 0;padding-top:12px">
+            <label style="font-weight:600">轮询模式(选填,主动探测开注)</label>
+            <div class="hint" style="margin-bottom:8px">每隔 N 秒主动给机器人发探测命令,回复出现开注关键词时立刻执行注册动作</div>
+            <label>轮询机器人(@username)</label>
+            <input type="text" id="gBot" placeholder="如: @invite_bot">
+            <div class="flex">
+              <div><label>探测命令</label><input type="text" id="gProbe" value="/start"></div>
+              <div><label>轮询间隔(秒,0=关闭)</label><input type="number" id="gPoll" value="0" min="0" max="86400"></div>
+            </div>
+          </div>
           <div class="flex" style="margin-top:14px">
             <button class="btn" type="submit">保存</button>
             <button class="ghost" type="button" onclick="cancelAutoEdit('grabcodes')" id="gCancel" style="display:none">取消编辑</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card fold">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>自定义任务</span><span class="mono" id="aCntCustom">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div id="aListCustom"></div>
+        <div class="empty" id="aEmptyCustom">暂无自定义任务,下面新增一个</div>
+        <form onsubmit="return saveAuto('custom')">
+          <label>任务名称</label>
+          <input type="text" id="cName" placeholder="如: 注册流程">
+          <label>目标(@机器人 或群ID)</label>
+          <input type="text" id="cTarget" placeholder="如: @invite_bot">
+          <label>步骤(JSON 数组,按顺序执行)</label>
+          <textarea id="cSteps" rows="5" placeholder='[{"t":"send","v":"/start"},{"t":"wait","v":"2000"},{"t":"until","v":"","success":"欢迎","timeout":30000}]'></textarea>
+          <div class="flex" style="gap:6px;flex-wrap:wrap">
+            <button class="ghost" type="button" style="flex:none;min-height:34px" onclick="fillStep('send')">+ 发消息</button>
+            <button class="ghost" type="button" style="flex:none;min-height:34px" onclick="fillStep('wait')">+ 等待</button>
+            <button class="ghost" type="button" style="flex:none;min-height:34px" onclick="fillStep('click')">+ 点按钮</button>
+            <button class="ghost" type="button" style="flex:none;min-height:34px" onclick="fillStep('captcha')">+ 验证码</button>
+            <button class="ghost" type="button" style="flex:none;min-height:34px" onclick="fillStep('until')">+ 等回复</button>
+          </div>
+          <div class="flex">
+            <div><label>整条失败重试(1-5)</label><input type="number" id="cRetry" value="1" min="1" max="5"></div>
+          </div>
+          <div class="flex" style="margin-top:14px">
+            <button class="btn" type="submit">保存</button>
+            <button class="ghost" type="button" onclick="cancelAutoEdit('custom')" id="cCancel" style="display:none">取消编辑</button>
           </div>
         </form>
       </div>
@@ -437,6 +482,48 @@ button.btn,button.ghost,button.danger{min-height:44px}
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>Telegram 账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b"><div id="tgCard"><div class="empty">加载中...</div></div></div>
     </div>
+    <div class="card fold">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>通知推送</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <label>Bark 推送(Bark Key 或完整 URL,如 https://api.day.app/xxxx)</label>
+        <input type="text" id="sBark" placeholder="xxxx 或 https://api.day.app/xxxx">
+        <div class="flex">
+          <div><label>Telegram Bot Token</label><input type="text" id="sBt" placeholder="123456:ABC..."></div>
+          <div><label>接收 Chat ID</label><input type="text" id="sBc" placeholder="123456789"></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="sNok" style="width:auto"> 成功时推送</label>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="checkbox" id="sNof" style="width:auto"> 失败时推送</label>
+        <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+        <div class="hint">配置任一(Bark 或 TG Bot)即可;签到成功/失败、抢注命中、自定义任务结束时按开关推送</div>
+      </div>
+    </div>
+    <div class="card fold">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M7 21h10M12 17a5 5 0 0 0 5-5V5a2 2 0 0 0-4 0v6M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7"/></svg>AI 验证码识别</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <label>API 地址(OpenAI 兼容,如 https://api.openai.com/v1)</label>
+        <input type="text" id="sAiBase" placeholder="https://api.openai.com/v1">
+        <label>API Key</label>
+        <input type="text" id="sAiKey" placeholder="sk-...">
+        <label>模型名</label>
+        <input type="text" id="sAiModel" placeholder="gpt-4o-mini">
+        <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+        <div class="hint">自定义任务里的「验证码」步骤用它识别;不配置则用服务器本地 OCR(ddddocr),VPS 已自动安装</div>
+      </div>
+    </div>
+    <div class="card fold">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>自动水群(从众)</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sFl" style="width:auto"> 开启从众模式(默认关闭)</label>
+        <div class="flex" style="margin-top:10px">
+          <div><label>同文本出现 N 条后跟风</label><input type="number" id="sFlCnt" min="2" max="30" value="5"></div>
+          <div><label>统计窗口(分钟)</label><input type="number" id="sFlMin" min="1" max="60" value="5"></div>
+        </div>
+        <label>跟风话术池(逗号分隔,随机选一条)</label>
+        <input type="text" id="sFlPool" placeholder="哈哈,确实,同意,+1,蹲一个">
+        <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+        <div class="hint">监听群内同一句话短时间出现多人的,你也跟一条,像真人一样融入群聊;命令类消息不会跟</div>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -482,20 +569,22 @@ function foldToggle(el){
   el.closest('.fold').classList.toggle('open');
 }
 
-// ---------- 自动化 (签到/抢注/抢红包) ----------
+// ---------- 自动化 (签到/抢注/抢红包/自定义) ----------
 let autos=[], editAuto=null;
-const AUTO_TYPE={signin:'签到',grabcodes:'抢注',redpacket:'抢红包'};
+const AUTO_TYPE={signin:'签到',grabcodes:'抢注',redpacket:'抢红包',custom:'自定义'};
 const ACTIONS={signin:'reply',grabcodes:'reply',redpacket:'reply'};
+const AUTO_MAP={signin:['Sign','签到'],grabcodes:['Grab','抢注'],redpacket:['Pack','抢红包'],custom:['Custom','自定义']};
 
 async function loadAutos(){
   try{autos=(await api('/api/autos')).autos||[]}catch(e){autos=[]}
-  ['signin','grabcodes','redpacket'].forEach(t=>renderAutoList(t));
+  Object.keys(AUTO_TYPE).forEach(t=>renderAutoList(t));
 }
 function renderAutoList(type){
+  const [suffix]=AUTO_MAP[type];
   const list=autos.filter(a=>a.type===type);
-  $('#aCnt'+({signin:'Sign',grabcodes:'Grab',redpacket:'Pack'})[type]).textContent=list.length+' 个';
-  $('#aEmpty'+({signin:'Sign',grabcodes:'Grab',redpacket:'Pack'})[type]).style.display=list.length?'none':'block';
-  $('#aList'+({signin:'Sign',grabcodes:'Grab',redpacket:'Pack'})[type]).innerHTML=list.map(a=>`
+  $('#aCnt'+suffix).textContent=list.length+' 个';
+  $('#aEmpty'+suffix).style.display=list.length?'none':'block';
+  $('#aList'+suffix).innerHTML=list.map(a=>`
     <div class="item">
       <div class="grow">
         <div class="t">${esc(a.name)} <span class="tag ${a.enabled?'':'off'}">${AUTO_TYPE[a.type]}</span></div>
@@ -504,15 +593,21 @@ function renderAutoList(type){
       <div class="switch ${a.enabled?'on':''}" style="flex:none" onclick="toggleAuto(${a.id})"></div>
     </div>
     <div class="flex" style="gap:8px;margin:-4px 0 10px">
-      ${a.type==='signin'?`<button class="ghost" style="flex:1;min-height:36px" onclick="runAuto(${a.id})">立即签到</button>`:''}
+      ${a.type==='signin'||a.type==='custom'?`<button class="ghost" style="flex:1;min-height:36px" onclick="runAuto(${a.id})">立即执行</button>`:''}
       <button class="ghost" style="flex:1;min-height:36px" onclick="editAutoItem(${a.id})">编辑</button>
+      <button class="ghost" style="flex:1;min-height:36px" onclick="dupAuto(${a.id})">复制</button>
       <button class="danger" style="flex:1;min-height:36px" onclick="delAuto(${a.id})">删除</button>
     </div>`).join('');
 }
 function autoDesc(a){
-  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · 每天 ${esc(a.win_start)}~${esc(a.win_end)}${a.click_btn?' · 点按钮':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.last_at?' · 今日已签':''}`;
-  if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}`;
-  return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
+  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · 每天 ${esc(a.win_start)}~${esc(a.win_end)}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.last_at?' · 今日已签':''}`;
+  if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}${a.poll_interval>0?' · 轮询'+a.poll_interval+'s@'+esc(a.target):''}`;
+  if(a.type==='redpacket')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
+  return `${esc(a.target||'--')} · ${(a.custom_steps||'').split('"t"').length-1} 步${a.chain_retry>1?' · 重试'+a.chain_retry:''}`;
+}
+function dupAuto(id){
+  const a=autos.find(x=>x.id===id);if(!a)return;
+  api('/api/autos/'+id+'/duplicate',{method:'POST'}).then(()=>{toast('已复制「'+a.name+'」');loadAutos()}).catch(e=>toast(e.message,1));
 }
 function editAutoItem(id){
   const a=autos.find(x=>x.id===id);if(!a)return;
@@ -520,28 +615,36 @@ function editAutoItem(id){
   const t=a.type;
   if(t==='signin'){
     $('#sName').value=a.name;$('#sTarget').value=a.target;$('#sCmd').value=a.command;
+    $('#sIsChat').checked=!!a.is_chat;
     $('#sWinStart').value=a.win_start;$('#sWinEnd').value=a.win_end;
     $('#sClickBtn').checked=!!a.click_btn;
     $('#sBtnWrap').classList.toggle('hidden',!a.click_btn);
     $('#sBtnText').value=a.btn_text||'';
     $('#sKw').value=a.success_kw||'';
+    $('#sFw').value=a.fail_kw||'';
+    $('#sPts').value=a.points_pat||'';
     $('#sRetries').value=a.retries!=null?a.retries:2;
     $('#sCancel').style.display='inline-block';
   }else if(t==='grabcodes'){
     $('#gName').value=a.name;$('#gGroups').value=a.groups;$('#gKeywords').value=a.keywords;
     $('#gText').value=a.reply_text;$('#gCd').value=a.cooldown;
+    $('#gBot').value=a.target||'';$('#gProbe').value=a.command||'/start';$('#gPoll').value=a.poll_interval||0;
     pickGrabAct(a.action);$('#gCancel').style.display='inline-block';
+  }else if(t==='custom'){
+    $('#cName').value=a.name;$('#cTarget').value=a.target;$('#cSteps').value=a.custom_steps||'[]';
+    $('#cRetry').value=a.chain_retry||1;$('#cCancel').style.display='inline-block';
   }else{
     $('#pName').value=a.name;$('#pGroups').value=a.groups;$('#pKeywords').value=a.keywords;
     $('#pCd').value=a.cooldown;$('#pCancel').style.display='inline-block';
   }
-  $(editAuto.type==='signin'?'#sName':editAuto.type==='grabcodes'?'#gName':'#pName').scrollIntoView({behavior:'smooth'});
+  $(editAuto.type==='signin'?'#sName':editAuto.type==='grabcodes'?'#gName':editAuto.type==='custom'?'#cName':'#pName').scrollIntoView({behavior:'smooth'});
   toast('编辑中,改完点保存');
 }
 function cancelAutoEdit(t){
   editAuto=null;
-  ({signin:()=>{$('#sName').value='';$('#sTarget').value='';$('#sCmd').value='';$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sKw').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
-    grabcodes:()=>{$('#gName').value='';$('#gGroups').value='';$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';pickGrabAct('reply');$('#gCancel').style.display='none'},
+  ({signin:()=>{$('#sName').value='';$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
+    grabcodes:()=>{$('#gName').value='';$('#gGroups').value='';$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
+    custom:()=>{$('#cName').value='';$('#cTarget').value='';$('#cSteps').value='[]';$('#cRetry').value=1;$('#cCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';$('#pGroups').value='';$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'}})[t]();
 }
 function pickGrabAct(v){
@@ -549,17 +652,43 @@ function pickGrabAct(v){
   $('#gActReply').classList.toggle('ghost',v!=='reply');$('#gActReply').classList.toggle('btn',v==='reply');
   $('#gActSend').classList.toggle('ghost',v!=='send');$('#gActSend').classList.toggle('btn',v==='send');
 }
+const STEP_HINTS={
+  send:'{"t":"send","v":"/start"}',
+  wait:'{"t":"wait","v":"2000"}',
+  click:'{"t":"click","v":"按钮文字","any":false,"ai":false}',
+  captcha:'{"t":"captcha","v":"4","send":""}',
+  until:'{"t":"until","success":"成功词","fail":"失败词","timeout":30000}'
+};
+function fillStep(k){
+  try{
+    const cur=JSON.parse($('#cSteps').value.trim()||'[]');
+    if(!Array.isArray(cur))throw 0;
+    cur.push(JSON.parse(STEP_HINTS[k]));
+    $('#cSteps').value=JSON.stringify(cur,null,1);
+  }catch(e){toast('当前步骤不是合法 JSON,请先修正',1)}
+}
 async function saveAuto(type){
   let body,url='/api/autos';
   if(type==='signin'){
     body={type,name:$('#sName').value.trim(),target:$('#sTarget').value.trim(),command:$('#sCmd').value.trim(),
+      is_chat:$('#sIsChat').checked?1:0,
       win_start:$('#sWinStart').value.trim(),win_end:$('#sWinEnd').value.trim(),click_btn:$('#sClickBtn').checked?1:0,
-      btn_text:$('#sBtnText').value.trim(),success_kw:$('#sKw').value.trim(),retries:+$('#sRetries').value||2};
+      btn_text:$('#sBtnText').value.trim(),success_kw:$('#sKw').value.trim(),fail_kw:$('#sFw').value.trim(),
+      points_pat:$('#sPts').value.trim(),retries:+$('#sRetries').value||2};
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
   }else if(type==='grabcodes'){
     body={type,name:$('#gName').value.trim(),groups:$('#gGroups').value.trim(),keywords:$('#gKeywords').value.trim(),
-      action:ACTIONS.grabcodes,reply_text:$('#gText').value.trim(),cooldown:+$('#gCd').value||30};
+      action:ACTIONS.grabcodes,reply_text:$('#gText').value.trim(),cooldown:+$('#gCd').value||30,
+      target:$('#gBot').value.trim(),command:$('#gProbe').value.trim()||'/start',poll_interval:+$('#gPoll').value||0};
     if(!body.name||!body.reply_text)return toast('请填写名称和动作文本',1);
+    if(body.poll_interval&&!body.target)return toast('轮询模式需填写轮询机器人',1);
+  }else if(type==='custom'){
+    let steps;
+    try{steps=JSON.parse($('#cSteps').value.trim()||'[]')}catch(e){return toast('步骤不是合法 JSON',1)}
+    if(!Array.isArray(steps)||!steps.length)return toast('至少配置一个步骤',1);
+    body={type,name:$('#cName').value.trim(),target:$('#cTarget').value.trim(),custom_steps:JSON.stringify(steps),
+      chain_retry:+$('#cRetry').value||1};
+    if(!body.name||!body.target)return toast('请填写名称和目标',1);
   }else{
     body={type,name:$('#pName').value.trim(),groups:$('#pGroups').value.trim(),keywords:$('#pKeywords').value.trim(),
       cooldown:+$('#pCd').value||5};
@@ -591,13 +720,31 @@ function showLoginGate(){
   $('#lgBody').innerHTML=`
     <label>面板访问密码</label>
     <input type="password" id="lgPw" placeholder="输入面板密码" onkeydown="if(event.key==='Enter')panelLogin()" autocomplete="off">
+    <label style="margin-top:12px">图形验证码</label>
+    <div class="flex" style="gap:10px;align-items:center">
+      <div style="flex:1.6"><input type="text" id="lgCap" placeholder="输入图中字符(不区分大小写)" onkeydown="if(event.key==='Enter')panelLogin()" autocomplete="off"></div>
+      <div style="flex:1"><img id="lgCapImg" alt="验证码" style="height:44px;border-radius:8px;display:block" onclick="reloadCaptcha()" title="点击刷新"></div>
+    </div>
     <button class="btn" style="width:100%;margin-top:16px" onclick="panelLogin()">进入面板</button>
-    <div class="hint">密码为部署时设置的面板密码(install.sh 询问项)</div>`;
+    <div class="hint">密码为部署时设置的面板密码(install.sh 询问项);验证码可点击图片刷新</div>`;
+  reloadCaptcha();
   setTimeout(()=>{const f=$('#lgPw');if(f)f.focus()},60);
 }
+async function reloadCaptcha(){
+  try{
+    const d=await api('/api/panel/captcha');
+    $('#lgCapImg').src='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(d.svg)));
+    $('#lgCap').value='';
+  }catch(e){}
+}
 async function panelLogin(){
-  try{await api('/api/panel/login',{method:'POST',body:JSON.stringify({password:$('#lgPw').value})});$('#loginGate').classList.add('hidden');bootstrap()}
-  catch(e){const el=$('#lgErr');el.textContent=e.message;el.style.display='block'}
+  try{
+    await api('/api/panel/login',{method:'POST',body:JSON.stringify({password:$('#lgPw').value,captcha:$('#lgCap').value.trim()})});
+    $('#loginGate').classList.add('hidden');bootstrap();
+  }catch(e){
+    const el=$('#lgErr');el.textContent=e.message;el.style.display='block';
+    reloadCaptcha();
+  }
 }
 
 // ---------- Telegram 账号登录(设置页内) ----------
@@ -756,6 +903,18 @@ async function loadSettings(){
     $('#ovCooldown').textContent=(s.cooldown||20)+'s';
     $('#ovDelay').textContent=(s.delay||'1.0 3.0').replace(' ','~')+'s';
     $('#ovIgnore').textContent=s.ignore_bots==='0'?'关':'开';
+    $('#sBark').value=s.notify_bark||'';
+    $('#sBt').value=s.notify_bt||'';
+    $('#sBc').value=s.notify_bc||'';
+    $('#sNok').checked=s.notify_on_success==='1';
+    $('#sNof').checked=s.notify_on_fail==='1';
+    $('#sAiBase').value=s.ai_base||'';
+    $('#sAiKey').value=s.ai_key||'';
+    $('#sAiModel').value=s.ai_model||'';
+    $('#sFl').checked=s.flock_enabled==='1';
+    $('#sFlCnt').value=s.flock_count||5;
+    $('#sFlMin').value=s.flock_minutes||5;
+    $('#sFlPool').value=s.flock_pool||'';
     if(s.theme)applyTheme(s.theme);  // 后端主题为准(跨设备同步)
   }catch(e){}
 }
@@ -764,7 +923,19 @@ async function saveSettings(){
     await api('/api/settings',{method:'POST',body:JSON.stringify({
       cooldown:+$('#sCooldown').value,
       delay:$('#sDelay').value.trim(),
-      ignore_bots:$('#sIgnore').checked?'1':'0'
+      ignore_bots:$('#sIgnore').checked?'1':'0',
+      notify_bark:$('#sBark').value.trim(),
+      notify_bt:$('#sBt').value.trim(),
+      notify_bc:$('#sBc').value.trim(),
+      notify_on_success:$('#sNok').checked?'1':'0',
+      notify_on_fail:$('#sNof').checked?'1':'0',
+      ai_base:$('#sAiBase').value.trim(),
+      ai_key:$('#sAiKey').value.trim(),
+      ai_model:$('#sAiModel').value.trim(),
+      flock_enabled:$('#sFl').checked?'1':'0',
+      flock_count:$('#sFlCnt').value||5,
+      flock_minutes:$('#sFlMin').value||5,
+      flock_pool:$('#sFlPool').value.trim()
     })});
     toast('设置已保存');loadSettings();
   }catch(e){toast(e.message,1)}

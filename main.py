@@ -23,6 +23,11 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+try:
+    import httpx
+except ImportError:
+    httpx = None  # 通知/AI 需要 httpx;缺失时降级 urllib
+
 from telethon import TelegramClient, errors, events
 from telethon.tl.functions.messages import SendReactionRequest
 from telethon.tl.types import ReactionEmoji
@@ -88,6 +93,12 @@ def db_init():
             action TEXT DEFAULT 'reply',        -- grabcodes: reply(回复消息) | send(发送命令)
             reply_text TEXT DEFAULT '',         -- 回复/命令文本,{code} 替换为提取的邀请码
             cooldown INTEGER DEFAULT 30,        -- 同群同任务冷却(秒)
+            poll_interval INTEGER DEFAULT 0,    -- grabcodes: 轮询探测开注间隔(秒,0=关闭仅监听)
+            custom_steps TEXT DEFAULT '',       -- custom: 多步任务 JSON
+            chain_retry INTEGER DEFAULT 1,      -- custom: 任务链级重试
+            fail_kw TEXT DEFAULT '',            -- signin: 失败关键词(回复含它判失败重试)
+            is_chat INTEGER DEFAULT 0,          -- signin: 目标是群组而非机器人
+            points_pat TEXT DEFAULT '',         -- signin: 积分提取正则(日志显示 +N)
             enabled INTEGER DEFAULT 1,
             last_at TEXT DEFAULT '',            -- 最近执行(签到存日期 YYYY-MM-DD,防当日重复)
             created_at INTEGER
@@ -95,7 +106,17 @@ def db_init():
         """
     )
     # 兼容旧库:补充新增列
-    for col, ddl in (("btn_text", "TEXT DEFAULT ''"), ("success_kw", "TEXT DEFAULT ''"), ("retries", "INTEGER DEFAULT 2")):
+    for col, ddl in (
+        ("btn_text", "TEXT DEFAULT ''"),
+        ("success_kw", "TEXT DEFAULT ''"),
+        ("retries", "INTEGER DEFAULT 2"),
+        ("fail_kw", "TEXT DEFAULT ''"),
+        ("is_chat", "INTEGER DEFAULT 0"),
+        ("points_pat", "TEXT DEFAULT ''"),
+        ("poll_interval", "INTEGER DEFAULT 0"),
+        ("custom_steps", "TEXT DEFAULT ''"),
+        ("chain_retry", "INTEGER DEFAULT 1"),
+    ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
@@ -137,6 +158,144 @@ handler_registered = False
 last_hit_ts = {}           # (chat_id, rule_id) -> 上次命中时间
 _running = {"paused": False}
 
+# 通知 / 验证码 / 水群 / AI 状态
+flock_buf = {}             # (chat_id, text) -> [ts1, ts2, ...] 相同消息时间戳(水群从众)
+captcha_holder = {"code": "", "ts": 0.0}   # 面板登录验证码
+_ocr = None                # ddddocr 实例(惰性加载)
+_ai_cfg = {}               # AI 验证码配置缓存
+
+def send_notify(title, text=""):
+    """失败/成功通知:Bark + TG Bot(可配置),后台异步发送不阻塞主流程"""
+    bark = str(get_setting("notify_bark", "") or "").strip()
+    bt = str(get_setting("notify_bt", "") or "").strip()
+    bc = str(get_setting("notify_bc", "") or "").strip()
+
+    async def _do():
+        try:
+            if bark:
+                import urllib.parse
+                url = bark.rstrip("/")
+                if "://" not in url:
+                    url = f"https://api.day.app/{url}"
+                payload = "/" + urllib.parse.quote(title) + "/" + urllib.parse.quote(text)
+                if httpx is not None:
+                    try:
+                        async with httpx.AsyncClient(timeout=8) as c:
+                            await c.post(url + payload, params={"group": "TG-Persona"})
+                    except Exception:
+                        import urllib.request
+                        urllib.request.urlopen(url + payload, timeout=8)
+                else:
+                    import urllib.request
+                    urllib.request.urlopen(url + payload, timeout=8)
+            if bt and bc:
+                if httpx is not None:
+                    async with httpx.AsyncClient(timeout=10) as c:
+                        await c.post(f"https://api.telegram.org/bot{bt}/sendMessage",
+                                     json={"chat_id": bc, "text": f"[TG-Persona] {title}\n{text}"})
+                else:
+                    import urllib.request
+                    import urllib.parse as _up
+                    req = urllib.request.Request(
+                        f"https://api.telegram.org/bot{bt}/sendMessage",
+                        data=json.dumps({"chat_id": bc, "text": f"[TG-Persona] {title}\n{text}"}).encode(),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    urllib.request.urlopen(req, timeout=10)
+        except Exception as e:
+            log.warning("通知发送失败: %s", e)
+
+    try:
+        asyncio.get_event_loop().create_task(_do())
+    except Exception:
+        pass
+
+
+def notify_event(kind, name, detail=""):
+    """kind: success/fail;按设置决定是否推送"""
+    key = "notify_on_success" if kind == "success" else "notify_on_fail"
+    if get_setting(key, "0") == "1":
+        send_notify(f"{'✅' if kind=='success' else '❌'} {name}", detail)
+
+
+def load_ai_cfg():
+    _ai_cfg.update({
+        "base": str(get_setting("ai_base", "") or "").strip(),
+        "key": str(get_setting("ai_key", "") or "").strip(),
+        "model": str(get_setting("ai_model", "") or "").strip(),
+    })
+
+
+async def recognize_image_text(image_bytes, length=0):
+    """验证码识别:优先 OpenAI 兼容视觉 API,未配置则本地 ddddocr;返回识别文本或 ''"""
+    if not _ai_cfg:
+        load_ai_cfg()
+    if _ai_cfg.get("base") and _ai_cfg.get("key"):
+        try:
+            import base64 as _b64
+            if httpx is None:
+                raise RuntimeError("httpx 未安装")
+            b64 = _b64.b64encode(image_bytes).decode()
+            async with httpx.AsyncClient(timeout=30) as c:
+                r = await c.post(
+                    (_ai_cfg["base"].rstrip("/")) + "/chat/completions",
+                    headers={"Authorization": f"Bearer {_ai_cfg['key']}"},
+                    json={
+                        "model": _ai_cfg.get("model") or "gpt-4o-mini",
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": f"识别图片中的验证码文字,只输出字符本身,不要任何解释{'，长度应为'+str(length) if length else ''}"},
+                                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                            ],
+                        }],
+                        "max_tokens": 20,
+                    },
+                )
+                d = r.json()
+                txt = (d["choices"][0]["message"]["content"] or "").strip()
+                return "".join(ch for ch in txt if ch.isalnum())[:16]
+        except Exception as e:
+            log.warning("AI 识别失败: %s", e)
+    # 本地 ddddocr
+    try:
+        global _ocr
+        if _ocr is None:
+            import ddddocr
+            _ocr = ddddocr.DdddOcr(show_ad=False)
+        res = _ocr.classification(image_bytes)
+        return "".join(ch for ch in (res or "") if ch.isalnum())[:16]
+    except Exception as e:
+        log.warning("本地 OCR 不可用(可配置 AI 接口): %s", e)
+        return ""
+
+
+def gen_captcha():
+    """生成面板登录图形验证码(SVG),答案存内存"""
+    import random as _r
+    code = "".join(_r.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=4))
+    captcha_holder["code"] = code
+    captcha_holder["ts"] = time.time()
+    # 简单 SVG:旋转字符 + 干扰线
+    chars = "".join(
+        f'<text x="{28+i*26}" y="{42}" font-size="30" font-family="Arial" font-weight="bold" fill="#{_r.choice(["4af","a4d","5ad","6cf","8e8"])}" transform="rotate({_r.randint(-18,18)} {28+i*26} 42)">{c}</text>'
+        for i, c in enumerate(code)
+    )
+    lines = "".join(
+        f'<line x1="{_r.randint(0,120)}" y1="{_r.randint(0,50)}" x2="{_r.randint(0,120)}" y2="{_r.randint(0,50)}" stroke="#666" stroke-width="1"/>'
+        for _ in range(6)
+    )
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="140" height="50" viewBox="0 0 140 50">'
+           f'<rect width="140" height="50" fill="#1b1e28" rx="8"/>{lines}{chars}</svg>')
+    return svg
+
+
+def check_captcha(ans):
+    if captcha_holder["code"] and ans.strip().upper() == captcha_holder["code"] and time.time() - captcha_holder["ts"] < 300:
+        captcha_holder["code"] = ""
+        return True
+    return False
+
 
 def panel_password():
     """面板密码:env PANEL_PASSWORD > data/panel_password.txt(首次自动生成)> 打印日志"""
@@ -171,11 +330,32 @@ async def on_group_message(event):
     if _running["paused"] or not event.is_group or event.out:
         return
     rows = conn.execute("SELECT chat_id FROM watched_groups").fetchall()
-    if not rows or str(event.chat_id) not in {r["chat_id"] for r in rows}:
+    watched = {r["chat_id"] for r in rows}
+    if not watched or str(event.chat_id) not in watched:
         return
     text = (event.raw_text or "").strip()
     if not text:
         return
+
+    # 自动水群(从众模式,默认关):5 分钟内同群同文本出现 N 次 → 跟一条话术
+    if get_setting("flock_enabled", "0") == "1" and not text.startswith("/"):
+        try:
+            count = max(2, min(int(get_setting("flock_count", "5")), 30))
+            minutes = max(1, min(int(get_setting("flock_minutes", "5")), 60))
+            key = (str(event.chat_id), text[:80])
+            ts_list = flock_buf.setdefault(key, [])
+            now = time.monotonic()
+            ts_list[:] = [t for t in ts_list if now - t < minutes * 60]
+            ts_list.append(now)
+            if len(ts_list) >= count:
+                flock_buf.pop(key, None)
+                pool = [p.strip() for p in re.split(r"[,，]", str(get_setting("flock_pool", "") or "")) if p.strip()]
+                if pool:
+                    await asyncio.sleep(random.uniform(1.0, 3.0))
+                    await event.reply(random.choice(pool))
+                    log.info("水群跟风 群=%s 消息=%s", event.chat_id, text[:40])
+        except Exception:
+            pass
 
     rules = conn.execute(
         "SELECT * FROM rules WHERE enabled=1 ORDER BY id"
@@ -347,6 +527,7 @@ async def on_auto_event(event):
                 else:
                     await event.reply(rt)
                 reply_desc = rt
+                notify_event("success", a["name"], f"群内命中邀请码并注册: {rt[:120]}")
             else:
                 reply_desc = ""
                 buttons = await event.get_buttons()
@@ -417,15 +598,35 @@ def _find_btn(btns, btn_text):
     return None
 
 
+def _pick_cmd(command):
+    """命令支持 | 分隔多条,随机选一条"""
+    parts = [p.strip() for p in str(command or "").split("|") if p.strip()]
+    return render_placeholders(random.choice(parts) if parts else str(command or "").strip())
+
+
+async def _fetch_reply(ent):
+    """取与目标最近的非自己消息文本(判定成功/失败/积分用)"""
+    try:
+        recent = await client.get_messages(ent, limit=5)
+        for m in recent:
+            if m.out:
+                continue
+            return (m.raw_text or ""), m
+    except Exception:
+        pass
+    return "", None
+
+
 async def run_signin(a):
-    """执行单条签到:发命令(支持占位符),可选点按钮,按成功关键词判定"""
+    """执行单条签到:发命令(多条随机|占位符),可选点按钮;成功/失败关键词判定,积分提取,失败重试"""
     target = str(a["target"] or "").strip()
-    cmd = render_placeholders(str(a["command"] or "").strip())
+    cmd = _pick_cmd(a["command"])
     if not target or not cmd:
         return
     ent = await resolve_entity(target)
     if ent is None:
         log.warning("签到目标解析失败: %s", target)
+        notify_event("fail", a["name"], f"签到目标解析失败: {target}")
         return
     retries = max(1, min(int(a["retries"] or 2), 5))
     sent = False
@@ -445,6 +646,7 @@ async def run_signin(a):
             await asyncio.sleep(2)
     if not sent:
         log.warning("签到最终失败(重试 %s 次): %s", retries, target)
+        notify_event("fail", a["name"], f"发送失败(重试{retries}次): {target}")
         return
 
     # 可选:点击回复按钮
@@ -466,31 +668,267 @@ async def run_signin(a):
         except Exception:
             log.exception("签到点按钮异常")
 
-    # 成功关键词判定:机器人回复含关键词才算成功
-    ok = True
+    # 成功/失败关键词判定 + 积分提取
+    ok, points, fail = True, "", False
     skw = str(a["success_kw"] or "").strip()
-    if skw:
-        try:
-            await asyncio.sleep(1.5)
-            recent = await client.get_messages(ent, limit=4)
-            bot_reply = next((m for m in recent if not m.out), None)
-            reply_txt = (bot_reply.raw_text or "") if bot_reply else ""
-            ok = skw.lower() in reply_txt.lower()
-            if not ok:
-                log.warning("签到未达成功条件(未找到「%s」),目标=%s", skw, target)
-        except Exception:
-            pass
-    desc = f"发送命令: {cmd}"
+    fkw = str(a["fail_kw"] or "").strip()
+    ppat = str(a["points_pat"] or "").strip()
+    reply_txt = ""
+    if skw or fkw or ppat:
+        await asyncio.sleep(1.5)
+        reply_txt, _ = await _fetch_reply(ent)
+        rl = reply_txt.lower()
+        if fkw and any(k.strip().lower() in rl for k in re.split(r"[,，]", fkw) if k.strip()):
+            ok, fail = False, True
+        elif skw:
+            ok = any(k.strip().lower() in rl for k in re.split(r"[,，]", skw) if k.strip())
+        if ppat:
+            try:
+                m = re.search(ppat, reply_txt)
+                if m:
+                    points = m.group(1) if m.groups() else m.group(0)
+            except re.error:
+                pass
+    desc = f"发送: {cmd}"
     if a["click_btn"]:
-        desc += " + 点击按钮"
-    if not ok:
+        desc += " + 点按钮"
+    if points:
+        desc += f" · 积分 {points}"
+    if fail:
+        desc += " (失败)"
+        notify_event("fail", a["name"], f"回复含失败词「{fkw}」: {reply_txt[:120]}")
+    elif ok is False:
         desc += " (未达成功条件)"
+        notify_event("fail", a["name"], f"未找到成功词「{skw}」: {reply_txt[:120]}")
+    else:
+        notify_event("success", a["name"], f"签到成功{('· 积分 '+points) if points else ''} · {target}")
     conn.execute(
         "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name) VALUES(?,?,?,?,?,?,?,?)",
         (int(time.time()), target, -a["id"], 0, "signin", cmd[:200], desc[:200], target),
     )
     conn.commit()
-    log.info("签到%s 任务=%s 目标=%s", "成功" if ok else "(结果未知)", a["name"], target)
+    log.info("签到%s 任务=%s 目标=%s", "失败" if fail or ok is False else "成功", a["name"], target)
+
+
+async def _select_btn_ai(btns, hint):
+    """AI 从按钮列表中选择应点击的按钮,返回按钮对象;无 AI 配置返回 None"""
+    if not _ai_cfg:
+        load_ai_cfg()
+    if not (_ai_cfg.get("base") and _ai_cfg.get("key")):
+        return None
+    flat = [b.text for row in btns for b in row]
+    if not flat:
+        return None
+    try:
+        if httpx is None:
+            raise RuntimeError("httpx 未安装")
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post(
+                (_ai_cfg["base"].rstrip("/")) + "/chat/completions",
+                headers={"Authorization": f"Bearer {_ai_cfg['key']}"},
+                json={
+                    "model": _ai_cfg.get("model") or "gpt-4o-mini",
+                    "messages": [{"role": "user", "content": (
+                        f"以下是一个 Telegram 内联键盘的按钮: {flat}\n"
+                        f"根据提示「{hint}」选择应点击的那个按钮,只输出按钮上的原文,不要任何解释"
+                    )}],
+                    "max_tokens": 30,
+                },
+            )
+            d = r.json()
+            ans = (d["choices"][0]["message"]["content"] or "").strip()
+        ans = ans.strip().strip('"').strip("'")
+        for row in btns:
+            for b in row:
+                if (b.text or "").strip() == ans or ans in (b.text or ""):
+                    return b
+    except Exception as e:
+        log.warning("AI 选按钮失败: %s", e)
+    return None
+
+
+async def _find_latest_buttons(ent, limit=6):
+    """取目标最近消息中带按钮的那条"""
+    try:
+        msgs = await client.get_messages(ent, limit=limit)
+        for m in msgs:
+            try:
+                btns = await m.get_buttons()
+            except Exception:
+                btns = []
+            if btns:
+                return m, btns
+    except Exception:
+        pass
+    return None, []
+
+
+async def run_custom(a):
+    """自定义多步任务:send/wait/click/captcha/until,链级重试"""
+    target = str(a["target"] or "").strip()
+    try:
+        steps = json.loads(a["custom_steps"] or "[]")
+    except Exception:
+        steps = []
+    if not target or not steps:
+        return
+    ent = await resolve_entity(target)
+    if ent is None:
+        log.warning("自定义任务目标解析失败: %s", target)
+        notify_event("fail", a["name"], f"目标解析失败: {target}")
+        return
+    chain = max(1, min(int(a["chain_retry"] or 1), 5))
+    final_desc, final_ok = "", False
+    for attempt in range(chain):
+        log_desc = []
+        ok = True
+        try:
+            for s in steps:
+                t = s.get("t")
+                if t == "send":
+                    text = render_placeholders(str(s.get("v") or ""))
+                    await client.send_message(ent, text)
+                    log_desc.append(f"发送「{text}」")
+                elif t == "wait":
+                    ms = max(0, int(s.get("v") or 1000))
+                    await asyncio.sleep(ms / 1000)
+                    log_desc.append(f"等待{ms}ms")
+                elif t == "click":
+                    m, btns = await _find_latest_buttons(ent)
+                    if not btns:
+                        raise Exception("未找到带按钮的消息")
+                    b = None
+                    if s.get("ai"):
+                        b = await _select_btn_ai(btns, str(s.get("v") or "下一步"))
+                    if not b and s.get("any") and btns and btns[0]:
+                        b = btns[0][0]
+                    if not b:
+                        b = _find_btn(btns, str(s.get("v") or ""))
+                    if not b:
+                        raise Exception("未找到匹配按钮")
+                    await b.click()
+                    log_desc.append(f"点击按钮「{b.text}」")
+                elif t == "captcha":
+                    length = max(1, min(int(s.get("v") or 4), 16))
+                    img = None
+                    try:
+                        msgs = await client.get_messages(ent, limit=5)
+                        for m in msgs:
+                            if getattr(m, "photo", None) or getattr(m, "media", None):
+                                img = await client.download_media(m, file=bytes)
+                                if img:
+                                    break
+                    except Exception:
+                        pass
+                    if not img:
+                        raise Exception("未找到验证码图片")
+                    ans = await recognize_image_text(img, length)
+                    if not ans:
+                        raise Exception("验证码识别失败(未配置 AI 或本地 OCR 不可用)")
+                    log_desc.append(f"识别验证码「{ans}」")
+                    send_txt = str(s.get("send") or "")
+                    if send_txt:
+                        await client.send_message(ent, render_placeholders(send_txt).replace("{code}", ans))
+                        log_desc.append(f"发送「{send_txt}」")
+                    else:
+                        await client.send_message(ent, ans)
+                elif t == "until":
+                    timeout = max(1, int(s.get("timeout") or 30000))
+                    succ = str(s.get("success") or "")
+                    fail = str(s.get("fail") or "")
+                    deadline = time.monotonic() + timeout / 1000
+                    matched, failed = False, False
+                    while time.monotonic() < deadline:
+                        rt, _ = await _fetch_reply(ent)
+                        rl = rt.lower()
+                        if fail and any(k.strip().lower() in rl for k in re.split(r"[,，]", fail) if k.strip()):
+                            failed = True
+                            break
+                        if succ and any(k.strip().lower() in rl for k in re.split(r"[,，]", succ) if k.strip()):
+                            matched = True
+                            break
+                        if not succ and not fail:
+                            matched = True
+                            break
+                        await asyncio.sleep(2)
+                    if failed:
+                        raise Exception(f"回复含失败词「{fail}」")
+                    if not matched:
+                        raise Exception(f"等待回复超时({timeout}ms)")
+                    log_desc.append(f"收到期望回复({succ or fail or '任意'})")
+        except Exception as e:
+            ok = False
+            log_desc.append(f"失败: {e}")
+        final_desc = " → ".join(log_desc)
+        if ok:
+            final_ok = True
+            break
+    hits_desc = final_desc[:200] or "执行完成"
+    conn.execute(
+        "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name) VALUES(?,?,?,?,?,?,?,?)",
+        (int(time.time()), target, -a["id"], 0, "custom", f"自定义任务: {a['name']}"[:200], hits_desc, target),
+    )
+    conn.commit()
+    if final_ok:
+        notify_event("success", a["name"], hits_desc)
+    else:
+        notify_event("fail", a["name"], hits_desc)
+    log.info("自定义任务%s 任务=%s 目标=%s", "成功" if final_ok else "失败", a["name"], target)
+
+
+# 抢注轮询(开注探测):每间隔给机器人发探测命令,回复含开注关键词即注册
+poll_last = {}
+poll_task = None
+
+
+async def poll_loop():
+    """轮询 grabcodes 任务:探测开注 → 自动注册"""
+    global poll_task
+    while True:
+        try:
+            if client is not None and tg_state["phase"] == "ready":
+                autos = conn.execute(
+                    "SELECT * FROM automations WHERE enabled=1 AND type='grabcodes' AND poll_interval>0 AND target!=''"
+                ).fetchall()
+                now = time.time()
+                for a in autos:
+                    interval = max(10, int(a["poll_interval"] or 60))
+                    if now - poll_last.get(a["id"], 0) < interval:
+                        continue
+                    ent = await resolve_entity(a["target"])
+                    if ent is None:
+                        continue
+                    probe = _pick_cmd(a["command"] or "/start")
+                    try:
+                        await client.send_message(ent, probe)
+                        await asyncio.sleep(2)
+                        rt, _ = await _fetch_reply(ent)
+                        if match_keywords(a["keywords"] or "开注,开放注册,邀请码,发码,注册,开放", rt):
+                            reg = render_placeholders(
+                                str(a["reply_text"] or "").replace("{code}", extract_code(rt) or "REG")
+                            )
+                            if reg:
+                                await client.send_message(ent, reg)
+                                grp_name = a["target"]
+                                conn.execute(
+                                    "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name) VALUES(?,?,?,?,?,?,?,?)",
+                                    (int(time.time()), a["target"], -a["id"], 0, "grabcodes",
+                                     f"轮询{probe} 命中开注"[:200], f"注册: {reg}"[:200], grp_name),
+                                )
+                                conn.commit()
+                                log.info("抢注轮询命中! %s -> %s", a["target"], reg)
+                                notify_event("success", a["name"], f"检测到开注并注册: {reg}")
+                                poll_last[a["id"]] = now + max(interval, 3600)  # 成功后冷却 1h
+                                continue
+                    except errors.FloodWaitError as e:
+                        log.warning("轮询限流,等待 %ss", e.seconds)
+                        await asyncio.sleep(e.seconds + 1)
+                    except Exception:
+                        log.exception("轮询探测异常")
+                    poll_last[a["id"]] = now
+        except Exception as e:
+            log.warning("轮询循环异常: %s", e)
+        await asyncio.sleep(10)
 
 
 async def signin_loop():
@@ -571,15 +1009,23 @@ async def panel_auth(request: Request, call_next):
 # ---------- 面板登录 ----------
 class PanelLogin(BaseModel):
     password: str
+    captcha: str = ""
+
+
+@app.get("/api/panel/captcha")
+async def panel_captcha():
+    return {"svg": gen_captcha()}
 
 
 @app.post("/api/panel/login")
 async def panel_login(body: PanelLogin):
-    if body.password == panel_password():
-        resp = JSONResponse({"ok": True})
-        resp.set_cookie("panel_token", panel_password(), max_age=86400 * 30, httponly=True)
-        return resp
-    raise HTTPException(403, "密码错误")
+    if body.password != panel_password():
+        raise HTTPException(403, "密码错误")
+    if not check_captcha(body.captcha):
+        raise HTTPException(400, "验证码错误或已过期,请刷新")
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie("panel_token", panel_password(), max_age=86400 * 30, httponly=True)
+    return resp
 
 
 @app.post("/api/panel/logout")
@@ -692,7 +1138,7 @@ async def tg_verify_password(body: VerifyPassword):
 
 
 async def finish_login(me=None):
-    global watcher_task, handler_registered, signin_task
+    global watcher_task, handler_registered, signin_task, poll_task
     tg_state["phase"] = "ready"
     tg_state["err"] = None
     me = me or await client.get_me()
@@ -725,6 +1171,8 @@ async def finish_login(me=None):
         watcher_task = asyncio.create_task(watcher_loop())
     if signin_task is None or signin_task.done():
         signin_task = asyncio.create_task(signin_loop())
+    if poll_task is None or poll_task.done():
+        poll_task = asyncio.create_task(poll_loop())
     log.info("已登录: %s (id=%s)", tg_state["me"]["name"], me.id)
 
 
@@ -845,29 +1293,35 @@ async def update_rule(rid: int, body: RuleIn):
     return {"ok": True}
 
 
-# ---------- 自动化管理 (签到 / 抢注 / 抢红包) ----------
+# ---------- 自动化管理 (签到 / 抢注 / 抢红包 / 自定义) ----------
 class AutoIn(BaseModel):
-    type: str = "signin"          # signin | grabcodes | redpacket
+    type: str = "signin"          # signin | grabcodes | redpacket | custom
     name: str = ""
-    target: str = ""              # signin: @机器人 或 群ID
-    command: str = ""             # signin: 签到命令(支持 {num:N}/{word:N}/{alpha:N}/{uuid})
+    target: str = ""              # signin/custom: @机器人 或 群ID;grabcodes: 轮询机器人(可选)
+    command: str = ""             # signin: 命令(| 分隔多条随机);grabcodes: 轮询探测命令(默认 /start)
     win_start: str = "08:00"      # signin: 窗口开始
     win_end: str = "12:00"        # signin: 窗口结束
     click_btn: int = 0            # signin: 签到后自动点按钮
     btn_text: str = ""            # signin: 按钮文字(留空自动匹配)
     success_kw: str = ""          # signin: 成功关键词
+    fail_kw: str = ""             # signin: 失败关键词(回复含它判失败)
+    points_pat: str = ""          # signin: 积分提取正则
+    is_chat: int = 0              # signin: 目标是群组
     retries: int = 2              # signin: 发送失败重试次数
     groups: str = ""              # grabcodes/redpacket: 指定群(留空=全部监听群)
     keywords: str = ""            # 触发关键词
     action: str = "reply"         # grabcodes: reply | send
     reply_text: str = ""          # 回复/命令文本,{code} 提取邀请码
+    poll_interval: int = 0        # grabcodes: 轮询间隔(秒,0=关闭)
+    custom_steps: str = ""        # custom: 步骤 JSON
+    chain_retry: int = 1          # custom: 链级重试
     cooldown: int = 30
     enabled: int = 1
 
 
 def _valid_auto(body: AutoIn):
-    if body.type not in ("signin", "grabcodes", "redpacket"):
-        raise HTTPException(400, "类型必须是 signin / grabcodes / redpacket")
+    if body.type not in ("signin", "grabcodes", "redpacket", "custom"):
+        raise HTTPException(400, "类型必须是 signin / grabcodes / redpacket / custom")
     if not body.name.strip():
         raise HTTPException(400, "请填写任务名称")
     if body.type == "signin":
@@ -879,8 +1333,37 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "重试次数需在 0-5 之间")
     if body.type == "grabcodes" and not body.reply_text.strip():
         raise HTTPException(400, "抢注需要填写动作文本(支持 {code} 占位符)")
+    if body.type == "grabcodes" and body.poll_interval:
+        if body.poll_interval < 10 or body.poll_interval > 86400:
+            raise HTTPException(400, "轮询间隔需在 10-86400 秒之间")
+    if body.type == "custom":
+        try:
+            steps = json.loads(body.custom_steps or "[]")
+            if not isinstance(steps, list) or not steps:
+                raise ValueError
+            for s in steps:
+                if not isinstance(s, dict) or s.get("t") not in ("send", "wait", "click", "captcha", "until"):
+                    raise ValueError
+        except Exception:
+            raise HTTPException(400, "步骤配置无效(格式: [{\"t\":\"send\",\"v\":\"/start\"},...])")
     if body.cooldown < 0 or body.cooldown > 86400:
         raise HTTPException(400, "冷却秒数无效")
+
+
+_AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,success_kw,fail_kw,points_pat,is_chat,retries,"
+              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled")
+
+
+def _auto_vals(body: AutoIn, extra=None):
+    return [
+        body.type, body.name.strip(), body.target.strip(), body.command.strip(),
+        body.win_start.strip(), body.win_end.strip(), body.click_btn,
+        body.btn_text.strip(), body.success_kw.strip(), body.fail_kw.strip(),
+        body.points_pat.strip(), body.is_chat, body.retries,
+        body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
+        body.poll_interval, body.custom_steps.strip(), body.chain_retry,
+        body.cooldown, body.enabled,
+    ] + (extra or [])
 
 
 @app.get("/api/autos")
@@ -893,14 +1376,8 @@ async def list_autos():
 async def create_auto(body: AutoIn):
     _valid_auto(body)
     cur = conn.execute(
-        "INSERT INTO automations(type,name,target,command,win_start,win_end,click_btn,btn_text,success_kw,retries,"
-        "groups,keywords,action,reply_text,cooldown,enabled,created_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (body.type, body.name.strip(), body.target.strip(), body.command.strip(),
-         body.win_start.strip(), body.win_end.strip(), body.click_btn,
-         body.btn_text.strip(), body.success_kw.strip(), body.retries,
-         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
-         body.cooldown, body.enabled, int(time.time())),
+        f"INSERT INTO automations({_AUTO_COLS},created_at) VALUES({','.join('?' * (len(_AUTO_COLS.split(',')) + 1))})",
+        _auto_vals(body, [int(time.time())]),
     )
     conn.commit()
     return {"ok": True, "id": cur.lastrowid}
@@ -909,14 +1386,10 @@ async def create_auto(body: AutoIn):
 @app.put("/api/autos/{aid}")
 async def update_auto(aid: int, body: AutoIn):
     _valid_auto(body)
+    cols = _AUTO_COLS.split(",")
     conn.execute(
-        "UPDATE automations SET type=?,name=?,target=?,command=?,win_start=?,win_end=?,click_btn=?,btn_text=?,success_kw=?,retries=?,"
-        "groups=?,keywords=?,action=?,reply_text=?,cooldown=?,enabled=? WHERE id=?",
-        (body.type, body.name.strip(), body.target.strip(), body.command.strip(),
-         body.win_start.strip(), body.win_end.strip(), body.click_btn,
-         body.btn_text.strip(), body.success_kw.strip(), body.retries,
-         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
-         body.cooldown, body.enabled, aid),
+        f"UPDATE automations SET {','.join(c + '=?' for c in cols)} WHERE id=?",
+        _auto_vals(body, [aid]),
     )
     conn.commit()
     return {"ok": True}
@@ -933,6 +1406,21 @@ async def toggle_auto(aid: int):
     return {"ok": True, "enabled": v}
 
 
+@app.post("/api/autos/{aid}/duplicate")
+async def duplicate_auto(aid: int):
+    """一键复制任务"""
+    r = conn.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    if not r:
+        raise HTTPException(404, "任务不存在")
+    d = dict(r)
+    cur = conn.execute(
+        f"INSERT INTO automations({_AUTO_COLS},created_at) VALUES({','.join('?' * (len(_AUTO_COLS.split(',')) + 1))})",
+        [d[c] if c in d else "" for c in _AUTO_COLS.split(",")] + [int(time.time())],
+    )
+    conn.commit()
+    return {"ok": True, "id": cur.lastrowid}
+
+
 @app.delete("/api/autos/{aid}")
 async def delete_auto(aid: int):
     conn.execute("DELETE FROM automations WHERE id=?", (aid,))
@@ -942,13 +1430,16 @@ async def delete_auto(aid: int):
 
 @app.post("/api/autos/{aid}/run")
 async def run_auto_now(aid: int):
-    """手动立即执行一次签到任务"""
-    a = conn.execute("SELECT * FROM automations WHERE id=? AND type='signin'", (aid,)).fetchone()
+    """手动立即执行:signin/custom"""
+    a = conn.execute("SELECT * FROM automations WHERE id=? AND type IN ('signin','custom')", (aid,)).fetchone()
     if not a:
-        raise HTTPException(404, "签到任务不存在")
+        raise HTTPException(404, "该类型任务不可手动执行或不存在")
     if client is None or tg_state["phase"] != "ready":
         raise HTTPException(409, "TG 尚未登录")
-    asyncio.get_running_loop().create_task(run_signin(a))
+    if a["type"] == "signin":
+        asyncio.get_running_loop().create_task(run_signin(a))
+    else:
+        asyncio.get_running_loop().create_task(run_custom(a))
     return {"ok": True}
 
 
@@ -960,17 +1451,26 @@ async def delete_rule(rid: int):
 
 
 # ---------- 设置 ----------
+SETTING_KEYS = ["cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar",
+                "notify_bark", "notify_bt", "notify_bc", "notify_on_success", "notify_on_fail",
+                "ai_base", "ai_key", "ai_model",
+                "flock_enabled", "flock_count", "flock_minutes", "flock_pool"]
+DEFAULTS = {"cooldown": "20", "delay": "1.0 3.0", "ignore_bots": "1", "theme": "dark",
+            "flock_count": "5", "flock_minutes": "5"}
+
+
 @app.get("/api/settings")
 async def get_settings():
-    keys = ["cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar"]
-    return {k: get_setting(k, {"cooldown": "20", "delay": "1.0 3.0", "ignore_bots": "1", "theme": "dark"}.get(k)) for k in keys}
+    return {k: get_setting(k, DEFAULTS.get(k)) for k in SETTING_KEYS}
 
 
 @app.post("/api/settings")
 async def update_settings(body: dict):
     for k, v in body.items():
-        if k in ("cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar"):
+        if k in SETTING_KEYS:
             set_setting(k, str(v))
+    if any(k in body for k in ("ai_base", "ai_key", "ai_model")):
+        load_ai_cfg()
     return {"ok": True}
 
 

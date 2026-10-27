@@ -2,3 +2,5 @@ telethon>=1.36
 fastapi>=0.110
 uvicorn>=0.29
 pydantic>=2.5
+httpx>=0.27
+ddddocr>=1.4.11
