@@ -11,6 +11,15 @@
   --acc:#3ea6ff; --acc2:#7c5cff; --ok:#2ee6a8; --warn:#ffb454; --err:#ff5d6c;
   --r:14px;
 }
+html[data-theme="light"]{
+  --bg:#f4f6fb; --panel:#ffffff; --panel2:#eef1f8; --line:#dfe4f0;
+  --txt:#1b2233; --sub:#5f6b85; --dim:#93a0b8;
+  --acc:#2f8fe8; --acc2:#6d4ff0; --ok:#12b27e; --warn:#e59a2b; --err:#e5484d;
+}
+html[data-theme="light"] header{background:rgba(255,255,255,.9)}
+html[data-theme="light"] .tabbar{background:rgba(255,255,255,.96)}
+html[data-theme="light"] .toast{box-shadow:0 8px 30px rgba(30,40,80,.15)}
+html[data-theme="light"] .switch::after{background:#c3cbdd}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:var(--bg);color:var(--txt);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px}
 body{min-height:100vh}
@@ -80,12 +89,20 @@ button.btn:hover{filter:brightness(1.12)}
 button.btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
 button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--sub);padding:10px 18px;border-radius:10px;font-size:13px;cursor:pointer}
 button.ghost:hover{border-color:var(--acc);color:var(--acc)}
+button.icon{width:38px;height:38px;flex:none;border-radius:10px;display:flex;align-items:center;justify-content:center;
+  background:var(--panel2);border:1px solid var(--line);color:var(--sub);cursor:pointer;transition:.15s}
+button.icon:hover{border-color:var(--acc);color:var(--acc)}
+button.icon svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.avatar{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,var(--acc),var(--acc2));
+  display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:#fff;
+  overflow:hidden;flex-shrink:0}
+.avatar img{width:100%;height:100%;object-fit:cover;display:block}
 button.danger{background:rgba(255,93,108,.12);border:1px solid rgba(255,93,108,.4);color:var(--err);padding:9px 14px;border-radius:10px;font-size:12px;cursor:pointer}
 button.danger:hover{background:rgba(255,93,108,.22)}
-.switch{position:relative;width:42px;height:24px;border-radius:999px;background:var(--line);cursor:pointer;transition:.2s;flex-shrink:0}
-.switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#889;transition:.2s}
+.switch{position:relative;width:36px;height:20px;border-radius:999px;background:var(--line);cursor:pointer;transition:.2s;flex-shrink:0}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#889;transition:.2s}
 .switch.on{background:var(--ok)}
-.switch.on::after{left:21px;background:#fff}
+.switch.on::after{left:19px;background:#fff}
 .hint{font-size:11px;color:var(--dim);margin-top:5px;line-height:1.5}
 
 /* ---------- 列表 ---------- */
@@ -173,8 +190,10 @@ button.btn,button.ghost,button.danger{min-height:44px}
 <header>
   <div class="logo"><span class="dot" id="dotHead"></span>TG PERSONA <small>人形分身</small></div>
   <div class="spacer"></div>
-  <div class="hstatus"><span id="hMe">未登录</span></div>
-  <button class="pill" id="btnLogout">退出 TG</button>
+  <button class="icon" id="btnTheme" onclick="toggleTheme()" title="切换主题">
+    <svg id="icMoon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    <svg id="icSun" class="hidden" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+  </button>
   <button class="pill" id="btnPanelOut">退出面板</button>
 </header>
 
@@ -193,7 +212,7 @@ button.btn,button.ghost,button.danger{min-height:44px}
       <div class="flex" style="gap:14px">
         <div class="grow">
           <div style="display:flex;align-items:center;gap:12px">
-            <div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,var(--acc),var(--acc2));display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:#fff" id="ovAvatar">?</div>
+            <div class="avatar" id="ovAvatar">?</div>
             <div>
               <div style="font-weight:700;font-size:16px" id="ovName">--</div>
               <div class="mono" id="ovUser">@--</div>
@@ -387,13 +406,22 @@ let tgPhase='idle';
 async function renderTgCard(){
   const el=$('#tgCard'); if(!el)return;
   if(state.logged_in){
+    const av=state.tg.me.avatar||'';
     el.innerHTML=`
       <div class="flex" style="gap:12px;align-items:center">
-        <div style="width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--acc),var(--acc2));display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;flex:none">${esc((state.tg.me.name||'?').charAt(0).toUpperCase())}</div>
+        <div class="avatar" id="tgAvatar" style="width:42px;height:42px">?</div>
         <div class="grow"><div class="t">${esc(state.tg.me.name||'--')}</div><div class="s mono">@${esc(state.tg.me.username||state.tg.me.phone||'--')}</div></div>
         <button class="danger" onclick="logoutTG()">退出登录</button>
       </div>
-      <div class="hint" style="margin-top:10px">会话已保存在服务器 data/tg.session,重启不丢登录</div>`;
+      <div style="margin-top:12px">
+        <label>自定义头像(图片 URL,留空则用 TG 头像)</label>
+        <div class="flex">
+          <div style="flex:2"><input type="text" id="tgAvatarUrl" placeholder="https://... 留空恢复 TG 头像" value="${esc(av)}"></div>
+          <button class="btn" onclick="saveAvatar()">保存</button>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:10px">会话已保存在服务器 data/tg.session,重启不丢登录;登录后 TG 头像会自动同步</div>`;
+    setAvatar($('#tgAvatar'), av, state.tg.me.name);
     return;
   }
   const p=await api('/api/settings').catch(()=>({api_id:'',api_hash:''}));
@@ -459,6 +487,39 @@ function afterTgLogin(){
   tgPhase='ready'; toast('登录成功,人形分身已上线'); loadState();
 }
 
+// ---------- 头像 ----------
+function setAvatar(el, custom, name){
+  if(!el)return;
+  el.innerHTML='';
+  const letter=document.createElement('span');
+  letter.textContent=(name||'?').charAt(0).toUpperCase();
+  if(custom&&/^https?:\/\//.test(custom)){
+    const img=document.createElement('img');
+    img.src=custom;img.onerror=()=>{el.innerHTML='';el.appendChild(letter)};
+    el.appendChild(img);
+  }else if(custom){  // 相对路径 /avatar(后端 TG 头像缓存)
+    const img=document.createElement('img');
+    img.src=custom;img.onerror=()=>{el.innerHTML='';el.appendChild(letter)};
+    el.appendChild(img);
+  }else{
+    el.appendChild(letter);
+  }
+}
+
+// ---------- 主题 ----------
+function applyTheme(t){
+  t=t||'dark';
+  document.documentElement.dataset.theme=t;
+  $('#icMoon').classList.toggle('hidden',t!=='dark');
+  $('#icSun').classList.toggle('hidden',t==='dark');
+  try{localStorage.setItem('tgp_theme',t)}catch(e){}
+}
+async function toggleTheme(){
+  const cur=document.documentElement.dataset.theme==='light'?'dark':'light';
+  applyTheme(cur);
+  try{await api('/api/settings',{method:'POST',body:{theme:cur}})}catch(e){}
+}
+
 // ---------- 状态 ----------
 async function loadState(){
   try{
@@ -466,12 +527,11 @@ async function loadState(){
     const on=state.logged_in&&state.running;
     $('#dotHead').classList.toggle('on',on);
     if(state.logged_in){
-      $('#hMe').innerHTML='<b>'+esc(state.tg.me.name)+'</b> · '+esc(state.tg.me.username||state.tg.me.phone);
       $('#ovName').textContent=state.tg.me.name;
       $('#ovUser').textContent='@'+(state.tg.me.username||state.tg.me.phone||'--');
-      $('#ovAvatar').textContent=(state.tg.me.name||'?').charAt(0).toUpperCase();
+      setAvatar($('#ovAvatar'),state.tg.me.avatar||'',state.tg.me.name);
     }else{
-      $('#hMe').textContent='未登录';$('#ovName').textContent='--';$('#ovUser').textContent='@--';$('#ovAvatar').textContent='?';
+      $('#ovName').textContent='--';$('#ovUser').textContent='@--';setAvatar($('#ovAvatar'),'','');
     }
     $('#ovNoTg').style.display=state.logged_in?'none':'flex';
     if(state.logged_in!==window._prevLoggedIn){window._prevLoggedIn=state.logged_in;renderTgCard()}
@@ -497,6 +557,7 @@ async function loadSettings(){
     $('#ovCooldown').textContent=(s.cooldown||20)+'s';
     $('#ovDelay').textContent=(s.delay||'1.0 3.0').replace(' ','~')+'s';
     $('#ovIgnore').textContent=s.ignore_bots==='0'?'关':'开';
+    if(s.theme)applyTheme(s.theme);  // 后端主题为准(跨设备同步)
   }catch(e){}
 }
 async function saveSettings(){
@@ -519,6 +580,15 @@ async function logoutTG(){
   if(!confirm('确认退出 Telegram 账号?已保存的会话会被清除'))return;
   try{await api('/api/tg/logout',{method:'POST'});tgPhase='idle';window._prevLoggedIn=null;toast('已退出 TG');loadState();renderTgCard()}
   catch(e){toast(e.message,1)}
+}
+async function saveAvatar(){
+  const v=$('#tgAvatarUrl').value.trim();
+  if(v&&!/^https?:\/\//.test(v))return toast('请输入 http(s) 开头的图片 URL',1);
+  try{
+    await api('/api/settings',{method:'POST',body:JSON.stringify({avatar:v})});
+    toast(v?'自定义头像已保存':'已恢复 TG 头像');
+    await loadState(); renderTgCard();
+  }catch(e){toast(e.message,1)}
 }
 async function btnPanelOut(){
   try{await api('/api/panel/logout',{method:'POST'});showLoginGate()}
@@ -635,6 +705,7 @@ async function bootstrap(){
   }catch(e){}
   renderEmojis();pickAction('reply');
   loadState();loadSettings();loadRules();
+  applyTheme((localStorage.getItem('tgp_theme'))||'dark');  // 主题初始:本地优先,后端在 loadSettings 后对齐
   setInterval(()=>{loadState();loadLogs()},5000);
 }
 bootstrap();

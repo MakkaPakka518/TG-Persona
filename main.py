@@ -37,6 +37,7 @@ DATA.mkdir(mode=0o700, exist_ok=True)
 DB_PATH = DATA / "config.db"
 SESSION_PATH = str(DATA / "tg")           # Telethon 会话文件 (data/tg.session)
 PW_FILE = DATA / "panel_password.txt"
+AVATAR_FILE = DATA / "avatar.jpg"         # 登录时自动拉取的 TG 头像缓存
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
@@ -385,6 +386,7 @@ async def finish_login(me=None):
         "name": getattr(me, "first_name", "") + (" " + me.last_name if getattr(me, "last_name", None) else ""),
         "username": getattr(me, "username", "") or "",
         "phone": getattr(me, "phone", "") or "",
+        "avatar": get_setting("avatar", ""),   # 自定义头像 URL,空则用 /avatar(TG 头像缓存)
     }
     try:
         os.chmod(SESSION_PATH + ".session", 0o600)
@@ -393,6 +395,11 @@ async def finish_login(me=None):
     # 预热实体缓存,保证私有群 ID 可解析
     try:
         await client.get_dialogs(limit=200)
+    except Exception:
+        pass
+    # 拉取 TG 头像缓存,面板展示用(失败则保留占位)
+    try:
+        await client.download_profile_photo(entity="me", file=str(AVATAR_FILE))
     except Exception:
         pass
     if not handler_registered:
@@ -527,14 +534,14 @@ async def delete_rule(rid: int):
 # ---------- 设置 ----------
 @app.get("/api/settings")
 async def get_settings():
-    keys = ["cooldown", "delay", "ignore_bots", "api_id", "api_hash"]
-    return {k: get_setting(k, {"cooldown": "20", "delay": "1.0 3.0", "ignore_bots": "1"}.get(k)) for k in keys}
+    keys = ["cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar"]
+    return {k: get_setting(k, {"cooldown": "20", "delay": "1.0 3.0", "ignore_bots": "1", "theme": "dark"}.get(k)) for k in keys}
 
 
 @app.post("/api/settings")
 async def update_settings(body: dict):
     for k, v in body.items():
-        if k in ("cooldown", "delay", "ignore_bots", "api_id", "api_hash"):
+        if k in ("cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar"):
             set_setting(k, str(v))
     return {"ok": True}
 
@@ -587,6 +594,14 @@ async def get_logs(n: int = 60):
 @app.get("/")
 async def index():
     return FileResponse(BASE / "web" / "index.html")
+
+
+@app.get("/avatar")
+async def avatar():
+    """返回缓存的 TG 头像;不存在或失败时前端自动回退首字母占位"""
+    if not AVATAR_FILE.exists():
+        raise HTTPException(404, "no avatar")
+    return FileResponse(AVATAR_FILE, media_type="image/jpeg")
 
 
 # ---------------- 启动 ----------------
