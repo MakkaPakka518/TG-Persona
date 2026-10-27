@@ -442,9 +442,9 @@ input[readonly]:focus{border-color:var(--acc)}
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12a9 9 0 1 1-9-9"/></svg>签到任务</span><span class="cnt" id="aCntSign">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <div id="aListSign"></div>
-        <div class="empty" id="aEmptySign">暂无签到任务,点下面按钮添加</div>
         <button class="btn addtask" type="button" onclick="openAutoForm('signin')">＋ 添加签到任务</button>
+        <div id="aListSign"></div>
+        <div class="empty" id="aEmptySign">暂无签到任务,点上面按钮添加</div>
         <div class="autof" id="af-signin"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑签到任务</b><button class="ghost" type="button" onclick="closeAutoForm('signin')">关闭</button></div><form onsubmit="saveAuto('signin');return false">
           <label>任务名称</label>
           <input type="text" id="sName" placeholder="如: 某站每日签到">
@@ -497,9 +497,9 @@ input[readonly]:focus{border-color:var(--acc)}
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 20h5v-2a3 3 0 0 0-5.36-1.65M5 20H0v-2a3 3 0 0 1 5.36-1.65M12 20H7a3 3 0 0 1 5.36-1.65"/><circle cx="16" cy="8" r="3"/><path d="M19 4a3 3 0 1 1-3-3 3 3 0 0 1 3 3z"/></svg>抢注监控</span><span class="cnt" id="aCntGrab">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <div id="aListGrab"></div>
-        <div class="empty" id="aEmptyGrab">暂无抢注任务,点下面按钮添加</div>
         <button class="btn addtask" type="button" onclick="openAutoForm('grabcodes')">＋ 添加抢注任务</button>
+        <div id="aListGrab"></div>
+        <div class="empty" id="aEmptyGrab">暂无抢注任务,点上面按钮添加</div>
         <div class="autof" id="af-grabcodes"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑抢注任务</b><button class="ghost" type="button" onclick="closeAutoForm('grabcodes')">关闭</button></div><form onsubmit="saveAuto('grabcodes');return false">
           <label>任务名称</label>
           <input type="text" id="gName" placeholder="如: 某站抢注邀请码">
@@ -539,9 +539,9 @@ input[readonly]:focus{border-color:var(--acc)}
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>自定义任务</span><span class="cnt" id="aCntCustom">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <div id="aListCustom"></div>
-        <div class="empty" id="aEmptyCustom">暂无自定义任务,点下面按钮添加</div>
         <button class="btn addtask" type="button" onclick="openAutoForm('custom')">＋ 添加自定义任务</button>
+        <div id="aListCustom"></div>
+        <div class="empty" id="aEmptyCustom">暂无自定义任务,点上面按钮添加</div>
         <div class="autof" id="af-custom"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑自定义任务</b><button class="ghost" type="button" onclick="closeAutoForm('custom')">关闭</button></div><form onsubmit="saveAuto('custom');return false">
           <label>任务名称</label>
           <input type="text" id="cName" placeholder="如: 注册流程">
@@ -571,9 +571,9 @@ input[readonly]:focus{border-color:var(--acc)}
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H5.2L4 17.5z"/><path d="M8 9h8M8 12h5"/></svg>群保号(定时发言)</span><span class="cnt" id="aCntKeep">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <div class="hint" style="margin-bottom:10px">每隔一段时间在指定群发一条内容,可设置发完 N 秒删除(Emby 保号常用)</div>
-        <div id="aListKeep"></div>
-        <div class="empty" id="aEmptyKeep">暂无群聊发言任务,点下面按钮添加</div>
         <button class="btn addtask" type="button" onclick="openAutoForm('keepalive')">＋ 添加群聊发言任务</button>
+        <div id="aListKeep"></div>
+        <div class="empty" id="aEmptyKeep">暂无群聊发言任务,点上面按钮添加</div>
         <div class="autof" id="af-keepalive"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑群聊发言任务</b><button class="ghost" type="button" onclick="closeAutoForm('keepalive')">关闭</button></div><form onsubmit="saveAuto('keepalive');return false">
           <label>任务名称</label>
           <input type="text" id="kName" placeholder="如: 星影保号">
@@ -605,9 +605,9 @@ input[readonly]:focus{border-color:var(--acc)}
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M20 12v10H4V12M12 22v-7M2 8h20v4H2zM12 2a3 3 0 0 0-3 3v3h6V5a3 3 0 0 0-3-3z"/></svg>抢红包</span><span class="cnt" id="aCntPack">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <div id="aListPack"></div>
-        <div class="empty" id="aEmptyPack">暂无抢红包任务,点下面按钮添加</div>
         <button class="btn addtask" type="button" onclick="openAutoForm('redpacket')">＋ 添加抢红包任务</button>
+        <div id="aListPack"></div>
+        <div class="empty" id="aEmptyPack">暂无抢红包任务,点上面按钮添加</div>
         <div class="autof" id="af-redpacket"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑抢红包任务</b><button class="ghost" type="button" onclick="closeAutoForm('redpacket')">关闭</button></div><form onsubmit="saveAuto('redpacket');return false">
           <label>任务名称</label>
           <input type="text" id="pName" placeholder="如: 群红包自动领取">
@@ -631,7 +631,7 @@ input[readonly]:focus{border-color:var(--acc)}
   <section id="tab-groups">
     <h2><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>监听群</h2>
     <div class="sub">勾选要监听的群 · 群成员发了命中关键词的消息才会触发</div>
-    <div class="card fold open">
+    <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>监听中</span><span class="cnt" id="gCnt">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b"><div id="gWatched"></div></div>
     </div>
@@ -653,10 +653,9 @@ input[readonly]:focus{border-color:var(--acc)}
     <h2><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12a9 9 0 1 1-9-9"/></svg>关键词规则</h2>
     <div class="sub">命中即行动 · 回复文本 / 点表情 / 两者同时</div>
     <div id="rList"></div>
-    <div class="card fold" style="margin-top:4px">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新增规则</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-      <label>关键词</label>
+    <button class="btn addtask" onclick="openRuleForm()">＋ 添加规则</button>
+    <div class="autof" id="af-rule"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑关键词规则</b><button class="ghost" type="button" onclick="closeRuleForm()">关闭</button></div>
+<label>关键词</label>
       <div class="flex">
         <div style="flex:2"><input type="text" id="rKw" placeholder="多个用逗号分隔,任意命中;如: 求推荐,有没有"></div>
         <div style="flex:1"><label style="margin-top:0;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);cursor:pointer">
@@ -684,8 +683,7 @@ input[readonly]:focus{border-color:var(--acc)}
         <button class="btn" onclick="saveRule()">保存规则</button>
         <span class="hint" style="margin:0">规则可随时开关或删除</span>
       </div>
-      </div>
-    </div>
+    </div></div>
   </section>
 
   <!-- 日志 -->
@@ -1486,12 +1484,24 @@ function groupScopeText(r){
 function resetRuleForm(){ruleGroupSel.clear();renderRuleGroups()}
 
 async function toggleRule(id){try{const d=await api('/api/rules/'+id+'/toggle',{method:'POST'});toast(d.enabled?'规则已开启':'规则已关闭');loadRules()}catch(e){toast(e.message,1)}}
+function openRuleForm(){
+  const el=document.getElementById('af-rule');
+  if(!el)return;
+  el.classList.add('show');document.body.style.overflow='hidden';
+}
+function closeRuleForm(){
+  const el=document.getElementById('af-rule');
+  if(el)el.classList.remove('show');
+  document.body.style.overflow='';
+  editingRule=null;
+  $('#rKw').value='';$('#rRegex').checked=false;$('#rValue').value='';$('#rReact').value='';
+  pickAction('reply');resetRuleForm();
+}
 function editRule(id){
   const r=allRules.find(x=>x.id===id);
   if(!r)return toast('规则数据未加载,刷新页面',1);
   editingRule=id;
-  const formFold=$('#rKw').closest('.fold');
-  if(formFold&&!formFold.classList.contains('open'))formFold.classList.add('open');
+  openRuleForm();
   $('#rKw').value=r.keywords; $('#rRegex').checked=!!r.regex;
   ruleGroupSel=new Set((r.groups||'').split(/[,，]/).map(x=>x.trim()).filter(Boolean));
   renderRuleGroups();
@@ -1499,7 +1509,7 @@ function editRule(id){
   $('#rValue').value=r.value;
   $('#rReact').value=r.action==='react'?r.value:(r.reaction||'');
   if(r.action!=='reply'){const t=$('#rEmojis span[data-e="'+$('#rReact').value+'"]');if(t)t.classList.add('sel')}
-  $('#rKw').scrollIntoView({behavior:'smooth'});
+  const box=document.querySelector('#af-rule .autof-card');if(box)box.scrollIntoView({block:'start'});
   toast('编辑规则 #'+id+' 中,改完点保存');
 }
 async function saveRule(){
@@ -1512,8 +1522,7 @@ async function saveRule(){
   try{
     if(editingRule){await api('/api/rules/'+editingRule,{method:'PUT',body:JSON.stringify({...body,enabled:1})});editingRule=null}
     else await api('/api/rules',{method:'POST',body:JSON.stringify(body)});
-    $('#rKw').value='';$('#rRegex').checked=false;$('#rValue').value='';$('#rReact').value='';pickAction('reply');resetRuleForm();
-    toast('规则已保存');loadRules();
+    toast('规则已保存');loadRules();closeRuleForm();
   }catch(e){toast(e.message,1)}
 }
 async function delRule(id){if(!confirm('删除规则 #'+id+'?'))return;try{await api('/api/rules/'+id,{method:'DELETE'});toast('已删除');loadRules()}catch(e){toast(e.message,1)}}
