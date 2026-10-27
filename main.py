@@ -362,6 +362,7 @@ _login_fail = {}     # ip -> {"n": 连续失败, "first": 窗口起点, "blocked
 RL_WINDOW = 600      # 失败统计窗口:10 分钟
 RL_MAX = 10          # 窗口内失败上限,超过封 10 分钟
 RL_BLOCK = 600
+CAPTCHA_AFTER = 3    # 连续失败 3 次后开始要求验证码
 
 
 def hash_password(pw: str) -> str:
