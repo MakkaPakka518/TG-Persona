@@ -1204,28 +1204,50 @@ async def tg_logout():
 
 
 # ---------- 群管理 ----------
+@app.get("/api/watched")
+async def list_watched():
+    """已监听群(直接读 DB,毫秒级,不依赖全量拉取)"""
+    rows = conn.execute("SELECT chat_id,name,added_at FROM watched_groups").fetchall()
+    return {"groups": [{"chat_id": r["chat_id"], "name": r["name"], "added_at": r["added_at"]} for r in rows]}
+
+
+_dialog_cache = {"ts": 0.0, "groups": []}
+DIALOG_TTL = 60.0
+
+
+async def _fetch_all_dialogs():
+    out = []
+    async for d in client.iter_dialogs(limit=500):
+        if not d.is_group:
+            continue
+        out.append({
+            "chat_id": str(d.id),
+            "name": d.name or "(无名称)",
+            "members": getattr(d.entity, "participants_count", None),
+        })
+    return out
+
+
 @app.get("/api/dialogs")
 async def list_dialogs(q: str = ""):
     if client is None or tg_state["phase"] != "ready":
         raise HTTPException(409, "TG 尚未登录")
+    now = time.time()
+    if not _dialog_cache["groups"] or now - _dialog_cache["ts"] > DIALOG_TTL:
+        try:
+            _dialog_cache["groups"] = await _fetch_all_dialogs()
+            _dialog_cache["ts"] = time.time()
+        except Exception as e:
+            if not _dialog_cache["groups"]:
+                raise HTTPException(500, f"拉取群列表失败: {e}")
     watched = {r["chat_id"] for r in conn.execute("SELECT chat_id FROM watched_groups").fetchall()}
     out = []
-    try:
-        async for d in client.iter_dialogs(limit=500):
-            if not d.is_group:
-                continue
-            name = d.name or "(无名称)"
-            cid = str(d.id)
-            if q and q.lower() not in name.lower():
-                continue
-            out.append({
-                "chat_id": cid,
-                "name": name,
-                "members": getattr(d.entity, "participants_count", None),
-                "watched": cid in watched,
-            })
-    except Exception as e:
-        raise HTTPException(500, f"拉取群列表失败: {e}")
+    for g in _dialog_cache["groups"]:
+        g = dict(g)
+        g["watched"] = g["chat_id"] in watched
+        if q and q.lower() not in g["name"].lower():
+            continue
+        out.append(g)
     out.sort(key=lambda x: (not x["watched"], -(x["members"] or 0)))
     return {"groups": out}
 
