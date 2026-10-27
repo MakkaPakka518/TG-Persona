@@ -143,11 +143,28 @@ def db_init():
             conn.execute(f"ALTER TABLE rules ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
             pass
-    for col, ddl in (("content", "TEXT DEFAULT ''"), ("reply", "TEXT DEFAULT ''"), ("grp_name", "TEXT DEFAULT ''")):
+    for col, ddl in (("content", "TEXT DEFAULT ''"), ("reply", "TEXT DEFAULT ''"), ("grp_name", "TEXT DEFAULT ''"),
+                     ("ok", "INTEGER DEFAULT 1"), ("sender", "TEXT DEFAULT ''"), ("detail", "TEXT DEFAULT ''")):
         try:
             conn.execute(f"ALTER TABLE hits ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
             pass
+    conn.commit()
+
+
+def add_hit(action, ok, *, chat_id="", rule_id=0, msg_id=0, content="", reply="",
+            grp_name="", sender="", detail=None):
+    """统一写命中日志:kind(动作) + 成败 + 结构化详情(前端展开用)"""
+    try:
+        detail_json = json.dumps(detail or {}, ensure_ascii=False)[:2000]
+    except Exception:
+        detail_json = "{}"
+    conn.execute(
+        "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name,ok,sender,detail) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        (int(time.time()), str(chat_id), rule_id, msg_id, action, str(content)[:500],
+         str(reply)[:500], str(grp_name)[:100], 1 if ok else 0, str(sender)[:80], detail_json),
+    )
     conn.commit()
 
 
@@ -530,6 +547,19 @@ def match_rule(rule, text):
 
 
 # ---------------- Telethon 监听 ----------------
+async def sender_name_of(event):
+    """尽量取消息发送者显示名,失败返回空串"""
+    try:
+        sender = await event.get_sender()
+        if sender is None:
+            return ""
+        nm = getattr(sender, "first_name", "") or ""
+        ln = getattr(sender, "last_name", "") or ""
+        return (nm + (" " + ln if ln else "")).strip() or getattr(sender, "username", "") or ""
+    except Exception:
+        return ""
+
+
 async def on_group_message(event):
     if _running["paused"] or not event.is_group or event.out:
         return
@@ -574,13 +604,15 @@ async def on_group_message(event):
     if now - last_hit_ts.get(key, -1e9) < cooldown:
         return
 
-    if get_setting("ignore_bots", "1") == "1":
-        try:
-            sender = await event.get_sender()
-            if getattr(sender, "bot", False):
-                return
-        except Exception:
-            pass
+    sender_name = ""
+    try:
+        sender = await event.get_sender()
+        if get_setting("ignore_bots", "1") == "1" and getattr(sender, "bot", False):
+            return
+        nm = (getattr(sender, "first_name", "") or "") + ((" " + sender.last_name) if getattr(sender, "last_name", None) else "")
+        sender_name = nm.strip() or getattr(sender, "username", "") or ""
+    except Exception:
+        pass
 
     last_hit_ts[key] = now
 
@@ -616,11 +648,11 @@ async def on_group_message(event):
         except Exception:
             pass
         hits_count["total"] += 1
-        conn.execute(
-            "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name) VALUES(?,?,?,?,?,?,?,?)",
-            (int(time.time()), str(event.chat_id), rule["id"], event.id, action, text[:200], reply_desc[:200], grp_name),
-        )
-        conn.commit()
+        add_hit(action, True, chat_id=event.chat_id, rule_id=rule["id"], msg_id=event.id,
+                content=text, reply=reply_desc, grp_name=grp_name, sender=sender_name,
+                detail={"kind": "rule", "group": grp_name or str(event.chat_id), "sender": sender_name,
+                        "message": text, "action": action, "reply": reply_desc,
+                        "rule": rule["keywords"]})
         log.info("命中 #%s 群=%s 动作=%s", rule["id"], event.chat_id, action)
     except errors.FloodWaitError as e:
         log.warning("触发限流,等待 %ss", e.seconds)
@@ -705,6 +737,7 @@ async def on_auto_event(event):
         return
     chat = str(event.chat_id)
     text = (event.raw_text or "").strip()
+    sender_name = await sender_name_of(event)
 
     watched = {r["chat_id"] for r in conn.execute("SELECT chat_id FROM watched_groups").fetchall()}
     now = time.monotonic()
@@ -771,11 +804,11 @@ async def on_auto_event(event):
                 if target_btn:
                     await target_btn.click()
                     log.info("抢红包 群=%s 任务=%s", chat, a["name"])
-            conn.execute(
-                "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name) VALUES(?,?,?,?,?,?,?,?)",
-                (int(time.time()), chat, -a["id"], event.id, a["type"], text[:200], reply_desc[:200], grp_name),
-            )
-            conn.commit()
+            add_hit(a["type"], True, chat_id=chat, rule_id=-a["id"], msg_id=event.id,
+                    content=text, reply=reply_desc, grp_name=grp_name, sender=sender_name,
+                    detail={"kind": a["type"], "task": a["name"], "group": grp_name or str(chat),
+                            "sender": sender_name, "message": text, "reply": reply_desc,
+                            "action": "回复消息" if a["action"] != "send" else "群内发送"})
         except errors.FloodWaitError as e:
             log.warning("自动化触发限流,等待 %ss", e.seconds)
             await asyncio.sleep(e.seconds + 1)
@@ -876,6 +909,7 @@ async def run_signin(a):
 
     # 可选:点击回复按钮(bot 回复消息上的键盘,不区分是否自己发出)
     clicked_btn = False
+    btn_text_clicked = ""
     if a["click_btn"]:
         try:
             await asyncio.sleep(1.6)
@@ -884,6 +918,7 @@ async def run_signin(a):
             if b:
                 await b.click()
                 clicked_btn = True
+                btn_text_clicked = getattr(b, "text", "") or ""
                 log.info("签到点击按钮: %s", b.text)
         except errors.FloodWaitError as e:
             log.warning("点按钮限流,等待 %ss", e.seconds)
@@ -947,11 +982,11 @@ async def run_signin(a):
         notify_event("fail", a["name"], f"未找到成功词「{skw}」: {reply_txt[:120]}")
     else:
         notify_event("success", a["name"], f"签到成功{('· 积分 '+points) if points else ''} · {target}")
-    conn.execute(
-        "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name) VALUES(?,?,?,?,?,?,?,?)",
-        (int(time.time()), target, -a["id"], 0, "signin", cmd[:200], desc[:200], target),
-    )
-    conn.commit()
+    add_hit("signin", not (fail or ok is False), chat_id=target, rule_id=-a["id"], grp_name=a["name"],
+            content=cmd, reply=reply_txt or desc, sender="",
+            detail={"kind": "signin", "task": a["name"], "bot": target, "command": cmd,
+                    "reply": reply_txt, "button": btn_text_clicked, "captcha": cap_ans,
+                    "points": points, "note": desc})
     log.info("签到%s 任务=%s 目标=%s", "失败" if fail or ok is False else "成功", a["name"], target)
 
 
@@ -1133,11 +1168,10 @@ async def run_custom(a):
             final_ok = True
             break
     hits_desc = final_desc[:200] or "执行完成"
-    conn.execute(
-        "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name) VALUES(?,?,?,?,?,?,?,?)",
-        (int(time.time()), target, -a["id"], 0, "custom", f"自定义任务: {a['name']}"[:200], hits_desc, target),
-    )
-    conn.commit()
+    add_hit("custom", final_ok, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
+            content=f"自定义任务: {a['name']}", reply=final_desc,
+            detail={"kind": "custom", "task": a["name"], "bot": target, "steps": final_desc,
+                    "ok": final_ok})
     if final_ok:
         notify_event("success", a["name"], hits_desc)
     else:
@@ -1179,12 +1213,10 @@ async def poll_loop():
                             if reg:
                                 await client.send_message(ent, reg)
                                 grp_name = a["target"]
-                                conn.execute(
-                                    "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name) VALUES(?,?,?,?,?,?,?,?)",
-                                    (int(time.time()), a["target"], -a["id"], 0, "grabcodes",
-                                     f"轮询{probe} 命中开注"[:200], f"注册: {reg}"[:200], grp_name),
-                                )
-                                conn.commit()
+                                add_hit("grabcodes", True, chat_id=a["target"], rule_id=-a["id"], grp_name=a["name"],
+                                        content=f"轮询 {probe} 命中开注", reply=rt,
+                                        detail={"kind": "grabcodes", "task": a["name"], "bot": a["target"],
+                                                "probe": probe, "reply": rt, "registered": reg})
                                 log.info("抢注轮询命中! %s -> %s", a["target"], reg)
                                 notify_event("success", a["name"], f"检测到开注并注册: {reg}")
                                 poll_last[a["id"]] = now + max(interval, 3600)  # 成功后冷却 1h
@@ -1879,12 +1911,34 @@ async def get_state():
 
 
 @app.get("/api/logs")
-async def get_logs(n: int = 60):
+async def get_logs(n: int = 60, kind: str = ""):
+    """kind: reply(关键词回复) / signin / grabcodes / redpacket / custom;留空=全部"""
+    kind = (kind or "").strip()
+    if kind == "reply":
+        where, params = "action IN ('reply','react','both')", []
+    elif kind in ("signin", "grabcodes", "redpacket", "custom"):
+        where, params = "action=?", [kind]
+    else:
+        where, params = "1=1", []
     rows = conn.execute(
-        "SELECT ts,chat_id,rule_id,msg_id,action,content,reply,grp_name FROM hits ORDER BY id DESC LIMIT ?",
-        (min(n, 200),),
+        "SELECT ts,chat_id,rule_id,msg_id,action,content,reply,grp_name,ok,sender,detail FROM hits "
+        "WHERE " + where + " ORDER BY id DESC LIMIT ?",
+        (*params, min(n, 200)),
     ).fetchall()
-    return {"hits": [dict(r) for r in rows]}
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["detail"] = json.loads(d.get("detail") or "{}")
+        except Exception:
+            d["detail"] = {}
+        out.append(d)
+    counts = {"reply": 0, "signin": 0, "grabcodes": 0, "redpacket": 0, "custom": 0}
+    for r in conn.execute("SELECT action, COUNT(*) c FROM hits GROUP BY action").fetchall():
+        k = "reply" if r["action"] in ("reply", "react", "both") else r["action"]
+        if k in counts:
+            counts[k] += r["c"]
+    return {"hits": out, "counts": counts}
 
 
 # ---------- 前端 ----------

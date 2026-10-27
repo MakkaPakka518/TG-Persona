@@ -33,6 +33,7 @@ html[data-theme="light"]{
 html[data-theme="light"] header{background:rgba(255,255,255,.82)}
 html[data-theme="light"] .tabbar{background:rgba(255,255,255,.9)}
 html[data-theme="light"] .switch{background:#d4d9e4}
+html[data-theme="light"] .switch.on{background:#22c55e}
 html[data-theme="light"] .toast{box-shadow:var(--sh-lg)}
 
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -151,6 +152,22 @@ h2{display:none}
 .switch::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
   background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.3);transition:transform .22s cubic-bezier(.3,.8,.3,1)}
 .switch.on{background:#22c55e;box-shadow:0 0 0 1px rgba(34,197,94,.25)}
+.seg{display:flex;gap:6px;overflow:auto;padding:2px 0 10px}
+.seg button{flex:none;padding:8px 14px;border-radius:999px;border:1px solid var(--hair2);background:var(--panel2);
+  color:var(--sub);font-size:12.5px;cursor:pointer}
+.seg button.on{background:#22c55e;border-color:#22c55e;color:#fff}
+.logitem{padding:11px 2px;border-bottom:1px solid var(--hair);cursor:pointer}
+.logitem:last-child{border-bottom:0}
+.logrow{display:flex;align-items:center;gap:9px}
+.logrow .st{font-size:11.5px;padding:2px 7px;border-radius:6px;flex:none;font-weight:600}
+.logrow .st.ok{background:rgba(34,197,94,.15);color:#16a34a}
+.logrow .st.no{background:rgba(224,49,49,.14);color:#e03131}
+.logrow .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
+.logrow .tm{font-size:11.5px;color:var(--dim);flex:none}
+.logdetail{display:none;margin-top:9px;padding:10px 12px;background:var(--panel2);border-radius:10px;font-size:12.8px;line-height:1.6}
+.logitem.open .logdetail{display:block}
+.logdetail .k{color:var(--dim);margin-right:6px}
+.logdetail .line{margin-bottom:4px;word-break:break-word}
 .grp-pick{display:flex;flex-wrap:wrap;gap:8px;max-height:210px;overflow:auto;padding:2px}
 .grp-pick .gp{display:flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid var(--hair2);
   border-radius:999px;font-size:12.5px;color:var(--sub);cursor:pointer;background:var(--panel2);user-select:none}
@@ -460,8 +477,9 @@ input[readonly]:focus{border-color:var(--acc)}
         <form onsubmit="saveAuto('grabcodes');return false">
           <label>任务名称</label>
           <input type="text" id="gName" placeholder="如: 某站抢注邀请码">
-          <label>监控群(@群名或群ID,逗号分隔;留空 = 全部监听群)</label>
-          <input type="text" id="gGroups" placeholder="如: @invite_chat, -1001234567890">
+          <label>监控群</label>
+          <div class="hint" style="margin:0 0 8px">不勾 = 全部监听群</div>
+          <div id="gGroups" class="grp-pick"></div>
           <label>触发关键词(逗号分隔)</label>
           <input type="text" id="gKeywords" placeholder="邀请码,开注,开放注册,发码" value="邀请码,开注,开放注册,发码">
           <label>动作</label>
@@ -530,8 +548,9 @@ input[readonly]:focus{border-color:var(--acc)}
         <form onsubmit="saveAuto('redpacket');return false">
           <label>任务名称</label>
           <input type="text" id="pName" placeholder="如: 群红包自动领取">
-          <label>监控群(@群名或群ID,逗号分隔;留空 = 全部监听群)</label>
-          <input type="text" id="pGroups" placeholder="如: @redpacket_chat">
+          <label>监控群</label>
+          <div class="hint" style="margin:0 0 8px">不勾 = 全部监听群</div>
+          <div id="pGroups" class="grp-pick"></div>
           <label>触发关键词(逗号分隔,消息文本含其中任意词即抢)</label>
           <input type="text" id="pKeywords" placeholder="🎁,红包,领红包" value="🎁,红包">
           <div class="flex">
@@ -608,8 +627,15 @@ input[readonly]:focus{border-color:var(--acc)}
 
   <!-- 日志 -->
   <section id="tab-logs">
-    <h2><svg viewBox="0 0 24 24"><path d="M1 8h22M4 16h10M8 4v16M16 4v16"/></svg>命中日志</h2>
-    <div class="sub">最近触发的关键词动作记录</div>
+    <h2><svg viewBox="0 0 24 24"><path d="M1 8h22M4 16h10M8 4v16M16 4v16"/></svg>日志</h2>
+    <div class="sub">按类型分开 · 点一行展开完整记录</div>
+    <div class="seg" id="logSeg">
+      <button class="on" data-k="reply" onclick="pickLogKind('reply')">回复</button>
+      <button data-k="signin" onclick="pickLogKind('signin')">签到</button>
+      <button data-k="grabcodes" onclick="pickLogKind('grabcodes')">抢注</button>
+      <button data-k="redpacket" onclick="pickLogKind('redpacket')">红包</button>
+      <button data-k="custom" onclick="pickLogKind('custom')">自定义</button>
+    </div>
     <div class="card" id="logList"></div>
   </section>
 
@@ -838,7 +864,7 @@ function editAutoItem(id){
     $('#sRetries').value=a.retries!=null?a.retries:2;
     $('#sCancel').style.display='inline-block';
   }else if(t==='grabcodes'){
-    $('#gName').value=a.name;$('#gGroups').value=a.groups;$('#gKeywords').value=a.keywords;
+    $('#gName').value=a.name;setAutoGroups('grabcodes',a.groups);$('#gKeywords').value=a.keywords;
     $('#gText').value=a.reply_text;$('#gCd').value=a.cooldown;
     $('#gBot').value=a.target||'';$('#gProbe').value=a.command||'/start';$('#gPoll').value=a.poll_interval||0;
     pickGrabAct(a.action);$('#gCancel').style.display='inline-block';
@@ -846,7 +872,7 @@ function editAutoItem(id){
     $('#cName').value=a.name;$('#cTarget').value=a.target;$('#cSteps').value=a.custom_steps||'[]';
     $('#cRetry').value=a.chain_retry||1;$('#cCancel').style.display='inline-block';
   }else{
-    $('#pName').value=a.name;$('#pGroups').value=a.groups;$('#pKeywords').value=a.keywords;
+    $('#pName').value=a.name;setAutoGroups('redpacket',a.groups);$('#pKeywords').value=a.keywords;
     $('#pCd').value=a.cooldown;$('#pCancel').style.display='inline-block';
   }
   $(editAuto.type==='signin'?'#sName':editAuto.type==='grabcodes'?'#gName':editAuto.type==='custom'?'#cName':'#pName').scrollIntoView({behavior:'smooth'});
@@ -855,9 +881,9 @@ function editAutoItem(id){
 function cancelAutoEdit(t){
   editAuto=null;
   ({signin:()=>{$('#sName').value='';$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
-    grabcodes:()=>{$('#gName').value='';$('#gGroups').value='';$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
+    grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';$('#cSteps').value='[]';$('#cRetry').value=1;$('#cCancel').style.display='none'},
-    redpacket:()=>{$('#pName').value='';$('#pGroups').value='';$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'}})[t]();
+    redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'}})[t]();
 }
 function pickGrabAct(v){
   ACTIONS.grabcodes=v;
@@ -879,6 +905,25 @@ function fillStep(k){
     $('#cSteps').value=JSON.stringify(cur,null,1);
   }catch(e){toast('当前步骤不是合法 JSON,请先修正',1)}
 }
+const autoGroupSel={grabcodes:new Set(),redpacket:new Set()};
+function renderAutoGroups(type){
+  const box=document.getElementById(type==='grabcodes'?'gGroups':'pGroups');
+  if(!box)return;
+  const sel=autoGroupSel[type];
+  if(!watchedGroups.length){box.innerHTML='<div class="empty" style="padding:6px">还没有监听群,先去「群组」页添加</div>';return}
+  box.innerHTML=watchedGroups.map(g=>`<div class="gp ${sel.has(String(g.chat_id))?'on':''}" onclick="toggleAutoGroup('${type}','${g.chat_id}')">${esc(g.name||g.chat_id)}</div>`).join('');
+}
+function toggleAutoGroup(type,id){
+  id=String(id);const sel=autoGroupSel[type];
+  sel.has(id)?sel.delete(id):sel.add(id);
+  renderAutoGroups(type);
+}
+function setAutoGroups(type,csv){
+  autoGroupSel[type]=new Set(String(csv||'').split(/[,，]/).map(x=>x.trim()).filter(Boolean));
+  renderAutoGroups(type);
+}
+function getAutoGroups(type){return [...autoGroupSel[type]].join(',')}
+
 async function saveAuto(type){
   let body,url='/api/autos';
   if(type==='signin'){
@@ -890,7 +935,7 @@ async function saveAuto(type){
       signin_captcha:$('#sCap').checked?1:0};
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
   }else if(type==='grabcodes'){
-    body={type,name:$('#gName').value.trim(),groups:$('#gGroups').value.trim(),keywords:$('#gKeywords').value.trim(),
+    body={type,name:$('#gName').value.trim(),groups:getAutoGroups('grabcodes'),keywords:$('#gKeywords').value.trim(),
       action:ACTIONS.grabcodes,reply_text:$('#gText').value.trim(),cooldown:+$('#gCd').value||30,
       target:$('#gBot').value.trim(),command:$('#gProbe').value.trim()||'/start',poll_interval:+$('#gPoll').value||0};
     if(!body.name||!body.reply_text)return toast('请填写名称和动作文本',1);
@@ -903,7 +948,7 @@ async function saveAuto(type){
       chain_retry:+$('#cRetry').value||1};
     if(!body.name||!body.target)return toast('请填写名称和目标',1);
   }else{
-    body={type,name:$('#pName').value.trim(),groups:$('#pGroups').value.trim(),keywords:$('#pKeywords').value.trim(),
+    body={type,name:$('#pName').value.trim(),groups:getAutoGroups('redpacket'),keywords:$('#pKeywords').value.trim(),
       cooldown:+$('#pCd').value||5};
     if(!body.name)return toast('请填写任务名称',1);
   }
@@ -1053,17 +1098,15 @@ function setAvatar(el, custom, name){
   el.innerHTML='';
   const letter=document.createElement('span');
   letter.textContent=(name||'?').charAt(0).toUpperCase();
-  if(custom&&/^https?:\/\//.test(custom)){
-    const img=document.createElement('img');
-    img.src=custom;img.onerror=()=>{el.innerHTML='';el.appendChild(letter)};
-    el.appendChild(img);
-  }else if(custom){  // 相对路径 /avatar(后端 TG 头像缓存)
-    const img=document.createElement('img');
-    img.src=custom;img.onerror=()=>{el.innerHTML='';el.appendChild(letter)};
-    el.appendChild(img);
-  }else{
-    el.appendChild(letter);
-  }
+  const img=document.createElement('img');
+  let step=0;
+  const srcs=[custom, '/avatar?v='+Date.now()].filter(Boolean);
+  const next=()=>{
+    if(step>=srcs.length){el.innerHTML='';el.appendChild(letter);return}
+    img.src=srcs[step++];
+  };
+  img.onerror=next;
+  if(srcs.length){next();el.appendChild(img)}else{el.appendChild(letter)}
 }
 
 // ---------- 主题 ----------
@@ -1077,7 +1120,7 @@ function applyTheme(t){
 async function toggleTheme(){
   const cur=document.documentElement.dataset.theme==='light'?'dark':'light';
   applyTheme(cur);
-  try{await api('/api/settings',{method:'POST',body:{theme:cur}})}catch(e){}
+  try{await api('/api/settings',{method:'POST',body:JSON.stringify({theme:cur})})}catch(e){}
 }
 
 // ---------- 状态 ----------
@@ -1135,7 +1178,7 @@ async function loadSettings(){
     $('#sFlCnt').value=s.flock_count||5;
     $('#sFlMin').value=s.flock_minutes||5;
     $('#sFlPool').value=s.flock_pool||'';
-    if(s.theme)applyTheme(s.theme);  // 后端主题为准(跨设备同步)
+    if(s.theme && !localStorage.getItem('tgp_theme'))applyTheme(s.theme);  // 本机优先,其它设备首次访问才用后端主题
     loadTz();loadSessions();
   }catch(e){}
 }
@@ -1158,7 +1201,8 @@ async function saveSettings(){
       flock_enabled:$('#sFl').checked?'1':'0',
       flock_count:$('#sFlCnt').value||5,
       flock_minutes:$('#sFlMin').value||5,
-      flock_pool:$('#sFlPool').value.trim()
+      flock_pool:$('#sFlPool').value.trim(),
+      theme:document.documentElement.dataset.theme||'dark'
     })});
     toast('设置已保存');loadSettings();
   }catch(e){toast(e.message,1)}
@@ -1309,6 +1353,7 @@ let watchedGroups=[];
 async function loadRuleGroups(){
   try{
     const d=await api('/api/watched');watchedGroups=d.groups||[];renderRuleGroups();
+    renderAutoGroups('grabcodes');renderAutoGroups('redpacket');
     if(allRules.length)loadRules();   // 群名到位后刷新规则列表的「范围」文案
   }catch(e){}
 }
@@ -1360,23 +1405,57 @@ async function saveRule(){
 async function delRule(id){if(!confirm('删除规则 #'+id+'?'))return;try{await api('/api/rules/'+id,{method:'DELETE'});toast('已删除');loadRules()}catch(e){toast(e.message,1)}}
 
 // ---------- 日志 ----------
+let logKind='reply';
+const LOG_KINDS={reply:'回复',signin:'签到',grabcodes:'抢注',redpacket:'红包',custom:'自定义'};
+function pickLogKind(k){
+  logKind=k;
+  document.querySelectorAll('#logSeg button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
+  loadLogs();
+}
+function logRow(h){
+  const ok=(h.ok===undefined?1:h.ok)?'ok':'no';
+  const d=h.detail||{};
+  let title='';
+  if(h.action==='signin') title=(d.task||'签到')+(d.bot?(' · '+d.bot):'');
+  else if(h.action==='custom') title=(d.task||'自定义任务');
+  else if(h.action==='grabcodes'||h.action==='redpacket') title=(d.task||LOG_KINDS[h.action]||h.action)+(d.group?(' · '+d.group):'');
+  else title=(d.group||h.grp_name||('群 '+h.chat_id))+(d.rule?(' · '+d.rule):'');
+  const lines=[];
+  const add=(k,v)=>{if(v)lines.push('<div class="line"><span class="k">'+k+'</span>'+esc(String(v))+'</div>')};
+  if(h.action==='signin'){
+    add('时间',new Date(h.ts*1000).toLocaleString('zh-CN'));
+    add('目标',d.bot||h.chat_id);
+    add('指令',d.command||h.content);
+    add('回复',d.reply||h.reply);
+    add('按钮',d.button);
+    add('验证码',d.captcha);
+    add('积分',d.points);
+  }else if(h.action==='custom'){
+    add('目标',d.bot||h.chat_id);
+    add('过程',d.steps||h.reply);
+  }else{
+    add('群',d.group||h.grp_name||h.chat_id);
+    add('发送人',d.sender||h.sender);
+    add('消息',d.message||h.content);
+    add('动作',({reply:'回复文本',react:'点表情',both:'回复+表情',send:'群内发送'}[d.action])||d.action||(h.action==='react'?'点表情':h.action==='both'?'回复+表情':'回复文本'));
+    add('回复',d.reply||h.reply||d.registered);
+    add('规则',d.rule);
+    add('指令',d.probe);
+  }
+  return '<div class="logitem" onclick="this.classList.toggle(\'open\')">'+
+    '<div class="logrow"><span class="st '+ok+'">'+(ok==='ok'?'成功':'失败')+'</span>'+
+    '<span class="t">'+esc(title)+'</span><span class="tm">'+fmt(h.ts)+'</span></div>'+
+    '<div class="logdetail">'+(lines.join('')||'<div class="line">无详情</div>')+'</div></div>';
+}
 async function loadLogs(){
   try{
-    const d=await api('/api/logs?n=60');
-    $('#logList').innerHTML=d.hits.length?d.hits.map(h=>{
-      const actN={signin:'签到',grabcodes:'抢注',redpacket:'抢红包'}[h.action]||(h.action==='react'?'表情':h.action==='both'?'回复+表情':'回复');
-      const isAuto=h.rule_id<0;
-      const grp=h.grp_name?esc(h.grp_name):(isAuto?'':`群 ${esc(h.chat_id)}`);
-      const who=isAuto
-        ? `自动化 · ${actN}${h.chat_id&&h.chat_id!=='0'?` → ${esc(h.chat_id)}`:''}`
-        : `${grp} · 规则 #${h.rule_id}`;
-      return `<div class="logitem">
-        <span class="tm">${fmt(h.ts)}</span>
-        <span class="msg"><span class="badge ${h.action}">${actN}</span> ${who}</span>
-        ${h.content?`<div class="lc">💬 ${esc(h.content.length>60?h.content.slice(0,60)+'…':h.content)}</div>`:''}
-        ${h.reply?`<div class="lr">⚡ ${esc(h.reply.length>60?h.reply.slice(0,60)+'…':h.reply)}</div>`:''}
-      </div>`;
-    }).join(''):'<div class="empty">还没有命中记录</div>';
+    const d=await api('/api/logs?n=80&kind='+logKind);
+    const c=d.counts||{};
+    document.querySelectorAll('#logSeg button').forEach(b=>{
+      const n=c[b.dataset.k]||0;
+      b.textContent=LOG_KINDS[b.dataset.k]+(n?' '+n:'');
+    });
+    document.getElementById('logList').innerHTML=d.hits.length?d.hits.map(logRow).join(''):'<div class="empty">这一类还没有记录</div>';
   }catch(e){toast(e.message,1)}
 }
 
