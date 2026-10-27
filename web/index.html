@@ -690,6 +690,10 @@ input[readonly]:focus{border-color:var(--acc)}
   <section id="tab-logs">
     <h2><svg viewBox="0 0 24 24"><path d="M1 8h22M4 16h10M8 4v16M16 4v16"/></svg>日志</h2>
     <div class="sub">按类型分开 · 点一行展开完整记录</div>
+    <div class="search" style="margin-bottom:10px">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+      <input type="text" placeholder="搜索群名 / 发送人 / 消息内容…" id="logQ" oninput="onLogSearch()">
+    </div>
     <div class="seg" id="logSeg">
       <button class="on" data-k="reply" onclick="pickLogKind('reply')">回复</button>
       <button data-k="signin" onclick="pickLogKind('signin')">签到</button>
@@ -699,6 +703,11 @@ input[readonly]:focus{border-color:var(--acc)}
       <button data-k="keepalive" onclick="pickLogKind('keepalive')">群聊</button>
     </div>
     <div class="card" id="logList"></div>
+    <div class="flex" style="margin-top:12px">
+      <button class="ghost" onclick="clearLogs(30)">清理 30 天前</button>
+      <button class="ghost" onclick="clearLogs(0)">清空全部日志</button>
+    </div>
+    <div class="hint">日志默认保留 30 天自动清理,可在「设置 → 触发行为」调整</div>
   </section>
 
   <!-- 设置 -->
@@ -713,6 +722,9 @@ input[readonly]:focus{border-color:var(--acc)}
         <div><label>命中后随机延迟(秒,最小 最大)</label><input type="text" id="sDelay" placeholder="1.0 3.0"></div>
         <div><label style="display:flex;align-items:center;gap:8px;margin-top:14px"><input type="checkbox" id="sIgnore" style="width:auto"> 忽略机器人消息</label></div>
       </div>
+      <label>日志保留天数(0 = 永久保留)</label>
+      <input type="number" id="sLogKeep" min="0" max="3650" value="30">
+      <div class="hint">每小时检查一次,超过天数的记录自动删除并压缩数据库</div>
       <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
       </div>
     </div>
@@ -1273,6 +1285,7 @@ async function loadSettings(){
     $('#sCooldown').value=s.cooldown||20;
     $('#sDelay').value=s.delay||'1.0 3.0';
     $('#sIgnore').checked=s.ignore_bots!=='0';
+    $('#sLogKeep').value=s.log_keep_days==null?30:s.log_keep_days;
     $('#ovCooldown').textContent=(s.cooldown||20)+'s';
     $('#ovDelay').textContent=(s.delay||'1.0 3.0').replace(' ','~')+'s';
     $('#ovIgnore').textContent=s.ignore_bots==='0'?'关':'开';
@@ -1300,6 +1313,7 @@ async function saveSettings(){
       cooldown:+$('#sCooldown').value,
       delay:$('#sDelay').value.trim(),
       ignore_bots:$('#sIgnore').checked?'1':'0',
+      log_keep_days:+$('#sLogKeep').value||0,
       notify_bark:$('#sBark').value.trim(),
       notify_bt:$('#sBt').value.trim(),
       notify_bc:$('#sBc').value.trim(),
@@ -1578,15 +1592,29 @@ function logRow(h){
     '<span class="t">'+esc(title)+'</span><span class="tm">'+fmt(h.ts)+'</span></div>'+
     '<div class="logdetail">'+(lines.join('')||'<div class="line">无详情</div>')+'</div></div>';
 }
+let logQ='', logQtimer=null;
+function onLogSearch(){
+  clearTimeout(logQtimer);
+  logQtimer=setTimeout(()=>{logQ=(document.querySelector('#logQ')||{}).value||'';loadLogs()},350);
+}
+async function clearLogs(days){
+  const tip=days?('删除 '+days+' 天前的日志?'):'清空全部日志?此操作不可恢复';
+  if(!confirm(tip))return;
+  try{
+    const d=await api('/api/logs/clear',{method:'POST',body:JSON.stringify(days?{days:days}:{})});
+    toast('已删除 '+d.deleted+' 条');loadLogs();
+  }catch(e){toast(e.message,1)}
+}
 async function loadLogs(){
   try{
-    const d=await api('/api/logs?n=80&kind='+logKind);
+    const url='/api/logs?n=80&kind='+encodeURIComponent(logKind)+(logQ?('&q='+encodeURIComponent(logQ)):'');
+    const d=await api(url);
     const c=d.counts||{};
-    document.querySelectorAll('#logSeg button').forEach(b=>{
+    if(!logQ)document.querySelectorAll('#logSeg button').forEach(b=>{
       const n=c[b.dataset.k]||0;
       b.textContent=LOG_KINDS[b.dataset.k]+(n?' '+n:'');
     });
-    document.getElementById('logList').innerHTML=d.hits.length?d.hits.map(logRow).join(''):'<div class="empty">这一类还没有记录</div>';
+    document.getElementById('logList').innerHTML=d.hits.length?d.hits.map(logRow).join(''):('<div class="empty">'+(logQ?'没有匹配「'+esc(logQ)+'」的记录':'这一类还没有记录')+'</div>');
   }catch(e){toast(e.message,1)}
 }
 

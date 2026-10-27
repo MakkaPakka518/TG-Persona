@@ -176,6 +176,28 @@ def add_hit(action, ok, *, chat_id="", rule_id=0, msg_id=0, content="", reply=""
     conn.commit()
 
 
+def purge_hits(days=None):
+    """删除超过 N 天的命中日志(默认取设置 log_keep_days,0=永久保留)"""
+    try:
+        d = int(get_setting("log_keep_days", "30") if days is None else days)
+    except Exception:
+        d = 30
+    if d <= 0:
+        return 0
+    cutoff = int(time.time()) - d * 86400
+    cur = conn.execute("DELETE FROM hits WHERE ts < ?", (cutoff,))
+    conn.commit()
+    n = cur.rowcount or 0
+    if n:
+        try:
+            conn.execute("VACUUM")
+            conn.commit()
+        except sqlite3.Error:
+            pass
+        log.info("已清理 %s 条过期日志(早于 %s 天)", n, d)
+    return n
+
+
 def get_setting(key, default=None):
     r = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     return r["value"] if r else default
@@ -598,18 +620,21 @@ async def on_group_message(event):
         except Exception:
             pass
 
-    rule = next((r for r in rules if match_rule(r, text)), None)
-    if rule is None:
-        return
-    # 规则可以只对部分群生效(留空 = 全部监听群)
-    rgroups = {x.strip() for x in re.split(r"[,，]", (rule["groups"] or "")) if x.strip()}
-    if rgroups and str(event.chat_id) not in rgroups:
-        return
-
+    # 一条消息可以命中多条规则:每条规则各自执行、各自冷却
     cooldown = int(get_setting("cooldown", "20"))
     now = time.monotonic()
-    key = (event.chat_id, rule["id"])
-    if now - last_hit_ts.get(key, -1e9) < cooldown:
+    hit_rules = []
+    for r in rules:
+        if not match_rule(r, text):
+            continue
+        # 规则可以只对部分群生效(留空 = 全部监听群)
+        rgroups = {x.strip() for x in re.split(r"[,，]", (r["groups"] or "")) if x.strip()}
+        if rgroups and str(event.chat_id) not in rgroups:
+            continue
+        if now - last_hit_ts.get((event.chat_id, r["id"]), -1e9) < cooldown:
+            continue
+        hit_rules.append(r)
+    if not hit_rules:
         return
 
     sender_name = ""
@@ -622,53 +647,58 @@ async def on_group_message(event):
     except Exception:
         pass
 
-    last_hit_ts[key] = now
+    grp_name = ""
+    try:
+        g = conn.execute("SELECT name FROM watched_groups WHERE chat_id=?", (str(event.chat_id),)).fetchone()
+        if g:
+            grp_name = g["name"]
+    except Exception:
+        pass
 
     try:
         dmin, dmax = [float(x) for x in str(get_setting("delay", "1.0 3.0")).split()]
     except Exception:
         dmin, dmax = 1.0, 3.0
-    await asyncio.sleep(random.uniform(min(dmin, dmax), max(dmin, dmax)))
 
-    action = rule["action"]
-    reply_desc = ""
-    try:
-        if action in ("reply", "both") and rule["value"]:
-            reply = random.choice([s.strip() for s in rule["value"].split("||") if s.strip()])
-            reply_desc = reply
-            await event.reply(reply)
-        if action in ("react", "both"):
-            emo = (rule["reaction"] or rule["value"]).replace("\ufe0f", "")
-            if emo:
-                reply_desc = (reply_desc + " + " + emo) if reply_desc else emo
-                await client(
-                    SendReactionRequest(
-                        peer=await event.get_input_chat(),
-                        msg_id=event.id,
-                        reaction=[ReactionEmoji(emoticon=emo)],
-                    )
-                )
-        grp_name = ""
+    for idx, rule in enumerate(hit_rules):
+        # 多条规则之间额外错开一点,避免一口气刷屏
+        if idx:
+            await asyncio.sleep(random.uniform(0.6, 1.8))
+        last_hit_ts[(event.chat_id, rule["id"])] = time.monotonic()
+        if not idx:
+            await asyncio.sleep(random.uniform(min(dmin, dmax), max(dmin, dmax)))
+        action = rule["action"]
+        reply_desc = ""
         try:
-            g = conn.execute("SELECT name FROM watched_groups WHERE chat_id=?", (str(event.chat_id),)).fetchone()
-            if g:
-                grp_name = g["name"]
+            if action in ("reply", "both") and rule["value"]:
+                reply = random.choice([x.strip() for x in rule["value"].split("||") if x.strip()])
+                reply_desc = reply
+                await event.reply(reply)
+            if action in ("react", "both"):
+                emo = (rule["reaction"] or rule["value"]).replace("\ufe0f", "")
+                if emo:
+                    reply_desc = (reply_desc + " + " + emo) if reply_desc else emo
+                    await client(
+                        SendReactionRequest(
+                            peer=await event.get_input_chat(),
+                            msg_id=event.id,
+                            reaction=[ReactionEmoji(emoticon=emo)],
+                        )
+                    )
+            hits_count["total"] += 1
+            add_hit(action, True, chat_id=event.chat_id, rule_id=rule["id"], msg_id=event.id,
+                    content=text, reply=reply_desc, grp_name=grp_name, sender=sender_name,
+                    detail={"kind": "rule", "group": grp_name or str(event.chat_id), "sender": sender_name,
+                            "message": text, "action": action, "reply": reply_desc,
+                            "rule": rule["keywords"]})
+            log.info("命中 #%s 群=%s 动作=%s", rule["id"], event.chat_id, action)
+        except errors.FloodWaitError as e:
+            log.warning("触发限流,等待 %ss", e.seconds)
+            await asyncio.sleep(e.seconds + 1)
+        except errors.RPCError as e:
+            log.warning("操作失败(群=%s): %s", event.chat_id, e)
         except Exception:
-            pass
-        hits_count["total"] += 1
-        add_hit(action, True, chat_id=event.chat_id, rule_id=rule["id"], msg_id=event.id,
-                content=text, reply=reply_desc, grp_name=grp_name, sender=sender_name,
-                detail={"kind": "rule", "group": grp_name or str(event.chat_id), "sender": sender_name,
-                        "message": text, "action": action, "reply": reply_desc,
-                        "rule": rule["keywords"]})
-        log.info("命中 #%s 群=%s 动作=%s", rule["id"], event.chat_id, action)
-    except errors.FloodWaitError as e:
-        log.warning("触发限流,等待 %ss", e.seconds)
-        await asyncio.sleep(e.seconds + 1)
-    except errors.RPCError as e:
-        log.warning("操作失败(群=%s): %s", event.chat_id, e)
-    except Exception:
-        log.exception("未知错误")
+            log.exception("未知错误")
 
 
 async def watcher_loop():
@@ -1219,6 +1249,9 @@ async def run_custom(a):
 # 抢注轮询(开注探测):每间隔给机器人发探测命令,回复含开注关键词即注册
 poll_last = {}
 poll_task = None
+housekeeping_task = None
+health_task = None
+_session_alerted = False
 keepalive_task = None
 
 
@@ -1265,6 +1298,16 @@ async def run_keepalive(a, reason="定时"):
     return True
 
 
+async def housekeeping_loop():
+    """每小时:清理过期日志"""
+    while True:
+        try:
+            purge_hits()
+        except Exception as e:
+            log.warning("日志清理异常: %s", e)
+        await asyncio.sleep(3600)
+
+
 async def keepalive_loop():
     """每分钟检查一次:到点的保号任务去群里发一条"""
     while True:
@@ -1291,6 +1334,34 @@ async def keepalive_loop():
         except Exception as e:
             log.warning("保号循环异常: %s", e)
         await asyncio.sleep(60)
+
+
+async def health_loop():
+    """每分钟检查 TG 会话是否还有效;掉线立刻推一次通知(不重复刷)"""
+    global _session_alerted
+    while True:
+        await asyncio.sleep(60)
+        try:
+            if client is None or tg_state["phase"] != "ready":
+                continue
+            ok = False
+            try:
+                ok = await asyncio.wait_for(client.is_user_authorized(), timeout=20)
+            except Exception:
+                ok = False
+            if not ok:
+                if not _session_alerted:
+                    _session_alerted = True
+                    tg_state["phase"] = "error"
+                    tg_state["err"] = "会话已失效,请重新登录"
+                    send_notify("⚠️ TG 会话失效", "面板检测到登录已掉线,签到/回复都会失败,请打开面板重新登录")
+                    log.warning("会话失效,已推送提醒")
+            else:
+                if _session_alerted:
+                    _session_alerted = False
+                    log.info("会话已恢复正常")
+        except Exception as e:
+            log.debug("心跳检查异常: %s", e)
 
 
 async def poll_loop():
@@ -1380,6 +1451,10 @@ async def signin_loop():
 async def lifespan(app):
     global client
     set_setting("uptime_since", get_setting("uptime_since", str(int(time.time()))))
+    try:
+        purge_hits()
+    except Exception:
+        pass
     # 若已有会话,启动时自动登录并监听
     try:
         api_id = int(get_setting("api_id", "0"))
@@ -1578,7 +1653,7 @@ async def tg_verify_password(body: VerifyPassword):
 
 
 async def finish_login(me=None):
-    global watcher_task, handler_registered, signin_task, poll_task, keepalive_task
+    global watcher_task, handler_registered, signin_task, poll_task, keepalive_task, housekeeping_task, health_task
     tg_state["phase"] = "ready"
     tg_state["err"] = None
     me = me or await client.get_me()
@@ -1616,6 +1691,10 @@ async def finish_login(me=None):
     global keepalive_task
     if keepalive_task is None or keepalive_task.done():
         keepalive_task = asyncio.create_task(keepalive_loop())
+    if housekeeping_task is None or housekeeping_task.done():
+        housekeeping_task = asyncio.create_task(housekeeping_loop())
+    if health_task is None or health_task.done():
+        health_task = asyncio.create_task(health_loop())
     log.info("已登录: %s (id=%s)", tg_state["me"]["name"], me.id)
 
 
@@ -1958,7 +2037,7 @@ async def delete_rule(rid: int):
 
 
 # ---------- 设置 ----------
-SETTING_KEYS = ["tz", "cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar",
+SETTING_KEYS = ["tz", "log_keep_days", "cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar",
                 "notify_bark", "notify_bt", "notify_bc", "notify_on_success", "notify_on_fail",
                 "ai_base", "ai_key", "ai_model", "ai_enabled", "ocr_enabled",
                 "flock_enabled", "flock_count", "flock_minutes", "flock_pool"]
@@ -2042,8 +2121,26 @@ async def get_state():
     }
 
 
+@app.post("/api/logs/clear")
+async def clear_logs(body: dict = None):
+    """手动清理日志:days 给了按天数删,没有则全清"""
+    days = (body or {}).get("days")
+    if days is None:
+        cur = conn.execute("DELETE FROM hits")
+        conn.commit()
+        n = cur.rowcount or 0
+        try:
+            conn.execute("VACUUM")
+            conn.commit()
+        except sqlite3.Error:
+            pass
+        return {"ok": True, "deleted": n, "mode": "all"}
+    n = purge_hits(int(days))
+    return {"ok": True, "deleted": n, "mode": "days", "days": int(days)}
+
+
 @app.get("/api/logs")
-async def get_logs(n: int = 60, kind: str = ""):
+async def get_logs(n: int = 60, kind: str = "", q: str = ""):
     """kind: reply(关键词回复) / signin / grabcodes / redpacket / custom;留空=全部"""
     kind = (kind or "").strip()
     if kind == "reply":
@@ -2052,6 +2149,11 @@ async def get_logs(n: int = 60, kind: str = ""):
         where, params = "action=?", [kind]
     else:
         where, params = "1=1", []
+    if q.strip():
+        # 搜索:群名 / 发送人 / 消息 / 回复 / 详情
+        like = "%" + q.strip()[:60] + "%"
+        where += " AND (grp_name LIKE ? OR sender LIKE ? OR content LIKE ? OR reply LIKE ? OR detail LIKE ?)"
+        params = list(params) + [like] * 5
     rows = conn.execute(
         "SELECT ts,chat_id,rule_id,msg_id,action,content,reply,grp_name,ok,sender,detail FROM hits "
         "WHERE " + where + " ORDER BY id DESC LIMIT ?",
@@ -2065,6 +2167,8 @@ async def get_logs(n: int = 60, kind: str = ""):
         except Exception:
             d["detail"] = {}
         out.append(d)
+    if q.strip():
+        return {"hits": out, "counts": {}}
     counts = {"reply": 0, "signin": 0, "grabcodes": 0, "redpacket": 0, "custom": 0, "keepalive": 0}
     for r in conn.execute("SELECT action, COUNT(*) c FROM hits GROUP BY action").fetchall():
         k = "reply" if r["action"] in ("reply", "react", "both") else r["action"]
