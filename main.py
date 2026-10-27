@@ -116,6 +116,7 @@ def db_init():
         ("poll_interval", "INTEGER DEFAULT 0"),
         ("custom_steps", "TEXT DEFAULT ''"),
         ("chain_retry", "INTEGER DEFAULT 1"),
+        ("signin_captcha", "INTEGER DEFAULT 0"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -658,24 +659,41 @@ async def run_signin(a):
         notify_event("fail", a["name"], f"发送失败(重试{retries}次): {target}")
         return
 
-    # 可选:点击回复按钮
+    # 可选:点击回复按钮(bot 回复消息上的键盘,不区分是否自己发出)
+    clicked_btn = False
     if a["click_btn"]:
         try:
             await asyncio.sleep(1.6)
-            recent = await client.get_messages(ent, limit=3)
-            for m in recent:
-                if not m.out:
-                    continue
-                btns = await m.get_buttons()
-                b = _find_btn(btns, a["btn_text"])
-                if b:
-                    await b.click()
-                break
+            _, btns = await _find_latest_buttons(ent)
+            b = _find_btn(btns, a["btn_text"])
+            if b:
+                await b.click()
+                clicked_btn = True
+                log.info("签到点击按钮: %s", b.text)
         except errors.FloodWaitError as e:
             log.warning("点按钮限流,等待 %ss", e.seconds)
             await asyncio.sleep(e.seconds + 1)
         except Exception:
             log.exception("签到点按钮异常")
+
+    # 可选:点签到后出现图片验证码,自动识别并回复
+    cap_ans = ""
+    if a["signin_captcha"]:
+        # 刚点完按钮,给 bot 一点时间发验证码;若没点按钮则直接等
+        cap_m, img = await _await_signin_captcha(ent, 25)
+        if img:
+            cap_ans = await recognize_image_text(img)
+            if cap_ans:
+                try:
+                    await client.send_message(ent, cap_ans)
+                    log.info("签到验证码已回复: %s", cap_ans)
+                except Exception:
+                    log.exception("验证码回复异常")
+            else:
+                log.warning("签到验证码识别为空")
+                notify_event("fail", a["name"], "验证码识别为空(检查 AI/本地 OCR 开关)")
+        else:
+            log.info("签到未等到验证码图片")
 
     # 成功/失败关键词判定 + 积分提取
     ok, points, fail = True, "", False
@@ -684,7 +702,8 @@ async def run_signin(a):
     ppat = str(a["points_pat"] or "").strip()
     reply_txt = ""
     if skw or fkw or ppat:
-        await asyncio.sleep(1.5)
+        # 刚回复验证码后多等一点,让 bot 出最终结果
+        await asyncio.sleep(2.5 if cap_ans else 1.5)
         reply_txt, _ = await _fetch_reply(ent)
         rl = reply_txt.lower()
         if fkw and any(k.strip().lower() in rl for k in re.split(r"[,，]", fkw) if k.strip()):
@@ -701,6 +720,8 @@ async def run_signin(a):
     desc = f"发送: {cmd}"
     if a["click_btn"]:
         desc += " + 点按钮"
+    if cap_ans:
+        desc += f" + 验证码「{cap_ans}」"
     if points:
         desc += f" · 积分 {points}"
     if fail:
@@ -770,6 +791,30 @@ async def _find_latest_buttons(ent, limit=6):
     except Exception:
         pass
     return None, []
+
+
+async def _await_signin_captcha(ent, timeout=25):
+    """等待目标发来带图片的验证码消息,返回 (message, image_bytes);超时返回 (None,None)"""
+    deadline = time.monotonic() + timeout
+    checked = set()
+    while time.monotonic() < deadline:
+        try:
+            for m in await client.get_messages(ent, limit=8):
+                if m.out or m.id in checked:
+                    continue
+                checked.add(m.id)
+                has_img = bool(getattr(m, "photo", None))
+                if not has_img and getattr(m, "document", None):
+                    has_img = str(getattr(m.document, "mime_type", "")).startswith("image/")
+                if not has_img:
+                    continue
+                img = await client.download_media(m, file=bytes)
+                if img:
+                    return m, img
+        except Exception:
+            pass
+        await asyncio.sleep(1.5)
+    return None, None
 
 
 async def run_custom(a):
@@ -1339,6 +1384,7 @@ class AutoIn(BaseModel):
     points_pat: str = ""          # signin: 积分提取正则
     is_chat: int = 0              # signin: 目标是群组
     retries: int = 2              # signin: 发送失败重试次数
+    signin_captcha: int = 0       # signin: 点签到后出现图片验证码,自动识别并回复
     groups: str = ""              # grabcodes/redpacket: 指定群(留空=全部监听群)
     keywords: str = ""            # 触发关键词
     action: str = "reply"         # grabcodes: reply | send
@@ -1381,7 +1427,7 @@ def _valid_auto(body: AutoIn):
         raise HTTPException(400, "冷却秒数无效")
 
 
-_AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,success_kw,fail_kw,points_pat,is_chat,retries,"
+_AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
               "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled")
 
 
@@ -1390,7 +1436,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.type, body.name.strip(), body.target.strip(), body.command.strip(),
         body.win_start.strip(), body.win_end.strip(), body.click_btn,
         body.btn_text.strip(), body.success_kw.strip(), body.fail_kw.strip(),
-        body.points_pat.strip(), body.is_chat, body.retries,
+        body.points_pat.strip(), body.is_chat, body.retries, body.signin_captcha,
         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
         body.poll_interval, body.custom_steps.strip(), body.chain_retry,
         body.cooldown, body.enabled,

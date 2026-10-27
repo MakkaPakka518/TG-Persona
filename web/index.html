@@ -173,6 +173,33 @@ button.btn,button.ghost,button.danger{min-height:44px}
   box-shadow:0 8px 30px rgba(0,0,0,.5);transition:.25s;opacity:0;pointer-events:none}
 .toast.show{opacity:1}
 .toast.err{border-color:var(--err)}
+/* ---------- 时间滚轮选择器 ---------- */
+.tp-overlay{position:fixed;inset:0;z-index:90;background:rgba(5,8,16,.45);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;padding:24px}
+.tp-sheet{width:300px;background:var(--panel);border:1px solid var(--line);border-radius:20px;
+  padding:18px 18px 16px;box-shadow:0 24px 70px rgba(0,0,0,.45)}
+.tp-wheels{position:relative;display:flex;align-items:center;justify-content:center}
+.tp-wheel{position:relative;z-index:2;height:220px;flex:1;overflow-y:scroll;scroll-snap-type:y mandatory;
+  padding:88px 0;scrollbar-width:none;scrollbar-color:transparent transparent;-webkit-overflow-scrolling:touch}
+.tp-wheel::-webkit-scrollbar{display:none;width:0;height:0}
+.tp-opt{height:44px;display:flex;align-items:center;justify-content:center;scroll-snap-align:center;
+  font-size:22px;font-variant-numeric:tabular-nums;color:var(--dim);transition:color .15s,font-size .15s;font-weight:500}
+.tp-opt.sel{color:var(--txt);font-size:27px;font-weight:700}
+.tp-colon{position:relative;z-index:2;font-size:26px;font-weight:700;color:var(--txt);padding:0 2px}
+.tp-bar{position:absolute;left:6px;right:6px;top:50%;height:44px;transform:translateY(-50%);z-index:1;
+  border-radius:12px;background:var(--panel2);border:1px solid var(--line);pointer-events:none}
+.tp-wheels::before,.tp-wheels::after{content:"";position:absolute;left:0;right:0;height:70px;z-index:3;pointer-events:none}
+.tp-wheels::before{top:0;background:linear-gradient(var(--panel),transparent)}
+.tp-wheels::after{bottom:0;background:linear-gradient(transparent,var(--panel))}
+.tp-btns{display:flex;align-items:center;justify-content:space-between;margin-top:14px}
+.tp-reset{padding:10px 22px;border:none;border-radius:999px;background:var(--panel2);color:var(--sub);
+  font-size:15px;cursor:pointer}
+.tp-ok{width:52px;height:52px;border:none;border-radius:50%;background:linear-gradient(135deg,var(--acc),var(--acc2));
+  display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 8px 20px rgba(62,166,255,.35)}
+.tp-ok svg{width:26px;height:26px;fill:none;stroke:#fff;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+input[readonly]{cursor:pointer}
+input[readonly]:focus{outline:none;border-color:var(--acc)}
+
 </style>
 </head>
 <body>
@@ -185,6 +212,21 @@ button.btn,button.ghost,button.danger{min-height:44px}
       <div class="lg-sub">输入面板密码进入控制台</div>
       <div id="lgBody"></div>
       <div class="tgerr" id="lgErr"></div>
+    </div>
+  </div>
+</div>
+
+<div id="tpOverlay" class="tp-overlay hidden">
+  <div class="tp-sheet">
+    <div class="tp-wheels">
+      <div class="tp-wheel" id="tpHour"></div>
+      <div class="tp-colon">:</div>
+      <div class="tp-wheel" id="tpMin"></div>
+      <div class="tp-bar"></div>
+    </div>
+    <div class="tp-btns">
+      <button type="button" class="tp-reset" onclick="tpReset()">还原</button>
+      <button type="button" class="tp-ok" onclick="tpConfirm()"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></button>
     </div>
   </div>
 </div>
@@ -288,14 +330,15 @@ button.btn,button.ghost,button.danger{min-height:44px}
           <label>签到命令(多条用 | 分隔随机选一条;支持 {num:N} {word:N} {alpha:N} {uuid} 随机占位符)</label>
           <input type="text" id="sCmd" placeholder="如: /checkin {num:4} | /daily">
           <div class="flex">
-            <div><label>每天时间窗口(开始)</label><input type="text" id="sWinStart" placeholder="08:00" value="08:00"></div>
-            <div><label>窗口(结束)</label><input type="text" id="sWinEnd" placeholder="12:00" value="12:00"></div>
+            <div><label>每天时间窗口(开始)</label><input type="text" id="sWinStart" value="08:00" readonly onclick="openTimePicker('sWinStart')"></div>
+            <div><label>窗口(结束)</label><input type="text" id="sWinEnd" value="12:00" readonly onclick="openTimePicker('sWinEnd')"></div>
           </div>
           <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="sClickBtn" style="width:auto"> 签到后自动点击回复里的按钮</label>
           <div id="sBtnWrap" class="hidden">
             <label>按钮文字(留空自动匹配 签到/确认/领取;可逗号分隔多个)</label>
             <input type="text" id="sBtnText" placeholder="如: 签到,确认">
           </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="sCap" style="width:auto"> 点签到后出现图片验证码,自动识别并回复</label>
           <div class="flex">
             <div><label>成功关键词(选填,机器人回复含它才算成功)</label><input type="text" id="sKw" placeholder="如: 成功,已签到"></div>
             <div><label>失败关键词(选填,回复含它判失败并通知)</label><input type="text" id="sFw" placeholder="如: 失败,已签到过"></div>
@@ -574,6 +617,53 @@ function foldToggle(el){
   el.closest('.fold').classList.toggle('open');
 }
 
+// ---------- 时间滚轮选择器 ----------
+const TP_IH=44;
+let tpTarget=null, tpOrig='08:00';
+function pad2(n){return String(n).padStart(2,'0')}
+function buildWheel(id, n){
+  const el=$(id);
+  el.innerHTML=Array.from({length:n},(_,i)=>`<div class="tp-opt" data-i="${i}">${pad2(i)}</div>`).join('');
+}
+buildWheel('#tpHour',24);buildWheel('#tpMin',60);
+function tpIndex(el){return Math.max(0,Math.round(el.scrollTop/TP_IH))}
+function tpSetIndex(el,i){el.scrollTop=i*TP_IH;tpPaint(el)}
+function tpPaint(el){
+  const i=tpIndex(el);
+  el.querySelectorAll('.tp-opt').forEach(o=>o.classList.toggle('sel',+o.dataset.i===i));
+}
+function tpBindScroll(el){
+  let raf=null;
+  el.addEventListener('scroll',function(){
+    if(raf)cancelAnimationFrame(raf);
+    raf=requestAnimationFrame(()=>tpPaint(el));
+  });
+}
+tpBindScroll($('#tpHour'));tpBindScroll($('#tpMin'));
+function parseHM(v){
+  const m=/^(\d{1,2}):(\d{2})$/.exec((v||'').trim());
+  return m?[Math.min(23,+m[1]),Math.min(59,+m[2])]:[0,0];
+}
+function openTimePicker(id){
+  tpTarget=id;tpOrig=$('#'+id).value||'08:00';
+  const [h,m]=parseHM(tpOrig);
+  $('#tpOverlay').classList.remove('hidden');
+  // 先显示再定位,避免布局未完成
+  requestAnimationFrame(()=>{tpSetIndex($('#tpHour'),h);tpSetIndex($('#tpMin'),m)});
+}
+function tpClose(){$('#tpOverlay').classList.add('hidden');tpTarget=null}
+function tpReset(){
+  const [h,m]=parseHM(tpOrig);
+  tpSetIndex($('#tpHour'),h);tpSetIndex($('#tpMin'),m);
+}
+function tpConfirm(){
+  if(!tpTarget)return tpClose();
+  const h=tpIndex($('#tpHour')),m=tpIndex($('#tpMin'));
+  $('#'+tpTarget).value=pad2(h)+':'+pad2(m);
+  tpClose();
+}
+$('#tpOverlay').addEventListener('click',function(e){if(e.target===this)tpClose()});
+
 // ---------- 自动化 (签到/抢注/抢红包/自定义) ----------
 let autos=[], editAuto=null;
 const AUTO_TYPE={signin:'签到',grabcodes:'抢注',redpacket:'抢红包',custom:'自定义'};
@@ -605,7 +695,7 @@ function renderAutoList(type){
     </div>`).join('');
 }
 function autoDesc(a){
-  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · 每天 ${esc(a.win_start)}~${esc(a.win_end)}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.last_at?' · 今日已签':''}`;
+  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · 每天 ${esc(a.win_start)}~${esc(a.win_end)}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮':''}${a.signin_captcha?' · 验证码':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.last_at?' · 今日已签':''}`;
   if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}${a.poll_interval>0?' · 轮询'+a.poll_interval+'s@'+esc(a.target):''}`;
   if(a.type==='redpacket')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
   return `${esc(a.target||'--')} · ${(a.custom_steps||'').split('"t"').length-1} 步${a.chain_retry>1?' · 重试'+a.chain_retry:''}`;
@@ -625,6 +715,7 @@ function editAutoItem(id){
     $('#sClickBtn').checked=!!a.click_btn;
     $('#sBtnWrap').classList.toggle('hidden',!a.click_btn);
     $('#sBtnText').value=a.btn_text||'';
+    $('#sCap').checked=!!a.signin_captcha;
     $('#sKw').value=a.success_kw||'';
     $('#sFw').value=a.fail_kw||'';
     $('#sPts').value=a.points_pat||'';
@@ -647,7 +738,7 @@ function editAutoItem(id){
 }
 function cancelAutoEdit(t){
   editAuto=null;
-  ({signin:()=>{$('#sName').value='';$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
+  ({signin:()=>{$('#sName').value='';$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';$('#gGroups').value='';$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';$('#cSteps').value='[]';$('#cRetry').value=1;$('#cCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';$('#pGroups').value='';$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'}})[t]();
@@ -679,7 +770,8 @@ async function saveAuto(type){
       is_chat:$('#sIsChat').checked?1:0,
       win_start:$('#sWinStart').value.trim(),win_end:$('#sWinEnd').value.trim(),click_btn:$('#sClickBtn').checked?1:0,
       btn_text:$('#sBtnText').value.trim(),success_kw:$('#sKw').value.trim(),fail_kw:$('#sFw').value.trim(),
-      points_pat:$('#sPts').value.trim(),retries:+$('#sRetries').value||2};
+      points_pat:$('#sPts').value.trim(),retries:+$('#sRetries').value||2,
+      signin_captcha:$('#sCap').checked?1:0};
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
   }else if(type==='grabcodes'){
     body={type,name:$('#gName').value.trim(),groups:$('#gGroups').value.trim(),keywords:$('#gKeywords').value.trim(),
