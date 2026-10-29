@@ -1,0 +1,90 @@
+name: 发布公开版
+
+# 手动发版工具:在 GitHub 网页 → Actions → 「发布公开版」→ Run workflow
+# 留空版本号 = 自动在上一个 vX.Y.Z 的基础上 patch+1;填 v1.2.3 = 使用该版本
+# 动作: 打 tag → 生成 changelog(上个 tag 以来的提交) → 创建公开 GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号(留空自动递增 patch,例如 v1.2.3)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码(含完整历史)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 计算版本号
+        id: ver
+        run: |
+          INPUT="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT" ]; then
+            VER="$INPUT"
+            case "$VER" in
+              v*) ;;
+              *) VER="v$VER" ;;
+            esac
+            echo "$VER" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "版本号格式应为 v1.2.3"; exit 1; }
+          else
+            LAST=$(git tag --list 'v*' --sort=-v:refname | head -1)
+            if [ -z "$LAST" ]; then
+              VER="v1.0.0"
+            else
+              MAJOR=$(echo "$LAST" | sed -E 's/^v([0-9]+)\..*/\1/')
+              MINOR=$(echo "$LAST" | sed -E 's/^v[0-9]+\.([0-9]+)\..*/\1/')
+              PATCH=$(echo "$LAST" | sed -E 's/^v[0-9]+\.[0-9]+\.([0-9]+).*/\1/')
+              VER="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+            fi
+          fi
+          # 目标 tag 已存在(手动输入了已有版本)则终止
+          if git rev-parse -q --verify "refs/tags/$VER" >/dev/null 2>&1; then
+            echo "!! tag $VER 已存在,请换一个版本号"
+            exit 1
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "本次发布版本: $VER"
+
+      - name: 生成变更日志
+        id: changelog
+        run: |
+          PREV=$(git tag --list 'v*' --sort=-v:refname | head -1 || true)
+          if [ -n "$PREV" ]; then
+            git log "$PREV"..HEAD --oneline --no-decorate 2>/dev/null > /tmp/commits.txt \
+              || git log --oneline -20 > /tmp/commits.txt
+          else
+            git log --oneline --no-decorate > /tmp/commits.txt
+          fi
+          {
+            echo "### 变更内容"
+            echo ""
+            if [ -s /tmp/commits.txt ]; then
+              sed 's/^/- /' /tmp/commits.txt
+            else
+              echo "- (无新的代码提交)"
+            fi
+            echo ""
+            echo "---"
+            echo "> 由 GitHub Action「发布公开版」自动生成 · 部署请见 README(install.sh 一键安装)"
+          } > CHANGELOG.md
+          echo "已生成变更日志"
+
+      - name: 打 tag 并创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          gh release create "$VER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "TG Persona $VER" \
+            --notes "$(cat CHANGELOG.md)"
+          echo "已发布: https://github.com/$GITHUB_REPOSITORY/releases/tag/$VER"
