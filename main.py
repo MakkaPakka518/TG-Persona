@@ -43,6 +43,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+import updater
+
 BASE = Path(__file__).resolve().parent
 DATA = BASE / "data"
 DATA.mkdir(mode=0o700, exist_ok=True)
@@ -2181,6 +2183,25 @@ async def get_logs(n: int = 60, kind: str = "", q: str = ""):
 @app.get("/")
 async def index():
     return FileResponse(BASE / "web" / "index.html")
+
+
+# ---------------- 在线更新 ----------------
+@app.get("/api/version")
+async def get_version(check: int = 0):
+    """check=1 时实时向 GitHub 查询最新版本;否则返回缓存"""
+    if check:
+        try:
+            updater.fetch_latest()
+        except Exception as e:
+            raise HTTPException(502, f"检查更新失败:{e}")
+    return updater.snapshot()
+
+
+@app.post("/api/update")
+async def run_update(body: dict = None):
+    """后台执行更新;前端轮询 /api/version 看进度"""
+    force = bool((body or {}).get("force", False))
+    return updater.start_update(force=force)
 
 
 @app.get("/avatar")

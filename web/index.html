@@ -714,6 +714,18 @@ input[readonly]:focus{border-color:var(--acc)}
   <section id="tab-settings">
     <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</h2>
     <div class="sub">触发行为与面板安全</div>
+    <div class="card fold open">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>系统更新</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div class="hint" id="updInfo">版本信息加载中…</div>
+        <div class="flex" style="margin-top:10px">
+          <button class="btn" id="updCheck" style="flex:1" onclick="checkUpdate()">检查更新</button>
+          <button class="btn" id="updBtn" style="flex:1" onclick="doUpdate()">立即更新</button>
+        </div>
+        <pre id="updLog" class="hint" style="white-space:pre-wrap;display:none;margin-top:12px;max-height:260px;overflow:auto"></pre>
+        <div class="hint">更新会自动备份当前文件到 data/backup-时间戳,再拉取仓库最新文件并重启服务;data 数据和 venv 不受影响。</div>
+      </div>
+    </div>
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>触发行为</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
@@ -825,10 +837,50 @@ function goTab(t){
   if(t==='autos')loadAutos();
   if(t==='groups')loadDialogs();
   if(t==='logs')loadLogs();
-  if(t==='settings'){renderTgCard()}
+  if(t==='settings'){renderTgCard();loadUpd(false)}
 }
 function foldToggle(el){
   el.closest('.fold').classList.toggle('open');
+}
+
+// ---------- 系统更新 ----------
+let updTimer=null;
+function renderUpd(s){
+  const info=$('#updInfo'); if(!info) return;
+  let line=`当前版本 <b>${esc(s.current)}</b>`;
+  if(s.latest) line += `，最新版本 <b>${esc(s.latest)}</b>`;
+  if(s.running) line += `，<span style="color:var(--accent)">正在更新：${esc(s.phase||'')}…</span>`;
+  else if(s.ok===true) line += '，<span style="color:#16a34a">更新成功，服务重启中</span>';
+  else if(s.ok===false) line += '，<span style="color:var(--bad)">更新失败，见下方日志</span>';
+  else if(s.latest) line += s.available ? '，<span style="color:var(--accent)">有新版本可更新</span>' : '，已是最新版';
+  info.innerHTML=line;
+  const logEl=$('#updLog');
+  if(s.log && s.log.length){ logEl.style.display='block'; logEl.textContent=s.log.join('\n'); }
+  else if(!s.running) logEl.style.display='none';
+  $('#updCheck').disabled=s.running;
+  $('#updBtn').disabled=s.running;
+}
+async function loadUpd(check){
+  try{
+    const s=await api('/api/version'+(check?'?check=1':''));
+    renderUpd(s);
+    if(s.running){ clearInterval(updTimer); updTimer=setInterval(async()=>{ try{renderUpd(await api('/api/version'))}catch(e){} },1500); }
+    else clearInterval(updTimer);
+  }catch(e){ const info=$('#updInfo'); if(info) info.textContent='版本信息加载失败：'+e.message; }
+}
+async function checkUpdate(){
+  $('#updCheck').disabled=true;
+  try{ await loadUpd(true); toast('已检查最新版本'); }
+  catch(e){ toast(e.message,true); $('#updCheck').disabled=false; }
+}
+async function doUpdate(){
+  const s=await api('/api/version').catch(()=>({available:false}));
+  if(!s.available && !confirm('当前没有检测到新版本，仍要强制拉取最新文件吗？')) return;
+  if(!confirm('更新过程中服务会短暂重启，确定继续？')) return;
+  try{
+    await api('/api/update',{method:'POST',body:JSON.stringify({force:!s.available})});
+    toast('已开始更新'); loadUpd(false);
+  }catch(e){ toast(e.message,true); }
 }
 
 // ---------- 时间滚轮选择器 ----------
