@@ -5,7 +5,7 @@
 ## 功能
 
 - **可视化 TG 登录**:面板里填 API_ID / API_HASH → 手机号 → 验证码 → (两步验证密码),会话持久保存,重启免登录;登录后自动同步头像
-- **面板安全**:密码用 scrypt 哈希存储(不落明文、不写进 systemd unit);登录成功发随机会话令牌(30 天,可"退出所有设备");连续输错 3 次才要求图形验证码,10 次后自动锁定 10 分钟
+- **面板安全**:密码用 scrypt 哈希存储;随机会话令牌由服务端严格校验 30 天有效期;连续输错 3 次要求 PNG 位图验证码(一次性、3 分钟),10 次锁定 10 分钟;默认不信任伪造的代理头,改密必须验证原密码;HTTPS 下自动启用 Secure Cookie
 - **群管理**:列出账号加入的所有群(可搜索),一键加入 / 取消监听
 - **关键词规则**:
   - 关键词多词逗号分隔(任意命中)、支持正则
@@ -27,8 +27,8 @@
 - **拟人化参数**:命中后随机延迟(默认 1~3 秒)、同群同规则冷却(默认 20 秒)、忽略机器人消息
 - **主题与外观**:亮色 / 暗色主题一键切换(跨设备同步)、自定义头像、移动端友好 UI
 - **日志管理**:默认保留 30 天自动清理(设置里可改,0=永久),支持按「清理 30 天前 / 清空全部」手动删除;支持按群名/发送人/消息内容搜索
-- **会话守护**:每分钟检查一次 TG 登录状态,掉线立刻推送提醒(只推一次,恢复后自动复位)
-- **在线更新与版本号**:设置页显示当前/最新版本,一键检查并拉取仓库最新文件;更新前自动备份到 `data/backup-时间戳`,自动装依赖并重启服务(`data` 数据与 `venv` 不受影响)
+- **会话守护**:每分钟检测 TG 状态,临时故障不当作确定登出,异常状态仍继续复查;恢复后自动复位通知状态
+- **在线更新与版本号**:继续拉取 `main`,开始时锁定其提交快照;安全解包、校验、备份、依赖安装、替换、重启和健康检查,失败自动恢复代码/版本并尝试重启旧版;更新状态跨重启保存。会话与数据库不被覆盖;依赖安装可能修改 venv,不承诺依赖自动回滚
 - **多条规则同时命中**:一条消息可以同时触发多条规则(每条各自冷却),不再只执行第一条
 - **运行面板**:总览统计、日志按类型分开(回复/签到/抢注/红包/自定义)、点一行展开完整记录(谁在哪个群发了什么、我回复/点了什么)、暂停/恢复开关、任务复制、面板密码修改
 
@@ -103,15 +103,17 @@ cd /opt/tg-persona
 python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 
-# 3. 配置 systemd 服务(可先编辑端口和密码)
+# 3. 配置 systemd 服务(先编辑路径和端口)
 sudo cp tg-persona.service /etc/systemd/system/
-#   编辑 service:改 --port 和 PANEL_PASSWORD 环境变量
+#   ExecStart 必须使用已安装依赖的 venv/bin/python，保留 --no-proxy-headers。
+#   可用 data/panel_password.txt(600)预置首次密码，不要把密码写进 unit。
 sudo systemctl daemon-reload
 sudo systemctl enable --now tg-persona
 
-# 4. 查看启动状态与面板密码(仅当未设置 PANEL_PASSWORD 时)
+# 4. 查看启动状态；未预置密码时，随机密码仅在首次启动日志显示一次
 sudo systemctl status tg-persona
-cat /opt/tg-persona/data/panel_password.txt   # 首次启动自动生成的密码
+sudo journalctl -u tg-persona -n 50 --no-pager
+# data/panel_password.txt 启动后已经删除，密码只以哈希存于数据库。
 ```
 
 之后浏览器打开 `http://你的VPS的IP:端口`,输入面板密码进入。
@@ -129,19 +131,22 @@ cat /opt/tg-persona/data/panel_password.txt   # 首次启动自动生成的密�
 
 ## 在线更新(喂饭步骤)
 
-1. 进入面板「设置 → 系统更新」,会显示**当前版本**;点「检查更新」会向 GitHub 查询**最新版本**。
-2. 有新版本时提示「有新版本可更新」,点「立即更新」并确认;没有新版本也可强制拉取。
-3. 面板实时显示进度:下载 → 替换文件 → 装依赖 → 重启。更新前会把将被覆盖的文件备份到 `data/backup-时间戳/`。
-4. 服务重启后面板几秒后自动重连,再看版本号已变成最新即成功。
+1. 在「设置 → 系统更新」检查最新版本。**始终取 `main`，不是 Release**；一次更新的 VERSION 和代码锁定到同一个 main 提交，避免下载过程中分支变化造成混包。
+2. 有新版本时点「立即更新」；版本号相同也可以确认后强制拉取 main 最新代码。
+3. 进度依次为下载、解包校验、备份、依赖、替换、重启、健康检查。只有新服务连续通过健康检查才显示成功；重启期间网页保持轮询，状态写入 `data/update-state.json`。
+4. 失败自动恢复原代码与 VERSION，新版新增的文件也会移除；若已重启则尝试恢复旧服务。回滚失败会明确显示需人工处理，不会误报成功。
+5. 准备线程/监督器意外退出后，下一次更新请求会检查进程身份与事务标记：未覆盖的旧任务解除状态，已覆盖但未确认的事务先恢复，不会直接覆盖另一份代码；恢复失败可重试恢复或按备份 manifest 人工处理。
 
-> 注意:更新只覆盖代码文件,**不会动 `data/`(会话、数据库、密码)和 `venv/`**;服务器要能访问 github.com / codeload.github.com。
-> 回滚:若更新后异常,把 `data/backup-时间戳/` 里的对应文件复制回项目根目录覆盖,再 `systemctl restart tg-persona`。
-> 发版约定:每次发布在仓库根目录 `VERSION` 里写新版本号(如 `1.2.0`),用户端据此判断是否最新。
+> 更新不覆盖会话、数据库、密码、`.git`、`.env` 等本地数据。依赖安装使用应用解释器，pip 失败也可能已经改变部分依赖；代码可自动回滚，**依赖环境不保证自动回滚**。
+> systemd 部署需要 `systemctl` 和 `systemd-run`，监督更新的临时服务独立于应用，避免被重启杀掉。非 systemd 仅支持单进程 `python main.py` 或 `python -m uvicorn main:app`；不支持的管理器、多 worker/reload 或无法确认健康地址会在覆盖前拒绝更新。
+> 服务器需能访问 api.github.com、raw.githubusercontent.com、codeload.github.com；检查 main 使用 GitHub API，受其访问限额约束。
+> 备份目录含 manifest 与原文件，恢复方法见下方补充说明。
 
 ## 安全说明
 
 - Telegram 账号会话保存在 `data/tg.session`,目录权限 700 / 文件 600
-- 面板密码存 `data/panel_password.txt`(600),面板所有 API 均需密码鉴权(cookie)
+- 面板密码启动后只以 scrypt 哈希存于 `data/config.db`；随机 token 鉴权、30 天服务端过期；图形验证码为 PNG 位图
+- 改密必须填写原密码；改密会注销全部旧 token 并为当前设备换发新 token
 - 不建议把面板端口(8090)直接暴露公网;可用防火墙限定 IP,或通过 Nginx 反代加 HTTPS
 - 提示:频繁回复可能触发 Telegram 限流(代码会自动等待 FloodWait),请合理设置冷却时间
 
@@ -151,3 +156,60 @@ cat /opt/tg-persona/data/panel_password.txt   # 首次启动自动生成的密�
 - **登录后群列表为空**:确认登录的是你自己加入了群的账号
 - **改了端口**:编辑 service 里 `--port` 或设环境变量 `PORT`,然后 `sudo systemctl daemon-reload && sudo systemctl restart tg-persona`
 - **日志怎么调大**:`sudo journalctl -u tg-persona -f` 实时查看
+
+## 手动打包发布与 VERSION 同步
+
+GitHub → Actions →「发布公开版」→ Run workflow，选择 `main`：
+
+- **版本号留空**：优先使用根目录 `VERSION`。若这个版本已经有发布标签，则在当前文件/已发布版本的最高值上递增 patch。
+- **手动填写**：接受 `1.2.3` 或 `v1.2.3`，不允许已有标签或版本倒退。
+- 流程先跑隔离回归，再把最终版本写为 `VERSION` 的 `1.2.3`；若文件发生变化，自动提交回 `main`。
+- 从**同一个提交**生成 `v1.2.3` 标签、tar.gz、zip 与 SHA256SUMS，再原子推送 main 和标签，最后创建 Release/上传安装包。
+- 发布过程中 main 被别人推进，流程会拒绝过时快照，不强推，也不会留下半成功的远端标签。
+- 工作流需要仓库内容写权限；若 main 有分支保护，还需允许工作流的版本同步提交，否则会明确失败。
+
+**在线更新仍拉 main，发布并不会把更新来源改成 Release。** 本版本 `VERSION=1.0.4`，首次留空发布将使用 `v1.0.4`。
+
+## 反向代理与 HTTPS
+
+新安装已禁用 uvicorn 自动代理头解析。旧服务请在 ExecStart 中补上 `--no-proxy-headers`；应用仅按 `TRUSTED_PROXIES` 明确配置的 IP/CIDR 信任代理，默认不信任任何代理。
+
+本机 nginx 示例（服务绑定 127.0.0.1，TLS 在 nginx 终止）：
+
+```ini
+# systemctl edit tg-persona
+[Service]
+Environment="TRUSTED_PROXIES=127.0.0.1,::1"
+ExecStart=
+ExecStart=/opt/tg-persona/venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8090 --no-proxy-headers
+```
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8090;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+不要设置全网可信 CIDR，也不要允许客户端绕过代理直接访问后端。HTTPS 下自动设置 Secure cookie；HTTP 为兼容现有部署保留，但不适合直接暴露公网。更新代码不会替你签发证书或修改 VPS 的 nginx/systemd 配置。
+
+## 自动任务状态与失败重试
+
+- `last_at` 只记录成功；`last_attempt`、失败次数、下次重试时间单独存储，失败也留日志。每天是否已签以面板配置时区的当天成功日期判断。
+- `retries` 表示额外重试次数（0–5）；默认每轮最多 3 次尝试。失败退避为 60、120、240…秒，上限 3600 秒，Telegram FloodWait 优先遵守服务器要求。
+- 签到严格使用同日半开窗口 `[开始,结束)`，窗口结束不再开始/重试，并取消超窗的后续步骤。
+- 保号新任务仍先等待一个配置间隔；失败采用有次数上限的短退避，不会因为一次失败马上等待整个七天间隔。失败耗尽后才回到完整间隔，避免无限刷消息。
+- 手动执行和定时执行共用任务锁，防止重复并发；监听开关仍只控制群消息监听，不改成全局任务暂停。
+- 升级保留旧 `last_at`，因为旧版历史记录无法可靠区分成功和失败，不会为了修复而擅自重签全部任务。
+
+## 回归测试
+
+```bash
+python3 -m pip install fastapi telethon httpx uvicorn pyyaml
+python3 -m unittest discover -s test_suite -p 'test_*.py' -v
+node test_suite/test_frontend.js
+```
+
+所有测试使用原函数提取/mock 客户端、临时数据库或临时仓库。完整接口测试复制代码到临时目录；发布流程测试使用本地 bare 远端和 mock gh，不访问真实 Telegram、线上面板或 GitHub 发布接口。

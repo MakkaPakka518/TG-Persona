@@ -7,10 +7,20 @@ TG Persona —— Telegram 人形分身 (Userbot Watcher)
 - 可视化面板 (http://IP:端口) 完成登录、选群、配关键词
 - 监听的群里有人发你设定的关键词时,以你的身份回复文本 / 点表情
 
-启动:  uvicorn main:app --host 0.0.0.0 --port 8090
+启动:  uvicorn main:app --host 0.0.0.0 --port 8090 --no-proxy-headers
 或:    python main.py            (内置 uvicorn,读取 .env 的 PORT)
+安全配置: 默认不信任转发头。仅反向代理部署时配置 TRUSTED_PROXIES=127.0.0.1,::1
+(支持逗号分隔 IP/CIDR,不要配置全网 CIDR),代理须覆盖 X-Forwarded-For / Proto。
+外部 uvicorn 必须加 --no-proxy-headers,避免 request.client 在应用鉴权前被改写。
+公网面板推荐 HTTPS;HTTPS/可信代理的 HTTPS 请求使用 Secure cookie,直连 HTTP 兼容。
 """
 import asyncio
+import base64
+from collections import OrderedDict
+import ipaddress
+import math
+import struct
+import zlib
 import json
 import logging
 import random
@@ -138,6 +148,11 @@ def db_init():
         ("btn_emoji", "TEXT DEFAULT ''"),
         ("click_times", "INTEGER DEFAULT 1"),
         ("click_interval", "INTEGER DEFAULT 300"),
+        ("last_attempt", "INTEGER DEFAULT 0"),
+        ("retry_count", "INTEGER DEFAULT 0"),
+        ("retry_day", "TEXT DEFAULT ''"),
+        ("next_run_at", "INTEGER DEFAULT 0"),
+        ("last_status", "TEXT DEFAULT ''"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -159,6 +174,8 @@ def db_init():
             conn.execute(f"ALTER TABLE hits ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
             pass
+    # 重启时不把未完成的执行误记为成功;已有 next_run_at 保留退避保护。
+    conn.execute("UPDATE automations SET last_status='interrupted' WHERE last_status='running'")
     conn.commit()
 
 
@@ -413,8 +430,13 @@ async def recognize_image_text(image_bytes, length=0):
 
 
 # ---------------- 面板鉴权:密码哈希 / 会话令牌 / 限速 / 验证码 ----------------
-_captcha = {}        # ip -> (code, ts)
-_login_fail = {}     # ip -> {"n": 连续失败, "first": 窗口起点, "blocked_until": 解封时间}
+_captcha = OrderedDict()  # ip -> (code, ts),仅位图答案存在服务器内存
+_login_fail = OrderedDict()
+SESSION_TTL = 30 * 86400
+CAPTCHA_TTL = 180
+AUTH_CACHE_MAX = 4096
+CAPTCHA_CACHE_MAX = 2048
+_auth_gc_at = 0.0
 RL_WINDOW = 600      # 失败统计窗口:10 分钟
 RL_MAX = 10          # 窗口内失败上限,超过封 10 分钟
 RL_BLOCK = 600
@@ -473,17 +495,31 @@ def init_panel_password():
 def create_session(ip: str, ua: str) -> str:
     tok = secrets.token_urlsafe(32)
     ts = int(time.time())
-    conn.execute("DELETE FROM panel_sessions WHERE created < ?", (ts - 30 * 86400,))
+    purge_sessions(ts)
     conn.execute("INSERT INTO panel_sessions(token,created,ip,ua,last_seen) VALUES(?,?,?,?,?)",
                  (tok, ts, ip[:64], (ua or "")[:160], ts))
     conn.commit()
     return tok
 
 
+def purge_sessions(now=None):
+    now = int(time.time() if now is None else now)
+    conn.execute("DELETE FROM panel_sessions WHERE created IS NULL OR created<=? OR created>?",
+                 (now - SESSION_TTL, now))
+    conn.commit()
+
+
 def session_ok(tok: str) -> bool:
-    if not tok:
+    now = int(time.time())
+    purge_sessions(now)
+    if not tok or len(tok) > 256:
         return False
-    return conn.execute("SELECT 1 FROM panel_sessions WHERE token=?", (tok,)).fetchone() is not None
+    row = conn.execute("SELECT created FROM panel_sessions WHERE token=?", (tok,)).fetchone()
+    if row is None or not now - SESSION_TTL < row["created"] <= now:
+        return False
+    conn.execute("UPDATE panel_sessions SET last_seen=? WHERE token=?", (now, tok))
+    conn.commit()
+    return True
 
 
 def drop_session(tok: str):
@@ -497,18 +533,86 @@ def drop_all_sessions():
     conn.commit()
 
 
+def load_trusted_proxies():
+    nets = []
+    for item in os.environ.get("TRUSTED_PROXIES", "").split(","):
+        if item.strip():
+            try:
+                nets.append(ipaddress.ip_network(item.strip(), strict=False))
+            except ValueError:
+                raise ValueError("TRUSTED_PROXIES 必须是逗号分隔的 IP/CIDR") from None
+    return tuple(nets)
+
+
+TRUSTED_PROXIES = load_trusted_proxies()
+
+
+def _trusted_ip(host):
+    try:
+        addr = ipaddress.ip_address(host)
+        return any(addr in net for net in TRUSTED_PROXIES)
+    except ValueError:
+        return False
+
+
 def client_ip(request) -> str:
+    # 必须配合 uvicorn --no-proxy-headers,这里只认原始 TCP 对端。
+    peer = request.client.host if request.client else "?"
     xff = request.headers.get("x-forwarded-for", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.client.host if request.client else "?"
+    if not _trusted_ip(peer) or not xff or len(xff) > 2048:
+        return peer
+    chain = xff.split(",")
+    if len(chain) > 20:
+        return peer
+    try:
+        chain = [str(ipaddress.ip_address(ip.strip())) for ip in chain]
+    except ValueError:
+        return peer
+    # 从右侧可信跳点回溯,不把攻击者伪造的最左地址用作限速键。
+    for hop in reversed(chain):
+        if not _trusted_ip(peer):
+            break
+        peer = hop
+    return peer
+
+
+def request_https(request) -> bool:
+    if request.scope.get("scheme") == "https":
+        return True
+    peer = request.client.host if request.client else "?"
+    return _trusted_ip(peer) and request.headers.get("x-forwarded-proto", "").strip().lower() == "https"
+
+
+def set_panel_cookie(response, token, request):
+    response.set_cookie("panel_token", token, max_age=SESSION_TTL, httponly=True,
+                        samesite="lax", secure=request_https(request))
+
+
+def _auth_cache_gc(now):
+    global _auth_gc_at
+    if now - _auth_gc_at < 30 and len(_login_fail) < AUTH_CACHE_MAX and len(_captcha) < CAPTCHA_CACHE_MAX:
+        return
+    _auth_gc_at = now
+    for ip, (_, ts) in list(_captcha.items()):
+        if now - ts >= CAPTCHA_TTL:
+            _captcha.pop(ip, None)
+    for ip, st in list(_login_fail.items()):
+        if now - st["first"] >= RL_WINDOW and now >= st["blocked_until"]:
+            _login_fail.pop(ip, None)
 
 
 def rl_state(ip: str):
     now = time.time()
+    _auth_cache_gc(now)
     st = _login_fail.get(ip)
-    if not st or now - st["first"] > RL_WINDOW:
-        st = {"n": 0, "first": now, "blocked_until": 0}
+    if st and now - st["first"] >= RL_WINDOW and now >= st["blocked_until"]:
+        _login_fail.pop(ip, None)
+        st = None
+    if st is None:
+        if len(_login_fail) >= AUTH_CACHE_MAX:
+            # 容量满时拒绝新的来源,不逐出被封禁者以免换 IP 绕过封禁。
+            raise HTTPException(429, "登录请求过多,请稍后重试")
+        st = {"n": 0, "first": now, "blocked_until": 0, "captcha_at": 0}
         _login_fail[ip] = st
     return st
 
@@ -534,31 +638,74 @@ def rl_ok(ip: str):
     _login_fail.pop(ip, None)
 
 
+# 5x7 位图字形(不产生 SVG/text/font/PNG 文本元数据)。随机仿射+正弦扭曲后写 RGB PNG。
+_CAPTCHA_FONT = {
+    "2": "0e11010204081f", "3": "1e01010e01011e", "4": "02060a121f0202",
+    "5": "1f10101e01011e", "6": "0e10101e11110e", "7": "1f010204080808",
+    "8": "0e11110e11110e", "9": "0e11110f01010e", "A": "0e11111f111111",
+    "B": "1e11111e11111e", "C": "0e11101010110e", "D": "1e11111111111e",
+    "E": "1f10101e10101f", "F": "1f10101e101010", "G": "0e11101711110f",
+    "H": "1111111f111111", "J": "0702020212120c", "K": "11121418141211",
+    "L": "1010101010101f", "M": "111b1515111111", "N": "11191513111111",
+    "P": "1e11111e101010", "R": "1e11111e141211", "S": "0f10100e01011e",
+    "T": "1f040404040404", "U": "1111111111110e", "V": "11111111110a04",
+    "W": "11111115151b11", "X": "11110a040a1111", "Y": "11110a04040404",
+    "Z": "1f01020408101f",
+}
+
+
 def gen_captcha(ip: str) -> str:
-    """图形验证码:答案绑定 IP,3 分钟内有效,用过即失效"""
-    import random as _r
-    code = "".join(_r.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=4))
-    _captcha[ip] = (code, time.time())
-    chars = "".join(
-        f'<text x="{28 + i * 26}" y="{42}" font-size="30" font-family="Arial" font-weight="bold" '
-        f'fill="#{_r.choice(["4af", "a4d", "5ad", "6cf", "8e8"])}" '
-        f'transform="rotate({_r.randint(-18, 18)} {28 + i * 26} 42)">{c}</text>'
-        for i, c in enumerate(code)
-    )
-    lines = "".join(
-        f'<line x1="{_r.randint(0, 120)}" y1="{_r.randint(0, 50)}" '
-        f'x2="{_r.randint(0, 120)}" y2="{_r.randint(0, 50)}" stroke="#666" stroke-width="1"/>'
-        for _ in range(6)
-    )
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="140" height="50" viewBox="0 0 140 50">'
-            f'<rect width="140" height="50" fill="#1b1e28" rx="8"/>{lines}{chars}</svg>')
+    """返回完整 PNG data URL;答案绑定 IP,严格 3 分钟,任何验证均消耗一次。"""
+    now = time.time()
+    st = rl_state(ip)
+    if now - st.get("captcha_at", 0) < 1:
+        raise HTTPException(429, "验证码刷新过快")
+    if ip not in _captcha and len(_captcha) >= CAPTCHA_CACHE_MAX:
+        raise HTTPException(429, "验证码请求过多,请稍后重试")
+    st["captcha_at"] = now
+    rng = secrets.SystemRandom()
+    code = "".join(secrets.choice(tuple(_CAPTCHA_FONT)) for _ in range(4))
+    width, height = 160, 60
+    pixels = bytearray([24, 29, 40] * width * height)
+
+    def dot(x, y, color):
+        if 0 <= x < width and 0 <= y < height:
+            start = (y * width + x) * 3
+            pixels[start:start + 3] = bytes(color)
+
+    for i, char in enumerate(code):
+        rows = bytes.fromhex(_CAPTCHA_FONT[char])
+        tilt, phase = rng.uniform(-0.22, 0.22), rng.uniform(0, math.tau)
+        y0 = rng.randint(12, 19)
+        color = (rng.randint(140, 220), rng.randint(175, 245), rng.randint(185, 255))
+        for y in range(28):
+            for x in range(20):
+                if rows[y // 4] & (1 << (4 - x // 4)):
+                    xx = round(15 + i * 34 + x + tilt * (y - 14) + 2 * math.sin(y / 7 + phase))
+                    yy = round(y0 + y + 1.8 * math.sin(x / 9 + phase))
+                    dot(xx, yy, color)
+    for _ in range(160):
+        dot(rng.randrange(width), rng.randrange(height), (95, 105, 130))
+    for _ in range(3):
+        y0, phase = rng.randrange(height), rng.uniform(0, math.tau)
+        for x in range(width):
+            dot(x, round(y0 + 5 * math.sin(x / 17 + phase)), (75, 85, 110))
+
+    def chunk(kind, data):
+        return struct.pack("!I", len(data)) + kind + data + struct.pack("!I", zlib.crc32(kind + data) & 0xffffffff)
+
+    raw = b"".join(b"\x00" + pixels[y * width * 3:(y + 1) * width * 3] for y in range(height))
+    png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack("!2I5B", width, height, 8, 2, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+    _captcha[ip] = (code, now)
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
 def check_captcha(ip: str, ans: str) -> bool:
     code, ts = _captcha.pop(ip, ("", 0.0))
-    if not code or time.time() - ts > 300:
+    if not code or not 0 <= time.time() - ts < CAPTCHA_TTL:
         return False
-    return ans.strip().upper() == code
+    return hmac.compare_digest(str(ans or "").strip().upper(), code)
 
 
 init_panel_password()
@@ -761,7 +908,8 @@ async def resolve_entity(peer):
     if not peer or not str(peer).strip():
         return None
     try:
-        return await client.get_entity(str(peer).strip())
+        value = str(peer).strip()
+        return await client.get_entity(int(value) if re.fullmatch(r"[+-]?[0-9]+", value) else value)
     except Exception:
         return None
 
@@ -917,12 +1065,12 @@ def _pick_cmd(command):
     return render_placeholders(random.choice(parts) if parts else str(command or "").strip())
 
 
-async def _fetch_reply(ent):
-    """取与目标最近的非自己消息文本(判定成功/失败/积分用)"""
+async def _fetch_reply(ent, min_id=0):
+    """只读取本轮发出消息之后的非自己消息,禁止历史回复误报成功。"""
     try:
-        recent = await client.get_messages(ent, limit=5)
+        recent = await client.get_messages(ent, limit=10)
         for m in recent:
-            if m.out:
+            if m.out or m.id <= min_id:
                 continue
             return (m.raw_text or ""), m
     except Exception:
@@ -930,37 +1078,37 @@ async def _fetch_reply(ent):
     return "", None
 
 
+class _RetryLater(Exception):
+    def __init__(self, seconds, message="Telegram 限流"):
+        super().__init__(message)
+        self.seconds = max(60, int(seconds) + 1)
+
+
+def _task_failure(a, message, content=""):
+    add_hit(a["type"], False, chat_id=a["target"], rule_id=-a["id"], grp_name=a["name"],
+            content=content, detail={"kind": a["type"], "task": a["name"],
+                                     "error": str(message)[:200]})
+    notify_event("fail", a["name"], str(message)[:200])
+    log.warning("任务失败 %s: %s", a["name"], message)
+    return False
+
+
 async def run_signin(a):
-    """执行单条签到:发命令(多条随机|占位符),可选点按钮;成功/失败关键词判定,积分提取,失败重试"""
+    """单次签到尝试;重试/成功时间由统一执行器管理,不在协程内无限重发。"""
     target = str(a["target"] or "").strip()
     cmd = _pick_cmd(a["command"])
     if not target or not cmd:
-        return
+        return _task_failure(a, "签到缺少目标或命令")
     ent = await resolve_entity(target)
     if ent is None:
-        log.warning("签到目标解析失败: %s", target)
-        notify_event("fail", a["name"], f"签到目标解析失败: {target}")
-        return
-    retries = max(1, min(int(a["retries"] or 2), 5))
-    sent = False
-    for attempt in range(retries):
-        try:
-            await client.send_message(ent, cmd)
-            sent = True
-            break
-        except errors.FloodWaitError as e:
-            log.warning("签到限流,等待 %ss", e.seconds)
-            await asyncio.sleep(e.seconds + 1)
-        except errors.RPCError as e:
-            log.warning("签到发送失败(尝试 %s/%s): %s", attempt + 1, retries, e)
-            await asyncio.sleep(2)
-        except Exception:
-            log.exception("签到发送异常")
-            await asyncio.sleep(2)
-    if not sent:
-        log.warning("签到最终失败(重试 %s 次): %s", retries, target)
-        notify_event("fail", a["name"], f"发送失败(重试{retries}次): {target}")
-        return
+        return _task_failure(a, "签到目标解析失败", cmd)
+    try:
+        sent_msg = await client.send_message(ent, cmd)
+        min_id = sent_msg.id
+    except errors.FloodWaitError as e:
+        raise _RetryLater(e.seconds) from e
+    except Exception as e:
+        return _task_failure(a, f"签到发送失败: {e}", cmd)
 
     # 可选:点击回复按钮(bot 回复消息上的键盘,不区分是否自己发出)
     clicked_btn = False
@@ -968,8 +1116,10 @@ async def run_signin(a):
     if a["click_btn"]:
         try:
             await asyncio.sleep(1.6)
-            _, btns = await _find_latest_buttons(ent)
+            _, btns = await _find_latest_buttons(ent, min_id=min_id)
             b = _find_btn(btns, a["btn_text"], a["btn_emoji"])
+            if not b:
+                return _task_failure(a, "本轮签到未找到匹配按钮", cmd)
             if b:
                 times = max(1, min(int(a["click_times"] or 1), 20))
                 gap = max(50, min(int(a["click_interval"] or 300), 3000)) / 1000.0
@@ -978,7 +1128,7 @@ async def run_signin(a):
                         await asyncio.sleep(gap)
                         # 每点一次消息会更新,重新取最新按钮再点
                         try:
-                            _, btns2 = await _find_latest_buttons(ent)
+                            _, btns2 = await _find_latest_buttons(ent, min_id=min_id)
                             nb = _find_btn(btns2, a["btn_text"], a["btn_emoji"])
                             if nb:
                                 b = nb
@@ -989,29 +1139,28 @@ async def run_signin(a):
                 btn_text_clicked = getattr(b, "text", "") or ""
                 log.info("签到点击按钮: %s ×%s", b.text, times)
         except errors.FloodWaitError as e:
-            log.warning("点按钮限流,等待 %ss", e.seconds)
-            await asyncio.sleep(e.seconds + 1)
-        except Exception:
-            log.exception("签到点按钮异常")
+            raise _RetryLater(e.seconds) from e
+        except Exception as e:
+            return _task_failure(a, f"签到点按钮失败: {e}", cmd)
 
     # 可选:点签到后出现图片验证码,自动识别并回复
     cap_ans = ""
     if a["signin_captcha"]:
         # 刚点完按钮,给 bot 一点时间发验证码;若没点按钮则直接等
-        cap_m, img = await _await_signin_captcha(ent, 25)
-        if img:
-            cap_ans = await recognize_image_text(img)
-            if cap_ans:
-                try:
-                    await client.send_message(ent, cap_ans)
-                    log.info("签到验证码已回复: %s", cap_ans)
-                except Exception:
-                    log.exception("验证码回复异常")
-            else:
-                log.warning("签到验证码识别为空")
-                notify_event("fail", a["name"], "验证码识别为空(检查 AI/本地 OCR 开关)")
-        else:
-            log.info("签到未等到验证码图片")
+        cap_m, img = await _await_signin_captcha(ent, 25, min_id=min_id)
+        if not img:
+            return _task_failure(a, "本轮未等到验证码图片", cmd)
+        cap_ans = await recognize_image_text(img)
+        if not cap_ans:
+            return _task_failure(a, "验证码识别为空(检查 AI/本地 OCR 开关)", cmd)
+        try:
+            cap_sent = await client.send_message(ent, cap_ans)
+            min_id = cap_sent.id
+            log.info("签到验证码已回复")
+        except errors.FloodWaitError as e:
+            raise _RetryLater(e.seconds) from e
+        except Exception as e:
+            return _task_failure(a, f"验证码回复失败: {e}", cmd)
 
     # 成功/失败关键词判定 + 积分提取
     ok, points, fail = True, "", False
@@ -1022,7 +1171,7 @@ async def run_signin(a):
     if skw or fkw or ppat:
         # 刚回复验证码后多等一点,让 bot 出最终结果
         await asyncio.sleep(2.5 if cap_ans else 1.5)
-        reply_txt, _ = await _fetch_reply(ent)
+        reply_txt, _ = await _fetch_reply(ent, min_id=min_id)
         rl = reply_txt.lower()
         if fkw and any(k.strip().lower() in rl for k in re.split(r"[,，]", fkw) if k.strip()):
             ok, fail = False, True
@@ -1057,6 +1206,7 @@ async def run_signin(a):
                     "clicks": (int(a["click_times"] or 1) if a["click_btn"] else 0), "captcha": cap_ans,
                     "points": points, "note": desc})
     log.info("签到%s 任务=%s 目标=%s", "失败" if fail or ok is False else "成功", a["name"], target)
+    return not (fail or ok is False)
 
 
 async def _select_btn_ai(btns, hint):
@@ -1096,11 +1246,13 @@ async def _select_btn_ai(btns, hint):
     return None
 
 
-async def _find_latest_buttons(ent, limit=6):
-    """取目标最近消息中带按钮的那条"""
+async def _find_latest_buttons(ent, limit=6, min_id=0):
+    """只取本轮目标回复上带按钮的消息,不点击旧键盘。"""
     try:
         msgs = await client.get_messages(ent, limit=limit)
         for m in msgs:
+            if m.out or m.id <= min_id:
+                continue
             try:
                 btns = await m.get_buttons()
             except Exception:
@@ -1112,14 +1264,14 @@ async def _find_latest_buttons(ent, limit=6):
     return None, []
 
 
-async def _await_signin_captcha(ent, timeout=25):
-    """等待目标发来带图片的验证码消息,返回 (message, image_bytes);超时返回 (None,None)"""
+async def _await_signin_captcha(ent, timeout=25, min_id=0):
+    """等待本轮目标发来的图片验证码,超时返回 (None,None)。"""
     deadline = time.monotonic() + timeout
     checked = set()
     while time.monotonic() < deadline:
         try:
             for m in await client.get_messages(ent, limit=8):
-                if m.out or m.id in checked:
+                if m.out or m.id <= min_id or m.id in checked:
                     continue
                 checked.add(m.id)
                 has_img = bool(getattr(m, "photo", None))
@@ -1144,12 +1296,13 @@ async def run_custom(a):
     except Exception:
         steps = []
     if not target or not steps:
-        return
+        return _task_failure(a, "自定义任务缺少目标或步骤")
     ent = await resolve_entity(target)
     if ent is None:
-        log.warning("自定义任务目标解析失败: %s", target)
-        notify_event("fail", a["name"], f"目标解析失败: {target}")
-        return
+        return _task_failure(a, "自定义任务目标解析失败")
+    # 无初始 send 的链也必须从启动时的水位开始,不能用历史成功/键盘/图片。
+    recent = await client.get_messages(ent, limit=1)
+    min_id = max((m.id for m in recent), default=0)
     chain = max(1, min(int(a["chain_retry"] or 1), 5))
     final_desc, final_ok = "", False
     for attempt in range(chain):
@@ -1160,14 +1313,15 @@ async def run_custom(a):
                 t = s.get("t")
                 if t == "send":
                     text = render_placeholders(str(s.get("v") or ""))
-                    await client.send_message(ent, text)
+                    sent_msg = await client.send_message(ent, text)
+                    min_id = sent_msg.id
                     log_desc.append(f"发送「{text}」")
                 elif t == "wait":
                     ms = max(0, int(s.get("v") or 1000))
                     await asyncio.sleep(ms / 1000)
                     log_desc.append(f"等待{ms}ms")
                 elif t == "click":
-                    m, btns = await _find_latest_buttons(ent)
+                    m, btns = await _find_latest_buttons(ent, min_id=min_id)
                     if not btns:
                         raise Exception("未找到带按钮的消息")
                     b = None
@@ -1187,6 +1341,8 @@ async def run_custom(a):
                     try:
                         msgs = await client.get_messages(ent, limit=5)
                         for m in msgs:
+                            if m.out or m.id <= min_id:
+                                continue
                             if getattr(m, "photo", None) or getattr(m, "media", None):
                                 img = await client.download_media(m, file=bytes)
                                 if img:
@@ -1201,10 +1357,11 @@ async def run_custom(a):
                     log_desc.append(f"识别验证码「{ans}」")
                     send_txt = str(s.get("send") or "")
                     if send_txt:
-                        await client.send_message(ent, render_placeholders(send_txt).replace("{code}", ans))
+                        sent_msg = await client.send_message(ent, render_placeholders(send_txt).replace("{code}", ans))
                         log_desc.append(f"发送「{send_txt}」")
                     else:
-                        await client.send_message(ent, ans)
+                        sent_msg = await client.send_message(ent, ans)
+                    min_id = sent_msg.id
                 elif t == "until":
                     timeout = max(1, int(s.get("timeout") or 30000))
                     succ = str(s.get("success") or "")
@@ -1212,7 +1369,7 @@ async def run_custom(a):
                     deadline = time.monotonic() + timeout / 1000
                     matched, failed = False, False
                     while time.monotonic() < deadline:
-                        rt, _ = await _fetch_reply(ent)
+                        rt, _ = await _fetch_reply(ent, min_id=min_id)
                         rl = rt.lower()
                         if fail and any(k.strip().lower() in rl for k in re.split(r"[,，]", fail) if k.strip()):
                             failed = True
@@ -1246,6 +1403,7 @@ async def run_custom(a):
     else:
         notify_event("fail", a["name"], hits_desc)
     log.info("自定义任务%s 任务=%s 目标=%s", "成功" if final_ok else "失败", a["name"], target)
+    return final_ok
 
 
 # 抢注轮询(开注探测):每间隔给机器人发探测命令,回复含开注关键词即注册
@@ -1260,28 +1418,26 @@ keepalive_task = None
 async def run_keepalive(a, reason="定时"):
     """在指定群发一条内容,可选 N 秒后删除(Emby 保号用)"""
     if client is None or tg_state["phase"] != "ready":
-        return False
+        return _task_failure(a, "TG 尚未就绪")
     target = str(a["target"] or "").strip()
     parts = [x.strip() for x in str(a["reply_text"] or "").split("||") if x.strip()]
     if not target or not parts:
-        return False
+        return _task_failure(a, "保号缺少目标或内容")
     txt = render_placeholders(random.choice(parts))
     delay = max(0, min(int(a["cooldown"] or 0), 86400))
     try:
         ent = await resolve_entity(target)
+        if ent is None:
+            return _task_failure(a, "保号目标解析失败", txt)
         msg = await client.send_message(ent, txt)
     except errors.FloodWaitError as e:
-        log.warning("保号发言限流,等待 %ss", e.seconds)
-        await asyncio.sleep(e.seconds + 1)
-        return False
+        raise _RetryLater(e.seconds) from e
     except Exception as e:
         add_hit("keepalive", False, chat_id=target, rule_id=-a["id"], grp_name=target, content=txt,
                 detail={"kind": "keepalive", "task": a["name"], "group": target, "message": txt,
                         "error": str(e)[:200], "reason": reason})
         notify_event("fail", a["name"], f"发言失败: {e}")
         return False
-    conn.execute("UPDATE automations SET last_at=? WHERE id=?", (str(int(time.time())), a["id"]))
-    conn.commit()
     add_hit("keepalive", True, chat_id=target, rule_id=-a["id"], grp_name=target, content=txt,
             detail={"kind": "keepalive", "task": a["name"], "group": target, "message": txt,
                     "delete_after": delay, "reason": reason})
@@ -1300,68 +1456,237 @@ async def run_keepalive(a, reason="定时"):
     return True
 
 
+_auto_running = {}  # id -> Task;启动任务前同步占位,手动/定时共享同一锁
+RETRY_BASE = 60
+
+
+def _retry_limit(a):
+    return 1 + max(0, min(int(a["retries"] or 0), 5))
+
+
+def _forget_auto_schedule(aid):
+    for key in list(signin_plans):
+        if key[0] == aid:
+            signin_plans.pop(key, None)
+    poll_last.pop(aid, None)
+    for key in list(auto_last_ts):
+        if key[1] == aid:
+            auto_last_ts.pop(key, None)
+
+
+def _reset_auto_schedule(aid, clear_success=False):
+    _forget_auto_schedule(aid)
+    a = conn.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    now = int(time.time())
+    last = "" if clear_success else (a["last_at"] or "")
+    next_at = 0
+    if a["type"] == "keepalive":
+        try:
+            base = int(last) if last else now
+        except ValueError:
+            base = now
+            last = ""
+        next_at = max(now, base + max(60, int(a["poll_interval"] or 60)))
+    conn.execute("UPDATE automations SET last_at=?,last_attempt=0,retry_count=0,retry_day='',"
+                 "next_run_at=?,last_status='' WHERE id=?", (last, next_at, aid))
+    conn.commit()
+
+
+def _signin_deadline(a, current):
+    end = _win_minutes(a["win_end"])
+    return current.replace(hour=end // 60, minute=end % 60, second=0, microsecond=0).timestamp()
+
+
+def _queue_auto(aid, manual=False):
+    if aid in _auto_running:
+        return False
+    _auto_running[aid] = None  # 不等待协程开始就占锁
+    try:
+        _auto_running[aid] = asyncio.create_task(_execute_auto(aid, manual))
+    except BaseException:
+        _auto_running.pop(aid, None)
+        raise
+    return True
+
+
+async def _execute_auto(aid, manual=False):
+    """持久尝试/指数退避/成功状态;手动也走同一执行器,失败不污染 last_at。"""
+    a = None
+    try:
+        a = conn.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+        if a is None or (not manual and not a["enabled"]):
+            return
+        if client is None or tg_state["phase"] != "ready":
+            return
+        now = int(time.time())
+        today = now_local().strftime("%Y-%m-%d")
+        count = int(a["retry_count"] or 0)
+        if (a["type"] == "signin" and a["retry_day"] != today) or (manual and count >= _retry_limit(a)):
+            count = 0
+        if a["type"] == "keepalive" and count >= _retry_limit(a):
+            count = 0  # 上轮耗尽后只在完整间隔届满开启下一轮
+        count += 1
+        backoff = min(3600, RETRY_BASE * 2 ** (count - 1))
+        conn.execute("UPDATE automations SET last_attempt=?,retry_count=?,retry_day=?,"
+                     "last_status='running',next_run_at=? WHERE id=?",
+                     (now, count, today, now + backoff, aid))
+        conn.commit()
+        a = conn.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+        ok, status = False, "failed"
+        try:
+            if a["type"] == "signin":
+                if manual:
+                    ok = bool(await run_signin(a))
+                else:
+                    remaining = _signin_deadline(a, now_local()) - time.time()
+                    if remaining <= 0:
+                        raise asyncio.TimeoutError("签到窗口已结束")
+                    ok = bool(await asyncio.wait_for(run_signin(a), timeout=remaining))
+            elif a["type"] == "keepalive":
+                ok = bool(await run_keepalive(a, "手动" if manual else "定时"))
+            else:
+                ok = bool(await run_custom(a))
+        except _RetryLater as e:
+            backoff = max(backoff, e.seconds)
+            _task_failure(a, f"Telegram 限流,至少 {backoff} 秒后重试")
+        except asyncio.CancelledError:
+            status = "interrupted"
+            _task_failure(a, "任务被中断,未记为成功")
+            raise
+        except asyncio.TimeoutError:
+            _task_failure(a, "签到超过窗口结束,已取消本轮后续动作")
+        except Exception as e:
+            _task_failure(a, f"执行异常: {e}")
+        finally:
+            finished = int(time.time())
+            next_at = finished + backoff
+            if ok:
+                stamp = now_local().strftime("%Y-%m-%d") if a["type"] == "signin" else str(finished)
+                next_at = finished + max(60, int(a["poll_interval"] or 60)) if a["type"] == "keepalive" else 0
+                conn.execute("UPDATE automations SET last_at=?,retry_count=0,next_run_at=?,"
+                             "last_status='success' WHERE id=?", (stamp, next_at, aid))
+            else:
+                if a["type"] == "keepalive" and count >= _retry_limit(a):
+                    next_at = finished + max(backoff, max(60, int(a["poll_interval"] or 60)))
+                conn.execute("UPDATE automations SET next_run_at=?,last_status=? WHERE id=?",
+                             (next_at, status, aid))
+            conn.commit()
+    finally:
+        _auto_running.pop(aid, None)
+
+
+def _keepalive_tick():
+    if client is None or tg_state["phase"] != "ready":
+        return
+    now = int(time.time())
+    for a in conn.execute("SELECT * FROM automations WHERE enabled=1 AND type='keepalive' AND target!=''").fetchall():
+        if a["id"] in _auto_running:
+            continue
+        if not a["next_run_at"]:
+            # 兼容旧任务;未成功的新任务不能用 last_at 伪造一次成功。
+            _reset_auto_schedule(a["id"])
+            continue
+        if now >= a["next_run_at"]:
+            _queue_auto(a["id"])
+
+
+def _signin_tick():
+    if client is None or tg_state["phase"] != "ready":
+        return
+    current = now_local()
+    today = current.strftime("%Y-%m-%d")
+    nowm = current.hour * 60 + current.minute
+    now = int(time.time())
+    for key in list(signin_plans):
+        if key[1] != today:
+            signin_plans.pop(key, None)
+    for a in conn.execute("SELECT * FROM automations WHERE enabled=1 AND type='signin'").fetchall():
+        if a["id"] in _auto_running or a["last_at"] == today:
+            continue
+        w0, w1 = _win_minutes(a["win_start"]), _win_minutes(a["win_end"])
+        # 同日半开区间 [start,end),严格不允许在 win_end 之后开始/重试。
+        if w0 is None or w1 is None or w0 >= w1 or not w0 <= nowm < w1:
+            continue
+        if a["retry_day"] == today:
+            if a["retry_count"] >= _retry_limit(a) or now < a["next_run_at"]:
+                continue
+        elif a["retry_count"]:
+            conn.execute("UPDATE automations SET retry_count=0,next_run_at=0 WHERE id=?", (a["id"],))
+            conn.commit()
+        key = (a["id"], today)
+        if key not in signin_plans:
+            signin_plans[key] = nowm if a["retry_day"] == today and a["retry_count"] else random.randint(w0, w1 - 1)
+        if nowm >= signin_plans[key]:
+            _queue_auto(a["id"])
+
+
 async def housekeeping_loop():
     """每小时:清理过期日志"""
     while True:
         try:
             purge_hits()
+            purge_sessions()
+            _auth_cache_gc(time.time())
         except Exception as e:
             log.warning("日志清理异常: %s", e)
         await asyncio.sleep(3600)
 
 
 async def keepalive_loop():
-    """每分钟检查一次:到点的保号任务去群里发一条"""
+    """每分钟调度;短失败重试与完整成功间隔使用独立时间字段。"""
     while True:
         try:
-            if client is not None and tg_state["phase"] == "ready":
-                autos = conn.execute(
-                    "SELECT * FROM automations WHERE enabled=1 AND type='keepalive' AND target!=''"
-                ).fetchall()
-                now = int(time.time())
-                for a in autos:
-                    interval = max(60, int(a["poll_interval"] or 0))
-                    last = int(str(a["last_at"] or "0").strip() or 0)
-                    if last == 0:
-                        # 新建的任务先落一个时间点,首次发送等一个间隔;想立刻发用「执行」按钮
-                        conn.execute("UPDATE automations SET last_at=? WHERE id=?", (str(now), a["id"]))
-                        conn.commit()
-                        continue
-                    if now - last < interval:
-                        continue
-                    # 先占住时间点,避免同一分钟重复发
-                    conn.execute("UPDATE automations SET last_at=? WHERE id=?", (str(now), a["id"]))
-                    conn.commit()
-                    await run_keepalive(a, "定时")
+            _keepalive_tick()
         except Exception as e:
             log.warning("保号循环异常: %s", e)
         await asyncio.sleep(60)
 
 
-async def health_loop():
-    """每分钟检查 TG 会话是否还有效;掉线立刻推一次通知(不重复刷)"""
+async def _health_check_once():
+    """临时网络/RPC 故障不等同于撤销授权,error 状态仍持续复查。"""
     global _session_alerted
+    checked_client = client
+    if checked_client is None or tg_state["phase"] not in ("ready", "error"):
+        return
+    try:
+        ok = await asyncio.wait_for(checked_client.is_user_authorized(), timeout=20)
+    except Exception as e:
+        unauthorized = tuple(cls for name in ("AuthKeyUnregisteredError", "SessionRevokedError",
+                                               "UserDeactivatedError", "UserDeactivatedBanError",
+                                               "AuthKeyDuplicatedError")
+                             if isinstance((cls := getattr(errors, name, None)), type))
+        if unauthorized and isinstance(e, unauthorized):
+            ok = False
+        else:
+            if client is checked_client and tg_state["phase"] in ("ready", "error"):
+                tg_state["health_error"] = f"临时连接异常: {type(e).__name__}"
+            log.debug("心跳临时故障: %s", type(e).__name__)
+            return
+    # 心跳期间用户可能退出/重新登录;不能覆盖新客户端的状态。
+    if client is not checked_client or tg_state["phase"] not in ("ready", "error"):
+        return
+    if not ok:
+        tg_state["phase"] = "error"
+        tg_state["err"] = "会话已失效,请重新登录"
+        tg_state["health_error"] = None
+        if not _session_alerted:
+            _session_alerted = True
+            send_notify("⚠️ TG 会话失效", "明确检测到登录已失效,请打开面板重新登录")
+            log.warning("会话失效,已推送提醒")
+    else:
+        if tg_state["phase"] == "error" and not tg_state.get("me"):
+            await finish_login()
+        tg_state.update({"phase": "ready", "err": None, "health_error": None})
+        if _session_alerted:
+            log.info("会话已恢复正常")
+        _session_alerted = False
+
+
+async def health_loop():
     while True:
         await asyncio.sleep(60)
         try:
-            if client is None or tg_state["phase"] != "ready":
-                continue
-            ok = False
-            try:
-                ok = await asyncio.wait_for(client.is_user_authorized(), timeout=20)
-            except Exception:
-                ok = False
-            if not ok:
-                if not _session_alerted:
-                    _session_alerted = True
-                    tg_state["phase"] = "error"
-                    tg_state["err"] = "会话已失效,请重新登录"
-                    send_notify("⚠️ TG 会话失效", "面板检测到登录已掉线,签到/回复都会失败,请打开面板重新登录")
-                    log.warning("会话失效,已推送提醒")
-            else:
-                if _session_alerted:
-                    _session_alerted = False
-                    log.info("会话已恢复正常")
+            await _health_check_once()
         except Exception as e:
             log.debug("心跳检查异常: %s", e)
 
@@ -1385,9 +1710,10 @@ async def poll_loop():
                         continue
                     probe = _pick_cmd(a["command"] or "/start")
                     try:
-                        await client.send_message(ent, probe)
+                        probe_msg = await client.send_message(ent, probe)
+                        min_id = probe_msg.id
                         await asyncio.sleep(2)
-                        rt, _ = await _fetch_reply(ent)
+                        rt, _ = await _fetch_reply(ent, min_id=min_id)
                         if match_keywords(a["keywords"] or "开注,开放注册,邀请码,发码,注册,开放", rt):
                             reg = render_placeholders(
                                 str(a["reply_text"] or "").replace("{code}", extract_code(rt) or "REG")
@@ -1415,34 +1741,10 @@ async def poll_loop():
 
 
 async def signin_loop():
-    """每分钟检查一次:窗口内随机时刻执行当日签到"""
-    global signin_task
+    """同日窗口内随机执行;失败有限退避,成功才设置 last_at。"""
     while True:
         try:
-            if client is not None and tg_state["phase"] == "ready":
-                autos = conn.execute(
-                    "SELECT * FROM automations WHERE enabled=1 AND type='signin'"
-                ).fetchall()
-                _now = now_local()
-                today = _now.strftime("%Y-%m-%d")
-                nowm = _now.hour * 60 + _now.minute
-                for a in autos:
-                    if a["last_at"] == today:
-                        continue
-                    w0, w1 = _win_minutes(a["win_start"]), _win_minutes(a["win_end"])
-                    if w0 is None or w1 is None:
-                        continue
-                    if w0 > w1:
-                        w0, w1 = w1, w0
-                    plan_key = (a["id"], today)
-                    if plan_key not in signin_plans:
-                        signin_plans[plan_key] = random.randint(w0, w1)
-                    if nowm >= signin_plans[plan_key]:
-                        await run_signin(a)
-                        conn.execute("UPDATE automations SET last_at=? WHERE id=?", (today, a["id"]))
-                        conn.commit()
-                if len(signin_plans) > 500:
-                    signin_plans.clear()
+            _signin_tick()
         except Exception as e:
             log.warning("签到循环异常: %s", e)
         await asyncio.sleep(60)
@@ -1451,7 +1753,7 @@ async def signin_loop():
 # ---------------- 生命周期 ----------------
 @asynccontextmanager
 async def lifespan(app):
-    global client
+    global client, health_task
     set_setting("uptime_since", get_setting("uptime_since", str(int(time.time()))))
     try:
         purge_hits()
@@ -1466,9 +1768,22 @@ async def lifespan(app):
             await client.connect()
             if await client.is_user_authorized():
                 await finish_login()
+            else:
+                tg_state.update({"phase": "error", "err": "会话未授权,请重新登录"})
     except Exception as e:
+        if client is not None:
+            tg_state.update({"phase": "error", "err": "自动连接暂时失败,后台继续复查"})
         log.warning("自动登录失败(面板可重试): %s", e)
+    if health_task is None or health_task.done():
+        health_task = asyncio.create_task(health_loop())
     yield
+    pending = [task for task in (watcher_task, signin_task, poll_task, keepalive_task,
+                                housekeeping_task, health_task, *_auto_running.values())
+               if task is not None and not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
     if client is not None:
         try:
             await client.disconnect()
@@ -1503,7 +1818,7 @@ class PanelLogin(BaseModel):
 @app.get("/api/panel/captcha")
 async def panel_captcha(request: Request):
     ip = client_ip(request)
-    return {"svg": gen_captcha(ip), "required": rl_need_captcha(ip)}
+    return {"image": gen_captcha(ip), "required": rl_need_captcha(ip)}
 
 
 @app.post("/api/panel/login")
@@ -1512,8 +1827,12 @@ async def panel_login(body: PanelLogin, request: Request):
     left = rl_blocked(ip)
     if left:
         raise HTTPException(429, f"尝试次数过多,请 {left // 60 + 1} 分钟后再试")
-    if rl_need_captcha(ip) and not check_captcha(ip, body.captcha):
-        raise HTTPException(400, "验证码错误或已过期,点图片刷新后重试")
+    if rl_need_captcha(ip):
+        if not check_captcha(ip, body.captcha):
+            rl_fail(ip)
+            raise HTTPException(400, "验证码错误或已过期,点图片刷新后重试")
+    else:
+        _captcha.pop(ip, None)
     if not verify_password(body.password):
         n = rl_fail(ip)
         msg = "密码错误" if n < CAPTCHA_AFTER else f"密码错误(连续 {n} 次,之后需要验证码)"
@@ -1523,7 +1842,7 @@ async def panel_login(body: PanelLogin, request: Request):
     rl_ok(ip)
     tok = create_session(ip, request.headers.get("user-agent", ""))
     resp = JSONResponse({"ok": True})
-    resp.set_cookie("panel_token", tok, max_age=30 * 86400, httponly=True, samesite="lax")
+    set_panel_cookie(resp, tok, request)
     return resp
 
 
@@ -1546,6 +1865,7 @@ async def panel_logout_all():
 
 @app.get("/api/panel/sessions")
 async def panel_sessions(request: Request):
+    purge_sessions()
     cur = request.cookies.get("panel_token", "")
     rows = conn.execute("SELECT created, ip, ua, token FROM panel_sessions ORDER BY created DESC").fetchall()
     return {"count": len(rows), "now": sum(1 for r in rows if r["token"] == cur),
@@ -1584,9 +1904,14 @@ async def tg_init(body: TGInit):
 
 async def ensure_client():
     global client, tg_state
-    if client is not None:
+    if client is not None and tg_state["phase"] != "error":
         return
     try:
+        if client is not None:
+            await client.connect()
+            if await client.is_user_authorized():
+                await finish_login()
+            return
         api_id = int(get_setting("api_id", "0"))
         api_hash = get_setting("api_hash", "")
         if not api_id or not api_hash:
@@ -1655,10 +1980,12 @@ async def tg_verify_password(body: VerifyPassword):
 
 
 async def finish_login(me=None):
-    global watcher_task, handler_registered, signin_task, poll_task, keepalive_task, housekeeping_task, health_task
+    global watcher_task, handler_registered, signin_task, poll_task, keepalive_task, housekeeping_task, health_task, _session_alerted
+    me = me or await client.get_me()
     tg_state["phase"] = "ready"
     tg_state["err"] = None
-    me = me or await client.get_me()
+    tg_state["health_error"] = None
+    _session_alerted = False
     tg_state["me"] = {
         "id": me.id,
         "name": getattr(me, "first_name", "") + (" " + me.last_name if getattr(me, "last_name", None) else ""),
@@ -1899,6 +2226,8 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "签到需要填写目标(@机器人)和命令")
         if _win_minutes(body.win_start) is None or _win_minutes(body.win_end) is None:
             raise HTTPException(400, "时间窗口格式需为 hh:mm")
+        if _win_minutes(body.win_start) >= _win_minutes(body.win_end):
+            raise HTTPException(400, "签到窗口须同日开始早于结束,结束时刻不再执行")
         if body.retries < 0 or body.retries > 5:
             raise HTTPException(400, "重试次数需在 0-5 之间")
         if body.click_times < 1 or body.click_times > 20:
@@ -1954,7 +2283,8 @@ def _auto_vals(body: AutoIn, extra=None):
 @app.get("/api/autos")
 async def list_autos():
     rows = conn.execute("SELECT * FROM automations ORDER BY id DESC").fetchall()
-    return {"autos": [dict(r) for r in rows]}
+    return {"autos": [dict(r, signed_today=(r["type"] == "signin" and r["last_at"] == now_local().strftime("%Y-%m-%d")),
+                            running=(r["id"] in _auto_running)) for r in rows]}
 
 
 @app.post("/api/autos")
@@ -1965,29 +2295,42 @@ async def create_auto(body: AutoIn):
         _auto_vals(body, [int(time.time())]),
     )
     conn.commit()
+    _reset_auto_schedule(cur.lastrowid)
     return {"ok": True, "id": cur.lastrowid}
 
 
 @app.put("/api/autos/{aid}")
 async def update_auto(aid: int, body: AutoIn):
     _valid_auto(body)
+    if aid in _auto_running:
+        raise HTTPException(409, "任务正在执行,请完成后再修改")
+    previous = conn.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    if previous is None:
+        raise HTTPException(404, "任务不存在")
     cols = _AUTO_COLS.split(",")
     conn.execute(
         f"UPDATE automations SET {','.join(c + '=?' for c in cols)} WHERE id=?",
         _auto_vals(body, [aid]),
     )
     conn.commit()
+    changed = any(previous[key] != value for key, value in (
+        ("type", body.type), ("target", body.target.strip()), ("command", body.command.strip()),
+        ("reply_text", body.reply_text.strip()), ("custom_steps", body.custom_steps.strip())))
+    _reset_auto_schedule(aid, clear_success=changed)
     return {"ok": True}
 
 
 @app.post("/api/autos/{aid}/toggle")
 async def toggle_auto(aid: int):
+    if aid in _auto_running:
+        raise HTTPException(409, "任务正在执行,请完成后再切换")
     r = conn.execute("SELECT enabled FROM automations WHERE id=?", (aid,)).fetchone()
     if not r:
         raise HTTPException(404, "任务不存在")
     v = 0 if r["enabled"] else 1
     conn.execute("UPDATE automations SET enabled=? WHERE id=?", (v, aid))
     conn.commit()
+    _reset_auto_schedule(aid)
     return {"ok": True, "enabled": v}
 
 
@@ -2003,11 +2346,15 @@ async def duplicate_auto(aid: int):
         [d[c] if c in d else "" for c in _AUTO_COLS.split(",")] + [int(time.time())],
     )
     conn.commit()
+    _reset_auto_schedule(cur.lastrowid)
     return {"ok": True, "id": cur.lastrowid}
 
 
 @app.delete("/api/autos/{aid}")
 async def delete_auto(aid: int):
+    if aid in _auto_running:
+        raise HTTPException(409, "任务正在执行,请完成后再删除")
+    _forget_auto_schedule(aid)
     conn.execute("DELETE FROM automations WHERE id=?", (aid,))
     conn.commit()
     return {"ok": True}
@@ -2021,13 +2368,9 @@ async def run_auto_now(aid: int):
         raise HTTPException(404, "该类型任务不可手动执行或不存在")
     if client is None or tg_state["phase"] != "ready":
         raise HTTPException(409, "TG 尚未登录")
-    if a["type"] == "signin":
-        asyncio.get_running_loop().create_task(run_signin(a))
-    elif a["type"] == "keepalive":
-        asyncio.get_running_loop().create_task(run_keepalive(a, "手动"))
-    else:
-        asyncio.get_running_loop().create_task(run_custom(a))
-    return {"ok": True}
+    if not _queue_auto(aid, manual=True):
+        raise HTTPException(409, "任务正在执行,请勿重复提交")
+    return {"ok": True, "running": True}
 
 
 @app.delete("/api/rules/{rid}")
@@ -2072,14 +2415,19 @@ async def change_panel_password(body: dict, request: Request):
     old = str(body.get("old", "") or "")
     if len(pw) < 8:
         raise HTTPException(400, "面板密码至少 8 位")
-    if old and not verify_password(old):
-        raise HTTPException(403, "原密码不对")
+    ip = client_ip(request)
+    if rl_blocked(ip):
+        raise HTTPException(429, "尝试次数过多,请稍后重试")
+    if not old or not verify_password(old):
+        rl_fail(ip)
+        raise HTTPException(403, "必须填写有效原密码")
+    rl_ok(ip)
     set_setting("panel_pw_hash", hash_password(pw))
     drop_all_sessions()
     # 当前设备自动续一个会话,其它设备会被踢下线
     tok = create_session(client_ip(request), request.headers.get("user-agent", ""))
     resp = JSONResponse({"ok": True})
-    resp.set_cookie("panel_token", tok, max_age=30 * 86400, httponly=True, samesite="lax")
+    set_panel_cookie(resp, tok, request)
     return resp
 
 
@@ -2217,4 +2565,4 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.environ.get("PORT", "8090"))
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info", proxy_headers=False)

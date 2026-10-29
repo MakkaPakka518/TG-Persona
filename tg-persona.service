@@ -5,11 +5,13 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/tg-persona
-ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8090
+ExecStart=/opt/tg-persona/venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8090 --no-proxy-headers
 Restart=always
 RestartSec=5
-# 可选:设置面板密码(不设置则首次启动自动生成并写入 data/panel_password.txt)
-# Environment=PANEL_PASSWORD=你的面板密码
+# 首次密码用 data/panel_password.txt(600)预置，启动后转为哈希并删除。
+# 不要把密码写进任何 0644 的 systemd unit。
+# nginx 反代时可按实际地址设置可信代理：
+# Environment=TRUSTED_PROXIES=127.0.0.1,::1
 
 [Install]
 WantedBy=multi-user.target

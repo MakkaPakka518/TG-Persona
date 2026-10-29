@@ -755,7 +755,7 @@ input[readonly]:focus{border-color:var(--acc)}
       <div class="fold-b">
       <label>修改面板访问密码(至少 8 位)</label>
       <div class="flex">
-        <div><input type="password" id="sOldPw" placeholder="原密码(可留空)" autocomplete="current-password"></div>
+        <div><input type="password" id="sOldPw" placeholder="原密码(必填)" autocomplete="current-password"></div>
         <div><input type="password" id="sNewPw" placeholder="新面板密码" autocomplete="new-password"></div>
       </div>
       <button class="btn" style="margin-top:12px" onclick="changePw()">修改密码</button>
@@ -844,13 +844,13 @@ function foldToggle(el){
 }
 
 // ---------- 系统更新 ----------
-let updTimer=null;
+let updTimer=null, updPolling=false;
 function renderUpd(s){
   const info=$('#updInfo'); if(!info) return;
   let line=`当前版本 <b>${esc(s.current)}</b>`;
   if(s.latest) line += `，最新版本 <b>${esc(s.latest)}</b>`;
   if(s.running) line += `，<span style="color:var(--accent)">正在更新：${esc(s.phase||'')}…</span>`;
-  else if(s.ok===true) line += '，<span style="color:#16a34a">更新成功，服务重启中</span>';
+  else if(s.ok===true) line += '，<span style="color:#16a34a">更新成功，服务健康检查已通过</span>';
   else if(s.ok===false) line += '，<span style="color:var(--bad)">更新失败，见下方日志</span>';
   else if(s.latest) line += s.available ? '，<span style="color:var(--accent)">有新版本可更新</span>' : '，已是最新版';
   info.innerHTML=line;
@@ -860,13 +860,27 @@ function renderUpd(s){
   $('#updCheck').disabled=s.running;
   $('#updBtn').disabled=s.running;
 }
+async function pollUpd(){
+  if(updPolling)return;
+  updPolling=true;
+  try{
+    const s=await api('/api/version');renderUpd(s);
+    if(!s.running){clearInterval(updTimer);updTimer=null;}
+  }catch(e){/* 服务重启期间保持轮询，恢复后读取最终结果 */}
+  finally{updPolling=false;}
+}
 async function loadUpd(check){
   try{
     const s=await api('/api/version'+(check?'?check=1':''));
     renderUpd(s);
-    if(s.running){ clearInterval(updTimer); updTimer=setInterval(async()=>{ try{renderUpd(await api('/api/version'))}catch(e){} },1500); }
-    else clearInterval(updTimer);
-  }catch(e){ const info=$('#updInfo'); if(info) info.textContent='版本信息加载失败：'+e.message; }
+    if(s.running){if(!updTimer)updTimer=setInterval(pollUpd,1500);}
+    else{clearInterval(updTimer);updTimer=null;}
+    return s;
+  }catch(e){
+    const info=$('#updInfo');if(info)info.textContent='版本信息加载失败：'+e.message;
+    $('#updCheck').disabled=false;
+    if(check)throw e;
+  }
 }
 async function checkUpdate(){
   $('#updCheck').disabled=true;
@@ -963,7 +977,7 @@ function renderAutoList(type){
     </div>`).join('');
 }
 function autoDesc(a){
-  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · 每天 ${esc(a.win_start)}~${esc(a.win_end)}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮':''}${a.signin_captcha?' · 验证码':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.last_at?' · 今日已签':''}`;
+  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · 每天 ${esc(a.win_start)}~${esc(a.win_end)}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮':''}${a.signin_captcha?' · 验证码':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
   if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}${a.poll_interval>0?' · 轮询'+a.poll_interval+'s@'+esc(a.target):''}`;
   if(a.type==='redpacket')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
   if(a.type==='keepalive'){
@@ -1162,7 +1176,10 @@ function showLoginGate(){
 async function reloadCaptcha(){
   try{
     const d=await api('/api/panel/captcha');
-    $('#lgCapImg').src='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(d.svg)));
+    const image=d.image||(d.png?'data:image/png;base64,'+d.png:'');
+    if(image&&/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(image))$('#lgCapImg').src=image;
+    else if(d.svg)$('#lgCapImg').src='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(d.svg)));
+    else $('#lgCapImg').removeAttribute('src');
     $('#lgCap').value='';
   }catch(e){}
 }
@@ -1173,7 +1190,6 @@ async function panelLogin(){
   }catch(e){
     reloadCaptcha();
     const el=$('#lgErr');el.textContent=e.message;el.style.display='block';
-    reloadCaptcha();
   }
 }
 
@@ -1389,6 +1405,7 @@ async function saveSettings(){
 async function changePw(){
   const pw=$('#sNewPw').value.trim();
   const old=$('#sOldPw').value;
+  if(!old)return toast('请填写原密码',1);
   if(pw.length<8)return toast('密码至少 8 位',1);
   try{await api('/api/panel/password',{method:'POST',body:JSON.stringify({password:pw,old})});$('#sNewPw').value='';$('#sOldPw').value='';toast('面板密码已修改,其它设备已下线');loadSessions()}
   catch(e){toast(e.message,1)}
@@ -1445,8 +1462,8 @@ async function loadWatched(){
     $('#gWatched').innerHTML=d.groups.length?d.groups.map(g=>`
       <div class="item">
         <div class="grow"><div class="t">${esc(g.name)}</div>
-        <div class="s mono">${g.chat_id}</div></div>
-        <button class="danger" onclick="removeGroup('${g.chat_id}')">取消监听</button>
+        <div class="s mono">${esc(String(g.chat_id))}</div></div>
+        <button class="danger" data-remove-group="${esc(String(g.chat_id))}">取消监听</button>
       </div>`).join(''):'<div class="empty">还没有监听任何群</div>';
   }catch(e){toast(e.message,1)}
 }
@@ -1461,20 +1478,30 @@ async function loadAllGroups(){
 }
 function renderGroups(){
   const q=$('#gSearch').value.trim().toLowerCase();
-  const list=allGroups.filter(g=>!g.watched&&(!q||g.name.toLowerCase().includes(q)));
+  const list=allGroups.filter(g=>!g.watched&&(!q||String(g.name||'').toLowerCase().includes(q)));
   $('#gAll').innerHTML=list.length?list.map(g=>`
     <div class="item">
       <div class="grow"><div class="t">${esc(g.name)}</div>
-      <div class="s mono">${g.chat_id}${g.members?' · '+g.members+' 成员':''}</div></div>
-      <button class="ghost" onclick="addGroup('${g.chat_id}','${esc(g.name).replace(/'/g,"\\'")}')">加入监听</button>
+      <div class="s mono">${esc(String(g.chat_id))}${g.members?' · '+esc(String(g.members))+' 成员':''}</div></div>
+      <button class="ghost" data-add-group="${esc(String(g.chat_id))}">加入监听</button>
     </div>`).join(''):'<div class="empty">没有更多群'+(q?'(换个关键词)':'')+'</div>';
 }
+$('#gAll').addEventListener('click',e=>{
+  const btn=e.target.closest('button[data-add-group]');
+  if(!btn||!$('#gAll').contains(btn))return;
+  const g=allGroups.find(x=>String(x.chat_id)===btn.dataset.addGroup);
+  if(g)addGroup(String(g.chat_id),g.name);
+});
+$('#gWatched').addEventListener('click',e=>{
+  const btn=e.target.closest('button[data-remove-group]');
+  if(btn&&$('#gWatched').contains(btn))removeGroup(btn.dataset.removeGroup);
+});
 async function loadDialogs(){loadWatched();loadAllGroups()}
 async function addGroup(id,name){
   try{
     await api('/api/groups',{method:'POST',body:JSON.stringify({chat_id:id,name})});
     toast('已加入监听');
-    const g=allGroups.find(x=>x.chat_id===id);if(g)g.watched=true;
+    const g=allGroups.find(x=>String(x.chat_id)===String(id));if(g)g.watched=true;
     loadWatched();renderGroups();
   }catch(e){toast(e.message,1)}
 }
@@ -1482,7 +1509,7 @@ async function removeGroup(id){
   try{
     await api('/api/groups/'+id,{method:'DELETE'});
     toast('已取消监听');
-    const g=allGroups.find(x=>x.chat_id===id);if(g)g.watched=false;
+    const g=allGroups.find(x=>String(x.chat_id)===String(id));if(g)g.watched=false;
     loadWatched();renderGroups();
   }catch(e){toast(e.message,1)}
 }
