@@ -43,6 +43,15 @@ class WorkflowSandbox:
         self.repo = self.base / "checkout"
         self.bin = self.base / "bin"
         self.bin.mkdir()
+        # GitHub 托管工具不一定在 /usr/bin；只引入测试需要的工具，
+        # 不复制完整 PATH 或继承用户凭据。Node/Python 均固定到已解析的路径。
+        self.runtime_tools = {}
+        for name in ("python3", "node", "bash", "gzip", "tar", "sha256sum"):
+            executable = shutil.which(name)
+            if not executable:
+                raise RuntimeError("离线发布测试缺少工具: " + name)
+            self.runtime_tools[name] = executable
+            (self.bin / name).symlink_to(executable)
         self.git_log = self.base / "git.jsonl"
         self.gh_log = self.base / "gh.jsonl"
         self.pip_log = self.base / "pip.jsonl"
@@ -57,6 +66,9 @@ class WorkflowSandbox:
             "HOME": str(self.base / "home"),
             "XDG_CONFIG_HOME": str(self.base / "home" / "config"),
             "TMPDIR": str(self.base), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
+            # setup-python 的共享库可能位于工具缓存目录，按解释器推导，
+            # 不继承任意环境变量或密钥。
+            "LD_LIBRARY_PATH": str(Path(sys.executable).resolve().parent.parent / "lib"),
             "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_ALLOW_PROTOCOL": "file", "GIT_TERMINAL_PROMPT": "0",
             "GIT_AUTHOR_NAME": "Offline Release Test",
@@ -299,6 +311,24 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("HEAD:refs/heads/main", pushes[0])
         self.assertIn("refs/tags/" + tag, pushes[0])
         self.assertFalse(any(arg.startswith(("--force", "+")) or arg == "-f" for arg in pushes[0]))
+
+    def test_github_toolcache_node_is_available_inside_isolation(self):
+        from unittest.mock import patch
+        original_which = shutil.which
+        real_node = original_which("node")
+        with tempfile.TemporaryDirectory(prefix="github-toolcache-") as tmp:
+            hosted_node = Path(tmp) / "node/22/x64/bin/node"
+            hosted_node.parent.mkdir(parents=True)
+            hosted_node.symlink_to(real_node)
+            def resolve(name, *args, **kwargs):
+                return str(hosted_node) if name == "node" else original_which(name, *args, **kwargs)
+            with patch.object(shutil, "which", side_effect=resolve), patch.dict(os.environ, {"UNRELATED_TEST_SECRET": "not-a-real-secret"}):
+                box = self.sandbox(tags=("v1.0.3",))
+                self.assertEqual(os.readlink(box.bin / "node"), str(hosted_node))
+                self.assertNotIn(str(hosted_node.parent), box.env["PATH"])
+                self.assertNotIn("UNRELATED_TEST_SECRET", box.env)
+                self.assert_success(box, box.execute("v1.2.3"))
+                self.assert_release(box, "1.2.3", changed=True)
 
     def test_explicit_prefixed_version_full_workflow(self):
         box = self.sandbox(tags=("v1.0.3",))
