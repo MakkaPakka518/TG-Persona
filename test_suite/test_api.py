@@ -88,6 +88,29 @@ def probe():
         check(len(tasks)==1 and tasks[0]['signed_today'] is False, '新任务不误显示今日已签')
         main.conn.execute('UPDATE automations SET last_at=? WHERE id=?',('2000-01-01',tasks[0]['id']));main.conn.commit()
         check(https_client.get('/api/autos').json()['autos'][0]['signed_today'] is False, '旧成功日期不显示今日已签')
+        # 新增测试端点必须经过真实 middleware/Pydantic，外部调用全部 mock。
+        from unittest.mock import AsyncMock, patch
+        from fastapi.testclient import TestClient
+        guest=TestClient(main.app)
+        check(guest.post('/api/ai/test',json={}).status_code==401, 'AI测试必须登录')
+        check(guest.post('/api/captcha/test',json={'image':'invalid'}).status_code==401, '验证码测试必须登录')
+        cfg={'ai_base':'https://example.invalid/v1','ai_key':'fake-api-fixture-key','ai_model':'fixture-model','ai_enabled':'0','ocr_enabled':'0'}
+        with patch.object(main,'_call_ai',new=AsyncMock(return_value='测试成功')) as model:
+            tested=https_client.post('/api/ai/test',json=cfg)
+            check(tested.status_code==200 and tested.json()['ok'], '关闭识别开关仍可测试AI连接')
+            check(tested.json()['reply']=='测试成功', 'AI测试展示实际回复')
+            check(main.get_setting('ai_key','')=='', '临时测试密钥不保存')
+            check(model.call_args.args[0]['model']=='fixture-model', '测试使用当前填写模型')
+        with patch.object(main,'_call_ai',new=AsyncMock(return_value='A7B3')):
+            image_test=https_client.post('/api/captcha/test',json={**cfg,'ai_enabled':'1','image':captcha['image'],'length':4})
+            check(image_test.status_code==200 and image_test.json()['text']=='A7B3', '实际上传接口正确识别测试图片')
+            check(image_test.json()['channel']=='ai', '上传接口返回使用通道')
+        with patch.object(main,'_classify_local_image',return_value='OCR9'):
+            image_test=https_client.post('/api/captcha/test',json={**cfg,'ocr_enabled':'1','image':captcha['image']})
+            check(image_test.status_code==200 and image_test.json()['channel']=='ocr', '仅本地OCR的完整接口可用')
+        check(https_client.post('/api/captcha/test',json={**cfg,'image':'invalid'}).status_code==400, '损坏图片参数拒绝')
+        check(https_client.post('/api/captcha/test',json={**cfg,'image':captcha['image'],'length':17}).status_code==422, '字符长度上限校验')
+        guest.close()
         main.conn.close(); client.close();https_client.close()
         print(f'隔离HTTP接口 {assertions} 项通过；无Telegram/线上操作')
 

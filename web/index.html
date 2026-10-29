@@ -68,6 +68,7 @@ button{font-family:inherit}
   padding:10px 16px;border-radius:var(--r-sm);font-size:13px;font-weight:500;cursor:pointer;transition:.15s}
 .ghost:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-soft)}
 .ghost.sel{border-color:var(--acc);color:var(--acc);background:var(--acc-soft)}
+#aiTestBtn:disabled,#captchaTestBtn:disabled{opacity:.45;cursor:not-allowed;filter:none}
 .danger{display:inline-flex;align-items:center;justify-content:center;gap:6px;
   background:var(--err-soft);border:1px solid transparent;color:var(--err);
   padding:10px 14px;border-radius:var(--r-sm);font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
@@ -431,10 +432,25 @@ input[readonly]:focus{border-color:var(--acc)}
         <label style="margin-top:12px">AI API 地址(OpenAI 兼容,如 https://api.openai.com/v1)</label>
         <input type="text" id="sAiBase" placeholder="https://api.openai.com/v1">
         <label>AI API Key</label>
-        <input type="text" id="sAiKey" placeholder="sk-...">
+        <input type="password" id="sAiKey" placeholder="留空沿用已保存 Key" autocomplete="off">
         <label>AI 模型名</label>
         <input type="text" id="sAiModel" placeholder="gpt-4o-mini">
-        <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+        <div class="flex" style="gap:10px;flex-wrap:wrap;margin-top:14px">
+          <button class="btn" type="button" onclick="saveSettings()">保存设置</button>
+          <button class="ghost" type="button" id="aiTestBtn" onclick="testAIConnection()">测试 AI 连接</button>
+        </div>
+        <div class="hint">测试使用当前填写值，无需先保存；Key 留空沿用已保存值。连接测试不受识别开关限制，要求 AI 只回复“测试成功”，可能产生 API 费用。</div>
+        <div id="aiTestResult" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--hair)">
+          <label for="captchaTestFile">上传验证码图片（PNG / JPG / WebP，最大 2MB）</label>
+          <input type="file" id="captchaTestFile" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" onchange="previewCaptchaFile()" style="max-width:100%">
+          <img id="captchaTestPreview" alt="待识别验证码预览" style="display:none;max-width:100%;max-height:160px;object-fit:contain;margin-top:12px">
+          <label for="captchaTestLength">期望字符数（可选，0 表示不限）</label>
+          <input type="number" id="captchaTestLength" min="0" max="16" step="1" value="0" inputmode="numeric">
+          <button class="ghost" type="button" id="captchaTestBtn" disabled style="margin-top:12px" onclick="testCaptchaRecognition()">识别上传图片</button>
+          <div class="hint">选择图片只在本地预览；点击识别才上传。按上方开关选择通道，AI 优先，失败后可回退本地 OCR。</div>
+          <div id="captchaTestResult" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
+        </div>
         <div class="hint">两个开关独立可选:都开启时 AI 优先,识别失败自动兜底本地 OCR;只开一个则只走该通道;全关时验证码步骤会提示未启用。AI 需填 API 地址 + Key + 模型</div>
       </div>
     </div>
@@ -1401,6 +1417,90 @@ async function saveSettings(){
     })});
     toast('设置已保存');loadSettings();
   }catch(e){toast(e.message,1)}
+}
+// ---------- AI 与验证码测试 ----------
+function currentAIConfig(){
+  return {
+    ai_base:$('#sAiBase').value.trim(),ai_key:$('#sAiKey').value.trim(),
+    ai_model:$('#sAiModel').value.trim(),
+    ai_enabled:$('#sAiOn').checked?'1':'0',ocr_enabled:$('#sOcrOn').checked?'1':'0'
+  };
+}
+function testElapsed(ms){return typeof ms==='number'&&Number.isFinite(ms)&&ms>=0?ms+' ms':'未知'}
+async function testAIConnection(){
+  const btn=$('#aiTestBtn'),result=$('#aiTestResult');
+  if(btn.disabled)return;
+  btn.disabled=true;result.textContent='正在测试 AI 连接…';
+  try{
+    const d=await api('/api/ai/test',{method:'POST',body:JSON.stringify(currentAIConfig())});
+    const reply=typeof d.reply==='string'?d.reply:'';
+    const success=d.ok===true&&reply.trim()==='测试成功';
+    result.textContent=(success?'连接测试成功':'连接测试失败')+
+      '\n实际回复：'+(reply||'（空回复）')+'\n耗时：'+testElapsed(d.elapsed_ms)+
+      (success?'':'\n原因：'+(d.error||'AI 未按约定只回复“测试成功”'));
+  }catch(e){result.textContent='连接测试失败：'+e.message;toast(e.message,1)}
+  finally{btn.disabled=false}
+}
+let captchaTestImage='',captchaTestVersion=0,captchaTestReader=null,captchaTestBusy=false;
+function previewCaptchaFile(){
+  const version=++captchaTestVersion,result=$('#captchaTestResult'),preview=$('#captchaTestPreview'),btn=$('#captchaTestBtn');
+  captchaTestImage='';result.textContent='';preview.removeAttribute('src');preview.style.display='none';btn.disabled=true;
+  if(captchaTestReader){captchaTestReader.abort();captchaTestReader=null}
+  const file=$('#captchaTestFile').files?.[0];
+  if(!file)return;
+  if(!['image/png','image/jpeg','image/webp'].includes(file.type)){
+    result.textContent='请选择 PNG、JPG 或 WebP 图片';return;
+  }
+  if(!Number.isFinite(file.size)||file.size<=0||file.size>2*1024*1024){
+    result.textContent='图片不能为空，且大小不能超过 2MB';return;
+  }
+  result.textContent='正在读取图片…';
+  const fail=message=>{
+    if(version!==captchaTestVersion)return;
+    captchaTestReader=null;result.textContent=message;
+  };
+  try{
+    const reader=new FileReader();captchaTestReader=reader;
+    reader.onload=()=>{
+      if(version!==captchaTestVersion)return;
+      captchaTestReader=null;
+      const image=reader.result;
+      if(typeof image!=='string'||!/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(image)){
+        fail('图片读取失败：无效的图片数据');return;
+      }
+      captchaTestImage=image;preview.src=image;preview.style.display='block';
+      result.textContent='';btn.disabled=captchaTestBusy;
+    };
+    reader.onerror=()=>fail('图片读取失败，请重新选择');
+    reader.onabort=()=>fail('图片读取已取消，请重新选择');
+    reader.readAsDataURL(file);
+  }catch(e){fail('图片读取失败：'+e.message)}
+}
+async function testCaptchaRecognition(){
+  const btn=$('#captchaTestBtn'),result=$('#captchaTestResult');
+  if(captchaTestBusy)return;
+  if(!captchaTestImage){result.textContent='请先选择有效图片';return}
+  const length=Number($('#captchaTestLength').value);
+  if(!Number.isInteger(length)||length<0||length>16){result.textContent='期望字符数必须为 0 到 16 的整数';return}
+  const config=currentAIConfig();
+  if(config.ai_enabled==='0'&&config.ocr_enabled==='0'){result.textContent='请至少启用 AI 识别或本地 OCR';return}
+  const version=captchaTestVersion;
+  captchaTestBusy=true;btn.disabled=true;result.textContent='正在识别…';
+  try{
+    const d=await api('/api/captcha/test',{method:'POST',body:JSON.stringify({image:captchaTestImage,length,...config})});
+    if(version!==captchaTestVersion)return;
+    const text=typeof d.text==='string'?d.text:'';
+    const channel={ai:'AI',ocr:'本地 OCR',none:'无'}[d.channel]||'未知';
+    const errors=Array.isArray(d.errors)?d.errors:[];
+    const warnings=errors.map(e=>e&&typeof e==='object'?
+      (({ai:'AI',ocr:'本地 OCR',none:'无'}[e.channel]||'未知通道')+'：'+(e.message||'未知错误')):'未知错误');
+    const success=d.ok===true&&!!text.trim();
+    result.textContent=(success?'识别成功':'识别失败')+
+      '\n识别文本：'+(text||'（空文本）')+'\n使用通道：'+channel+'\n耗时：'+testElapsed(d.elapsed_ms)+
+      (warnings.length?'\n'+(success?'通道提醒（已使用上述通道完成识别）':'失败原因')+'：\n'+warnings.join('\n'):
+        (success?'':'\n失败原因：'+(d.error||'未获得有效识别文本')));
+  }catch(e){if(version===captchaTestVersion){result.textContent='识别失败：'+e.message;toast(e.message,1)}}
+  finally{captchaTestBusy=false;btn.disabled=!captchaTestImage}
 }
 async function changePw(){
   const pw=$('#sNewPw').value.trim();

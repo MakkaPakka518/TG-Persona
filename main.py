@@ -18,6 +18,8 @@ import asyncio
 import base64
 from collections import OrderedDict
 import ipaddress
+import threading
+from typing import Optional
 import math
 import struct
 import zlib
@@ -376,57 +378,151 @@ def load_ai_cfg():
     })
 
 
-async def recognize_image_text(image_bytes, length=0):
-    """验证码识别:ai_enabled / ocr_enabled 双开关;都开启时 AI 优先,失败自动兜底本地 OCR"""
-    if not _ai_cfg:
-        load_ai_cfg()
-    ai_on = get_setting("ai_enabled", "0") == "1"
-    ocr_on = get_setting("ocr_enabled", "1") == "1"
-    if ai_on and _ai_cfg.get("base") and _ai_cfg.get("key"):
+_ocr_guard = threading.Lock()
+_ai_test_lock = asyncio.Lock()
+MAX_TEST_IMAGE = 2 * 1024 * 1024
+
+
+def _image_mime(data):
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    raise ValueError("请上传 PNG、JPG 或 WebP 图片")
+
+
+def _decode_test_image(value):
+    try:
+        match = re.fullmatch(r"data:(image/(?:png|jpeg|jpg|webp));base64,([A-Za-z0-9+/=\r\n]+)", value)
+        if not match:
+            raise ValueError("图片格式无效，请重新选择 PNG、JPG 或 WebP")
+        data = base64.b64decode(match[2], validate=True)
+        if not data or len(data) > MAX_TEST_IMAGE:
+            raise ValueError("图片不能为空，大小不能超过 2 MB")
+        mime = _image_mime(data)
+        declared = "image/jpeg" if match[1] == "image/jpg" else match[1]
+        if mime != declared:
+            raise ValueError("图片内容与格式不匹配")
+        if mime == "image/png":
+            if len(data) < 45 or data[12:16] != b"IHDR" or data[-8:-4] != b"IEND":
+                raise ValueError("PNG 图片损坏或不完整，请重新上传")
+            width, height = struct.unpack("!II", data[16:24])
+            if not width or not height or width * height > 16_000_000:
+                raise ValueError("图片分辨率过大，请裁剪为验证码区域")
+        elif mime == "image/jpeg" and (len(data) < 16 or not data.endswith(b"\xff\xd9")):
+            raise ValueError("JPG 图片损坏或不完整，请重新上传")
+        elif mime == "image/webp" and (len(data) < 20 or struct.unpack("<I", data[4:8])[0] + 8 != len(data)):
+            raise ValueError("WebP 图片损坏或不完整，请重新上传")
+        return data
+    except (ValueError, TypeError) as error:
+        raise HTTPException(400, str(error)) from None
+
+
+def _safe_ai_error(error, key=""):
+    text = str(error)
+    if key:
+        text = text.replace(key, "[密钥已隐藏]")
+    text = re.sub(r"(?i)Bearer\s+\S+", "Bearer [已隐藏]", text)
+    return text[:300] or type(error).__name__
+
+
+def _ai_endpoint(base):
+    from urllib.parse import urlsplit
+    base = str(base or "").strip().rstrip("/")
+    parsed = urlsplit(base)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("AI API 地址应为有效的 HTTP(S) 基础地址，不含密码或查询参数")
+    return base if base.endswith("/chat/completions") else base + "/chat/completions"
+
+
+async def _call_ai(cfg, content, max_tokens=512):
+    if not cfg.get("base") or not cfg.get("key") or not cfg.get("model"):
+        raise ValueError("请填写 AI API 地址、密钥和模型名")
+    endpoint = _ai_endpoint(cfg["base"])
+    if httpx is None:
+        raise RuntimeError("服务器未安装 httpx，请重新安装项目依赖")
+    async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+        response = await client.post(endpoint,
+            headers={"Authorization": "Bearer " + cfg["key"]},
+            json={"model": cfg["model"], "messages": [{"role": "user", "content": content}], "max_tokens": max_tokens})
         try:
-            import base64 as _b64
-            if httpx is None:
-                raise RuntimeError("httpx 未安装")
-            b64 = _b64.b64encode(image_bytes).decode()
-            async with httpx.AsyncClient(timeout=30) as c:
-                r = await c.post(
-                    (_ai_cfg["base"].rstrip("/")) + "/chat/completions",
-                    headers={"Authorization": f"Bearer {_ai_cfg['key']}"},
-                    json={
-                        "model": _ai_cfg.get("model") or "gpt-4o-mini",
-                        "messages": [{
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": f"识别图片中的验证码文字,只输出字符本身,不要任何解释{'，长度应为'+str(length) if length else ''}"},
-                                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                            ],
-                        }],
-                        "max_tokens": 20,
-                    },
-                )
-                d = r.json()
-                txt = (d["choices"][0]["message"]["content"] or "").strip()
-                txt = "".join(ch for ch in txt if ch.isalnum())[:16]
-            if txt:
-                return txt
-            log.warning("AI 识别结果为空")
-        except Exception as e:
-            log.warning("AI 识别失败: %s", e)
-        if not ocr_on:
-            return ""   # AI 开但失败,且本地关 → 不再兜底
+            data = response.json()
+        except (ValueError, TypeError):
+            raise RuntimeError("AI API 未返回有效 JSON（HTTP " + str(response.status_code) + "）") from None
+        if not isinstance(data, dict):
+            raise RuntimeError("AI 返回格式不兼容，需要 JSON 对象")
+        if response.status_code >= 400 or data.get("error"):
+            error = data.get("error") or {}
+            message = error.get("message", "") if isinstance(error, dict) else str(error)
+            raise RuntimeError("AI API 错误（HTTP " + str(response.status_code) + "）：" + (message or "请求被拒绝"))
+        try:
+            reply = data["choices"][0]["message"]["content"]
+            if isinstance(reply, list):
+                reply = "".join(str(part.get("text", "")) for part in reply if isinstance(part, dict))
+            reply = str(reply or "").strip()
+        except (KeyError, IndexError, TypeError):
+            raise RuntimeError("AI 返回格式不兼容，缺少 choices/message/content") from None
+        if not reply:
+            raise RuntimeError("AI 未返回正文，请检查模型是否支持此接口或是否耗尽输出额度")
+        return reply
+
+
+def _classify_local_image(image_bytes):
+    global _ocr
+    with _ocr_guard:
+        if _ocr is None:
+            import ddddocr
+            _ocr = ddddocr.DdddOcr(show_ad=False)
+        return _ocr.classification(image_bytes)
+
+
+async def _recognize_image_result(image_bytes, length=0, cfg=None, ai_on=None, ocr_on=None):
+    """自动任务与面板测试共用识别链，测试只覆盖配置快照，不修改已保存设置。"""
+    started = time.perf_counter()
+    if cfg is None:
+        cfg = {"base": str(get_setting("ai_base", "") or "").strip(),
+               "key": str(get_setting("ai_key", "") or "").strip(),
+               "model": str(get_setting("ai_model", "") or "gpt-4o-mini").strip()}
+    ai_on = get_setting("ai_enabled", "0") == "1" if ai_on is None else ai_on
+    ocr_on = get_setting("ocr_enabled", "1") == "1" if ocr_on is None else ocr_on
+    errors = []
+    def result(text="", channel="none"):
+        return {"ok": bool(text), "text": text, "channel": channel, "errors": errors,
+                "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+    def clean(value):
+        text = "".join(ch for ch in str(value or "").strip() if ch.isalnum())[:16]
+        if not text:
+            raise ValueError("识别结果为空")
+        if length and len(text) != length:
+            raise ValueError("识别字符数与期望长度不一致（期望 " + str(length) + " 位）")
+        return text
+    if ai_on:
+        try:
+            content = [{"type": "text", "text": "识别图片中的验证码文字，只输出字符本身，不要解释" + ("，长度应为" + str(length) if length else "")},
+                       {"type": "image_url", "image_url": {"url": "data:" + _image_mime(image_bytes) + ";base64," + base64.b64encode(image_bytes).decode("ascii")}}]
+            return result(clean(await _call_ai(cfg, content)), "ai")
+        except Exception as error:
+            message = _safe_ai_error(error, cfg.get("key", ""))
+            errors.append({"channel": "ai", "message": message})
+            log.warning("AI 识别失败: %s", message)
     if ocr_on:
-        # 本地 ddddocr
         try:
-            global _ocr
-            if _ocr is None:
-                import ddddocr
-                _ocr = ddddocr.DdddOcr(show_ad=False)
-            res = _ocr.classification(image_bytes)
-            return "".join(ch for ch in (res or "") if ch.isalnum())[:16]
-        except Exception as e:
-            log.warning("本地 OCR 不可用(可开启 AI 识别): %s", e)
-            return ""
-    return ""   # 两个开关都关
+            loop = asyncio.get_running_loop()
+            value = await asyncio.wait_for(loop.run_in_executor(None, _classify_local_image, image_bytes), timeout=30)
+            return result(clean(value), "ocr")
+        except Exception as error:
+            message = "本地 OCR 不可用或识别失败：" + _safe_ai_error(error, cfg.get("key", ""))
+            errors.append({"channel": "ocr", "message": message})
+            log.warning("%s", message)
+    if not ai_on and not ocr_on:
+        errors.append({"channel": "none", "message": "请至少启用 AI 识别或本地 OCR"})
+    return result()
+
+
+async def recognize_image_text(image_bytes, length=0):
+    return (await _recognize_image_result(image_bytes, length))["text"]
 
 
 # ---------------- 面板鉴权:密码哈希 / 会话令牌 / 限速 / 验证码 ----------------
@@ -2407,6 +2503,58 @@ async def update_settings(body: dict):
     if any(k in body for k in ("ai_base", "ai_key", "ai_model")):
         load_ai_cfg()
     return {"ok": True}
+
+
+class AITestSettings(BaseModel):
+    ai_base: Optional[str] = Field(None, max_length=2048)
+    ai_key: Optional[str] = Field(None, max_length=4096)
+    ai_model: Optional[str] = Field(None, max_length=256)
+    ai_enabled: Optional[bool] = None
+    ocr_enabled: Optional[bool] = None
+
+
+class CaptchaTestInput(AITestSettings):
+    image: str = Field(..., min_length=1, max_length=MAX_TEST_IMAGE * 4 // 3 + 2048)
+    length: int = Field(0, ge=0, le=16)
+
+
+def _test_ai_settings(body):
+    cfg = {}
+    for name in ("base", "key", "model"):
+        supplied = getattr(body, "ai_" + name)
+        saved = str(get_setting("ai_" + name, "") or "").strip()
+        cfg[name] = saved if supplied is None or (name == "key" and not supplied.strip()) else supplied.strip()
+    ai_on = get_setting("ai_enabled", "0") == "1" if body.ai_enabled is None else body.ai_enabled
+    ocr_on = get_setting("ocr_enabled", "1") == "1" if body.ocr_enabled is None else body.ocr_enabled
+    return cfg, ai_on, ocr_on
+
+
+@app.post("/api/ai/test")
+async def test_ai_connection(body: AITestSettings):
+    """测试当前填写配置，不保存；只发送固定测试提示，不触发 Telegram 任务。"""
+    if _ai_test_lock.locked():
+        raise HTTPException(409, "已有识别或 AI 测试正在执行，请稍后重试")
+    cfg, _, _ = _test_ai_settings(body)
+    started = time.perf_counter()
+    async with _ai_test_lock:
+        try:
+            reply = await _call_ai(cfg, "这是连接测试。请只回复四个字：测试成功。不要解释，不要添加其它文字。")
+            ok = reply.strip() == "测试成功"
+            return {"ok": ok, "reply": reply, "error": "" if ok else "AI 已返回内容，但没有按要求回复“测试成功”",
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+        except Exception as error:
+            return {"ok": False, "reply": "", "error": _safe_ai_error(error, cfg.get("key", "")),
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+
+
+@app.post("/api/captcha/test")
+async def test_captcha_recognition(body: CaptchaTestInput):
+    if _ai_test_lock.locked():
+        raise HTTPException(409, "已有识别或 AI 测试正在执行，请稍后重试")
+    image = _decode_test_image(body.image)
+    cfg, ai_on, ocr_on = _test_ai_settings(body)
+    async with _ai_test_lock:
+        return await _recognize_image_result(image, body.length, cfg, ai_on, ocr_on)
 
 
 @app.post("/api/panel/password")

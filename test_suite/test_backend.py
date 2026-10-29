@@ -21,6 +21,7 @@ import sqlite3
 import struct
 import time
 from types import SimpleNamespace
+from typing import Optional
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 import zlib
@@ -61,7 +62,7 @@ def load_backend():
     # 只读源代码，绝不求值任何 BASE/DATA/conn/app/环境变量等顶层初始化。
     tree = ast.parse(SOURCE.read_text(encoding='utf-8'), filename=str(SOURCE))
     safe_assignments = {'SESSION_TTL', 'CAPTCHA_TTL', 'AUTH_CACHE_MAX', 'CAPTCHA_CACHE_MAX',
-                        'RL_WINDOW', 'RL_MAX', 'RL_BLOCK', 'CAPTCHA_AFTER', '_CAPTCHA_FONT',
+                        'RL_WINDOW', 'RL_MAX', 'RL_BLOCK', 'CAPTCHA_AFTER', '_CAPTCHA_FONT', 'MAX_TEST_IMAGE',
                         '_AUTO_COLS', 'RETRY_BASE'}
     selected = []
     for node in tree.body:
@@ -73,7 +74,7 @@ def load_backend():
     names = {name: globals()[name] for name in ('ast', 'asyncio', 'base64', 'OrderedDict', 'datetime',
              'timezone', 'timedelta', 'hashlib', 'hmac', 'ipaddress', 'json', 'math', 'random', 're',
              'secrets', 'sqlite3', 'struct', 'time', 'zlib')}
-    names.update(BaseModel=Model, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
+    names.update(BaseModel=Model, Optional=Optional, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
                  HTTPException=HTTPException, JSONResponse=Response, os=SimpleNamespace(environ={}),
                  log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=Exception,
                  AuthKeyUnregisteredError=Unauthorized), ZoneInfo=None,
