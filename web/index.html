@@ -288,7 +288,7 @@ select{appearance:none;-webkit-appearance:none;
 .toast.err{border-color:var(--err)}
 
 /* ---------- 时间滚轮 ---------- */
-.tp-overlay{position:fixed;inset:0;z-index:90;background:rgba(4,6,12,.5);backdrop-filter:blur(4px);
+.tp-overlay{position:fixed;inset:0;z-index:140;background:rgba(4,6,12,.5);backdrop-filter:blur(4px);
   display:flex;align-items:center;justify-content:center;padding:24px}
 .tp-sheet{width:300px;background:var(--panel);border:1px solid var(--hair2);border-radius:22px;
   padding:18px 18px 16px;box-shadow:var(--sh-lg)}
@@ -1032,6 +1032,7 @@ function closeAutoForm(type){
   if(el)el.classList.remove('show');
   document.body.style.overflow='';
   cancelAutoEdit(type);
+  if(typeof tpClose==='function')tpClose(); // 顺手关掉可能还开着的时间滚轮
 }
 async function saveAuto(type){
   let body,url='/api/autos';
