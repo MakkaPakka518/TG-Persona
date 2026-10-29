@@ -473,6 +473,11 @@ input[readonly]:focus{border-color:var(--acc)}
             <div><label>每天时间窗口(开始)</label><input type="text" id="sWinStart" value="08:00" readonly onclick="openTimePicker('sWinStart')"></div>
             <div><label>窗口(结束)</label><input type="text" id="sWinEnd" value="12:00" readonly onclick="openTimePicker('sWinEnd')"></div>
           </div>
+          <div class="flex">
+            <div><label for="sCommandDelay">发送命令后延迟（秒）</label><input type="number" id="sCommandDelay" value="1.6" min="0" max="120" step="0.1" required></div>
+            <div><label for="sButtonDelay">点击按钮后延迟（秒）</label><input type="number" id="sButtonDelay" value="2" min="0" max="120" step="0.1" required></div>
+          </div>
+          <div class="hint">发送命令 → 等待命令后延迟 → 点击按钮 → 等待按钮后延迟 → 后续验证码步骤。两段独立设置，范围 0–120 秒；0 秒表示立即进行。</div>
           <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="sClickBtn" style="width:auto"> 签到后自动点击回复里的按钮</label>
           <div id="sBtnWrap" class="hidden">
             <label>按钮表情(推荐 · 文字会变但图标不变的 bot 用它)</label>
@@ -491,7 +496,12 @@ input[readonly]:focus{border-color:var(--acc)}
               <div><label>连点次数(有的 bot 要点多次才生效)</label><input type="number" id="sClicks" value="1" min="1" max="20"></div>
               <div><label>连点间隔(毫秒)</label><input type="number" id="sClickGap" value="300" min="50" max="3000" step="50"></div>
             </div>
-            <div class="hint">连点会每点一次重新抓取最新按钮(适合按钮随之刷新的 bot)</div>
+            <label for="sRefreshButtons">连点模式</label>
+            <select id="sRefreshButtons">
+              <option value="1" selected>刷新按钮状态（默认，适合会变化按钮）</option>
+              <option value="0">复用同一按钮（连点中不重新获取消息）</option>
+            </select>
+            <div class="hint">刷新模式每次连点重新获取最新按钮；复用模式始终点击同一按钮，不在连点中重新获取消息。</div>
           </div>
           <label style="display:flex;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="sCap" style="width:auto"> 点签到后出现图片验证码,自动识别并回复</label>
           <div class="flex">
@@ -740,6 +750,16 @@ input[readonly]:focus{border-color:var(--acc)}
         </div>
         <pre id="updLog" class="hint" style="white-space:pre-wrap;display:none;margin-top:12px;max-height:260px;overflow:auto"></pre>
         <div class="hint">更新会自动备份当前文件到 data/backup-时间戳,再拉取仓库最新文件并重启服务;data 数据和 venv 不受影响。</div>
+        <h4 style="margin:16px 0 8px">备份管理</h4>
+        <div class="hint" id="backupsInfo" aria-live="polite">尚未加载备份列表</div>
+        <div class="hint" id="backupsReason">请先查看备份；清理只删除备份，不删除数据库、会话或 venv。</div>
+        <div class="flex" style="margin-top:10px;flex-wrap:wrap">
+          <button class="ghost" type="button" id="backupsLoadBtn" onclick="loadBackups()">查看备份</button>
+          <button class="btn" type="button" id="backupsKeepBtn" onclick="cleanupBackups('keep_latest')" disabled>保留最新一份，清理其余（推荐）</button>
+          <button class="danger" type="button" id="backupsAllBtn" onclick="cleanupBackups('all')" disabled>删除全部备份</button>
+        </div>
+        <div id="backupsList" style="margin-top:10px;max-height:260px;overflow:auto"></div>
+        <div class="hint" id="backupsResult" aria-live="polite" style="margin-top:8px"></div>
       </div>
     </div>
     <div class="card fold">
@@ -861,7 +881,67 @@ function foldToggle(el){
 
 // ---------- 系统更新 ----------
 let updTimer=null, updPolling=false;
+let backupsBusy=false, backupsCleanupAllowed=false, backupsCount=0, backupsUpdateBusy=false;
+function backupBytes(value){
+  const n=Number(value);
+  if(!Number.isFinite(n)||n<0)return '未知';
+  if(n<1024)return n+' B';
+  if(n<1024*1024)return (n/1024).toFixed(1)+' KiB';
+  if(n<1024*1024*1024)return (n/1024/1024).toFixed(1)+' MiB';
+  return (n/1024/1024/1024).toFixed(1)+' GiB';
+}
+function syncBackupButtons(){
+  const busy=backupsBusy||backupsUpdateBusy;
+  $('#backupsLoadBtn').disabled=backupsBusy;
+  $('#backupsKeepBtn').disabled=busy||!backupsCleanupAllowed||backupsCount<=1;
+  $('#backupsAllBtn').disabled=busy||!backupsCleanupAllowed||backupsCount===0;
+}
+async function fetchBackups(){
+  backupsCleanupAllowed=false;
+  const d=await api('/api/backups');
+  const items=Array.isArray(d.items)?d.items:[];
+  backupsCount=Number.isInteger(d.count)&&d.count>=0?d.count:items.length;
+  backupsCleanupAllowed=d.cleanup_allowed===true;
+  $('#backupsInfo').textContent=`备份共 ${backupsCount} 份 · 占用 ${backupBytes(d.total_bytes)}`;
+  $('#backupsReason').textContent=backupsCleanupAllowed?'清理只删除备份，不删除数据库、会话或 venv。':('暂不可清理：'+String(d.reason||'当前有活动任务或系统更新，请稍后重试'));
+  const list=$('#backupsList');
+  list.replaceChildren();
+  for(const item of items){
+    const row=document.createElement('div');row.className='hint';row.style.marginBottom='8px';
+    const name=document.createElement('div');name.textContent=String(item.name??'未命名备份');
+    const meta=document.createElement('div');
+    meta.textContent=`大小：${backupBytes(item.bytes)} · 创建时间：${String(item.created_at??'未知')} · 类型：${String(item.kind??'未知')}`;
+    row.appendChild(name);row.appendChild(meta);list.appendChild(row);
+  }
+  if(!items.length)list.textContent='暂无备份';
+}
+async function loadBackups(){
+  if(backupsBusy)return;
+  backupsBusy=true;backupsCleanupAllowed=false;syncBackupButtons();
+  $('#backupsInfo').textContent='备份加载中…';$('#backupsResult').textContent='';
+  try{await fetchBackups()}
+  catch(e){backupsCleanupAllowed=false;$('#backupsInfo').textContent='备份加载失败：'+e.message;toast(e.message,1)}
+  finally{backupsBusy=false;syncBackupButtons()}
+}
+async function cleanupBackups(mode){
+  if(backupsBusy||backupsUpdateBusy||!backupsCleanupAllowed)return;
+  if(mode!=='keep_latest'&&mode!=='all')return;
+  if(backupsCount===0||(mode==='keep_latest'&&backupsCount<=1))return;
+  const action=mode==='keep_latest'?'保留最新一份备份，删除其余备份':'删除全部备份';
+  if(!window.confirm(action+'？删除后不可恢复，也不可回滚到这些已删除的备份版本。只删除备份，不删除数据库、会话或 venv。确定继续？'))return;
+  backupsBusy=true;syncBackupButtons();$('#backupsResult').textContent='备份清理中…';
+  try{
+    const body=mode==='keep_latest'?{mode:'keep_latest',keep:1}:{mode:'all'};
+    const d=await api('/api/backups/cleanup',{method:'POST',body:JSON.stringify(body)});
+    if(d.ok!==true)throw new Error(d.error||'备份清理失败');
+    const deleted=Array.isArray(d.deleted)?d.deleted.length:0;
+    $('#backupsResult').textContent=`已删除 ${deleted} 份备份 · 释放 ${backupBytes(d.freed_bytes)} · 剩余 ${String(d.remaining??'未知')} 份`;
+    await fetchBackups();
+  }catch(e){backupsCleanupAllowed=false;$('#backupsResult').textContent='备份清理或列表刷新失败：'+e.message;toast(e.message,1)}
+  finally{backupsBusy=false;syncBackupButtons()}
+}
 function renderUpd(s){
+  backupsUpdateBusy=!!s.running;syncBackupButtons();
   const info=$('#updInfo'); if(!info) return;
   let line=`当前版本 <b>${esc(s.current)}</b>`;
   if(s.latest) line += `，最新版本 <b>${esc(s.latest)}</b>`;
@@ -993,7 +1073,7 @@ function renderAutoList(type){
     </div>`).join('');
 }
 function autoDesc(a){
-  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · 每天 ${esc(a.win_start)}~${esc(a.win_end)}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮':''}${a.signin_captcha?' · 验证码':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
+  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · 每天 ${esc(a.win_start)}~${esc(a.win_end)}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒${a.signin_captcha?' · 验证码':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
   if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}${a.poll_interval>0?' · 轮询'+a.poll_interval+'s@'+esc(a.target):''}`;
   if(a.type==='redpacket')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
   if(a.type==='keepalive'){
@@ -1016,12 +1096,14 @@ function editAutoItem(id){
     $('#sName').value=a.name;$('#sTarget').value=a.target;$('#sCmd').value=a.command;
     $('#sIsChat').checked=!!a.is_chat;
     $('#sWinStart').value=a.win_start;$('#sWinEnd').value=a.win_end;
+    $('#sCommandDelay').value=a.command_delay??1.6;$('#sButtonDelay').value=a.button_delay??2;
     $('#sClickBtn').checked=!!a.click_btn;
     $('#sBtnWrap').classList.toggle('hidden',!a.click_btn);
     $('#sBtnText').value=a.btn_text||'';
     $('#sBtnEmoji').value=a.btn_emoji||'';
     $('#sClicks').value=a.click_times||1;
     $('#sClickGap').value=a.click_interval||300;
+    $('#sRefreshButtons').value=String(a.refresh_buttons??1);
     $('#sCap').checked=!!a.signin_captcha;
     $('#sKw').value=a.success_kw||'';
     $('#sFw').value=a.fail_kw||'';
@@ -1053,7 +1135,7 @@ function editAutoItem(id){
 }
 function cancelAutoEdit(t){
   editAuto=null;
-  ({signin:()=>{$('#sName').value='';$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
+  ({signin:()=>{$('#sName').value='';$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';$('#cSteps').value='[]';$('#cRetry').value=1;$('#cCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'},
@@ -1124,10 +1206,17 @@ async function saveAuto(type){
       win_start:$('#sWinStart').value.trim(),win_end:$('#sWinEnd').value.trim(),click_btn:$('#sClickBtn').checked?1:0,
       btn_text:$('#sBtnText').value.trim(),btn_emoji:$('#sBtnEmoji').value.trim(),
       click_times:+$('#sClicks').value||1,click_interval:+$('#sClickGap').value||300,
+      refresh_buttons:$('#sRefreshButtons').value==='0'?0:1,
+      command_delay:$('#sCommandDelay').value.trim()===''?1.6:Number($('#sCommandDelay').value),
+      button_delay:$('#sButtonDelay').value.trim()===''?2:Number($('#sButtonDelay').value),
       success_kw:$('#sKw').value.trim(),fail_kw:$('#sFw').value.trim(),
       points_pat:$('#sPts').value.trim(),retries:+$('#sRetries').value||2,
       signin_captcha:$('#sCap').checked?1:0};
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
+    for(const delay of [body.command_delay,body.button_delay]){
+      if(!Number.isFinite(delay)||delay<0||delay>120||Math.abs(delay*10-Math.round(delay*10))>1e-7)
+        return toast('签到延迟须为 0–120 秒，步进 0.1 秒；0 秒表示立即进行',1);
+    }
   }else if(type==='grabcodes'){
     body={type,name:$('#gName').value.trim(),groups:getAutoGroups('grabcodes'),keywords:$('#gKeywords').value.trim(),
       action:ACTIONS.grabcodes,reply_text:$('#gText').value.trim(),cooldown:+$('#gCd').value||30,
@@ -1748,7 +1837,12 @@ function logRow(h){
     add('回复',d.reply||h.reply);
     add('按钮',d.button);
     add('验证码',d.captcha);
+    if(d.captcha_message_id!=null)add('图片来源','消息 #'+d.captcha_message_id+(d.captcha_prompt?' · '+d.captcha_prompt:''));
+    if(d.command_delay!=null)add('命令后等待',d.command_delay+' 秒');
+    if(d.button_delay!=null)add('按钮后等待',d.button_delay+' 秒');
+    if(d.refresh_buttons!=null)add('连点模式',Number(d.refresh_buttons)===0?'复用同一按钮':'刷新按钮状态');
     add('积分',d.points);
+    add('失败原因',d.error);
   }else if(h.action==='custom'){
     add('目标',d.bot||h.chat_id);
     add('过程',d.steps||h.reply);

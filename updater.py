@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -149,10 +150,20 @@ def _pip_install(requirements, python=None):
                     "-r", str(requirements)], check=True, timeout=300)
 
 
-def _acquire_lock(blocking=False):
-    DATA.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(DATA / "update.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+def _acquire_lock(blocking=False, data_fd=None):
+    if data_fd is None:
+        DATA.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(DATA / "update.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    else:
+        # Backup operations pin DATA and never follow a substituted lock link.
+        fd = os.open("update.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+                     0o600, dir_fd=data_fd)
     try:
+        if data_fd is not None:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or not os.path.samestat(
+                    info, os.stat("update.lock", dir_fd=data_fd, follow_symlinks=False)):
+                raise RuntimeError("更新锁文件不安全")
         fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
         return fd
     except BlockingIOError:
@@ -166,6 +177,319 @@ def _acquire_lock(blocking=False):
 def _release_lock(fd):
     fcntl.flock(fd, fcntl.LOCK_UN)
     os.close(fd)
+
+
+# Only direct, historical updater directories are eligible. No caller paths.
+_BACKUP_NAMES = re.compile(r"(?:backup-[0-9]{8}-[0-9]{6}|update-[0-9a-f]{32})", re.ASCII)
+_BACKUP_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+
+def _backup_kind(name):
+    if not isinstance(name, str) or not _BACKUP_NAMES.fullmatch(name):
+        return None
+    return "legacy" if name.startswith("backup-") else "transaction"
+
+
+def _open_backup_data(create=False):
+    data = Path(DATA)
+    if not data.is_absolute() or ".." in data.parts:
+        raise RuntimeError("备份父目录路径不安全")
+    try:
+        info = data.lstat()
+    except FileNotFoundError:
+        if not create:
+            return None
+        data.mkdir(parents=True, exist_ok=True)
+        info = data.lstat()
+    if not stat.S_ISDIR(info.st_mode):
+        raise RuntimeError("data 必须是实际目录，不能是符号链接")
+    fd = os.open(str(data), _BACKUP_DIR_FLAGS)
+    try:
+        if not os.path.samestat(info, os.fstat(fd)):
+            raise RuntimeError("data 目录发生变化，拒绝清理")
+        _check_backup_data(fd)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _check_backup_data(fd):
+    info = Path(DATA).lstat()
+    if not stat.S_ISDIR(info.st_mode) or not os.path.samestat(info, os.fstat(fd)):
+        raise RuntimeError("data 目录发生变化，拒绝清理")
+
+
+def _check_backup_entry(parent_fd, name, expected):
+    info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if not stat.S_ISDIR(info.st_mode) or not os.path.samestat(info, expected):
+        raise RuntimeError("备份目录发生变化，拒绝清理: " + name)
+
+
+def _open_backup_dir(parent_fd, name, expected):
+    _check_backup_entry(parent_fd, name, expected)
+    if expected.st_dev != os.fstat(parent_fd).st_dev:
+        raise RuntimeError("备份包含跨文件系统目录，拒绝清理")
+    fd = os.open(name, _BACKUP_DIR_FLAGS, dir_fd=parent_fd)
+    if not os.path.samestat(expected, os.fstat(fd)):
+        os.close(fd)
+        raise RuntimeError("备份目录发生变化，拒绝清理: " + name)
+    return fd
+
+
+def _backup_bytes(fd):
+    # Logical file/link bytes, not allocated blocks; never open file contents.
+    total = 0
+    with os.scandir(fd) as entries:
+        for entry in entries:
+            info = entry.stat(follow_symlinks=False)
+            if stat.S_ISDIR(info.st_mode):
+                child = _open_backup_dir(fd, entry.name, info)
+                try:
+                    total += _backup_bytes(child)
+                    _check_backup_entry(fd, entry.name, info)
+                finally:
+                    os.close(child)
+            else:
+                total += info.st_size
+    return total
+
+
+def _restorable_backup(directory_fd, kind):
+    """保留策略优先保留真正包含代码的备份，不把失败准备目录当作唯一备份。"""
+    backup_fd = None
+    try:
+        if kind == "legacy":
+            return stat.S_ISREG(os.stat("main.py", dir_fd=directory_fd, follow_symlinks=False).st_mode)
+        manifest = os.stat("manifest.json", dir_fd=directory_fd, follow_symlinks=False)
+        backup = os.stat("backup", dir_fd=directory_fd, follow_symlinks=False)
+        if not stat.S_ISREG(manifest.st_mode) or not stat.S_ISDIR(backup.st_mode):
+            return False
+        backup_fd = _open_backup_dir(directory_fd, "backup", backup)
+        main = os.stat("main.py", dir_fd=backup_fd, follow_symlinks=False)
+        _check_backup_entry(directory_fd, "backup", backup)
+        return stat.S_ISREG(main.st_mode)
+    except (OSError, RuntimeError):
+        return False
+    finally:
+        if backup_fd is not None:
+            os.close(backup_fd)
+
+
+def _scan_backups(data_fd):
+    items, identities, errors = [], {}, []
+    if data_fd is None:
+        return items, identities, errors
+    with os.scandir(data_fd) as entries:
+        for entry in entries:
+            kind = _backup_kind(entry.name)
+            if not kind:
+                continue  # Do not even stat unknown trees (sessions/db/venv/etc.).
+            item = None
+            try:
+                info = entry.stat(follow_symlinks=False)
+                if stat.S_ISLNK(info.st_mode):
+                    raise RuntimeError("顶层备份是符号链接")
+                if not stat.S_ISDIR(info.st_mode):
+                    continue
+                item = {"name": entry.name, "bytes": None,
+                        "created_at": info.st_mtime, "kind": kind}
+                items.append(item)
+                identities[entry.name] = info
+                child = _open_backup_dir(data_fd, entry.name, info)
+                try:
+                    item["bytes"] = _backup_bytes(child)
+                    item["restorable"] = _restorable_backup(child, kind)
+                    _check_backup_entry(data_fd, entry.name, info)
+                finally:
+                    os.close(child)
+            except (OSError, RuntimeError, RecursionError):
+                # No raw exception paths or backup file contents in the API.
+                errors.append("备份不可读取或不安全: " + entry.name)
+                if item is not None:
+                    item["bytes"] = None
+    items.sort(key=lambda item: (item["created_at"], item["name"]), reverse=True)
+    return items, identities, errors
+
+
+def _backup_cleanup_reason(data_fd):
+    """Refresh only updater state, using no-follow reads of its control file.
+
+    Completed updates retain mutation.json. That marker alone must NOT prevent
+    deleting a confirmed successful update or a completed code rollback.
+    """
+    running = STATE.get("running", False)
+    if data_fd is not None:
+        try:
+            state_fd = os.open("update-state.json", os.O_RDONLY | os.O_NOFOLLOW |
+                               os.O_NONBLOCK, dir_fd=data_fd)
+        except FileNotFoundError:
+            state_fd = None
+        if state_fd is not None:
+            with os.fdopen(state_fd, "r", encoding="utf-8") as source:
+                info = os.fstat(source.fileno())
+                if not stat.S_ISREG(info.st_mode):
+                    raise RuntimeError("更新状态文件不安全")
+                saved = json.load(source)
+                if not isinstance(saved, dict):
+                    raise RuntimeError("更新状态文件无效")
+                if not os.path.samestat(info, os.stat("update-state.json",
+                        dir_fd=data_fd, follow_symlinks=False)):
+                    raise RuntimeError("更新状态文件发生变化")
+                STATE.update(saved)  # Same refresh semantics as _load_state().
+    if running or STATE.get("running"):
+        STATE["running"] = True  # A stale persisted false cannot weaken this guard.
+        return "更新正在运行，禁止清理备份"
+    phase = STATE.get("phase")
+    if STATE.get("recovery_required") or phase in (
+            "deps", "replace", "restart", "health", "rollback",
+            "recovery_handoff", "recovery_required"):
+        return "存在待恢复的更新事务，禁止清理备份"
+    name = STATE.get("transaction")
+    if name is None or name == "":
+        return ""
+    if not isinstance(name, str):
+        return "当前事务路径无效，禁止清理备份"
+    txdir = _transaction_dir()
+    if txdir is None or txdir.parent != Path(DATA):
+        return "当前事务路径无效，禁止清理备份"
+    if data_fd is None:
+        return ""
+    try:
+        info = os.stat(name, dir_fd=data_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return ""
+    child = _open_backup_dir(data_fd, name, info)
+    try:
+        try:
+            os.stat("mutation.json", dir_fd=child, follow_symlinks=False)
+            mutated = True
+        except FileNotFoundError:
+            mutated = False
+        _check_backup_entry(data_fd, name, info)
+    finally:
+        os.close(child)
+    completed = ((phase == "done" and STATE.get("ok") is True) or
+                 (phase == "rolled_back" and STATE.get("code_rollback") is True
+                  and STATE.get("rollback_health") is not False))
+    if mutated and not completed:
+        return "当前事务已修改应用但未完成回滚，禁止清理备份"
+    return ""
+
+
+def _check_backup_lock(data_fd, lock_fd):
+    _check_backup_data(data_fd)
+    if not os.path.samestat(os.fstat(lock_fd), os.stat(
+            "update.lock", dir_fd=data_fd, follow_symlinks=False)):
+        raise RuntimeError("更新锁发生变化，拒绝清理")
+
+
+def _delete_backup_dir(parent_fd, name, expected, guard=None):
+    # openat/unlinkat-style traversal works on Python 3.8 too (rmtree's dir_fd
+    # argument requires 3.11). Pinned fds prevent symlink swaps escaping DATA.
+    if guard is None:
+        def guard():
+            _check_backup_data(parent_fd)
+            _check_backup_entry(parent_fd, name, expected)
+    guard()  # Revalidate the original DATA/top-level inode throughout recursion.
+    fd = _open_backup_dir(parent_fd, name, expected)
+    try:
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                guard()
+                info = entry.stat(follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode):
+                    _delete_backup_dir(fd, entry.name, info, guard)
+                else:
+                    _check_backup_entry(parent_fd, name, expected)
+                    os.unlink(entry.name, dir_fd=fd)  # Links are unlinked, never followed.
+        guard()
+        _check_backup_entry(parent_fd, name, expected)
+        os.rmdir(name, dir_fd=parent_fd)
+    finally:
+        os.close(fd)
+
+
+def list_backups():
+    """Metadata only. Unknown sizes are None; reason explains incomplete totals."""
+    data_fd = lock_fd = None
+    items, reason = [], ""
+    try:
+        with _STATE_LOCK:
+            data_fd = _open_backup_data()
+            if data_fd is not None:
+                lock_fd = _acquire_lock(data_fd=data_fd)
+                if lock_fd is None:
+                    reason = "更新或备份清理正在运行，禁止清理备份"
+                else:
+                    _check_backup_lock(data_fd, lock_fd)
+            reason = reason or _backup_cleanup_reason(data_fd)
+        items, _, errors = _scan_backups(data_fd)
+        if data_fd is not None:
+            _check_backup_data(data_fd)
+        if errors:
+            reason = reason or ("；".join(errors) + "；大小合计不完整")
+    except (OSError, RuntimeError, ValueError, RecursionError):
+        reason = "备份目录或更新状态不可读取或不安全，禁止清理备份"
+    finally:
+        if lock_fd is not None:
+            _release_lock(lock_fd)
+        if data_fd is not None:
+            os.close(data_fd)
+    return {"items": items, "count": len(items),
+            "total_bytes": sum(item["bytes"] or 0 for item in items),
+            "cleanup_allowed": not bool(reason), "reason": reason}
+
+
+def cleanup_backups(mode="keep_latest", keep=1):
+    """Remove only verified history under the same exclusive lock as updates."""
+    if mode not in ("keep_latest", "all"):
+        raise ValueError("mode 仅支持 keep_latest 或 all")
+    if type(keep) is not int or not 0 <= keep <= 20:
+        raise ValueError("keep 必须是 0..20 的整数")
+    data_fd = lock_fd = None
+    try:
+        with _STATE_LOCK:
+            data_fd = _open_backup_data(create=True)
+            lock_fd = _acquire_lock(data_fd=data_fd)
+            if lock_fd is None:
+                raise RuntimeError("更新或备份清理正在运行，禁止清理备份")
+            _check_backup_lock(data_fd, lock_fd)
+            reason = _backup_cleanup_reason(data_fd)
+            if reason:
+                raise RuntimeError(reason)
+        items, identities, errors = _scan_backups(data_fd)
+        if errors:
+            raise RuntimeError("；".join(errors) + "；未开始清理")
+        retained = {item["name"] for item in [entry for entry in items if entry.get("restorable")][:keep]}
+        selected = items if mode == "all" else [item for item in items if item["name"] not in retained]
+        # Preflight every candidate, not merely the first one, before deleting.
+        for item in selected:
+            _check_backup_entry(data_fd, item["name"], identities[item["name"]])
+        with _STATE_LOCK:
+            _check_backup_lock(data_fd, lock_fd)
+            reason = _backup_cleanup_reason(data_fd)
+            if reason:
+                raise RuntimeError(reason)
+        deleted, freed = [], 0
+        for item in selected:
+            _check_backup_lock(data_fd, lock_fd)
+            name = item["name"]
+            if not _backup_kind(name):
+                raise RuntimeError("备份名称无效，拒绝清理")
+            _delete_backup_dir(data_fd, name, identities[name])
+            deleted.append(name)
+            freed += item["bytes"]
+        _check_backup_lock(data_fd, lock_fd)
+        return {"ok": True, "deleted": deleted, "freed_bytes": freed,
+                "remaining": len(items) - len(deleted)}
+    except (OSError, ValueError, RecursionError) as error:
+        raise RuntimeError("备份目录或更新状态不可读取或发生变化，清理已停止") from error
+    finally:
+        if lock_fd is not None:
+            _release_lock(lock_fd)
+        if data_fd is not None:
+            os.close(data_fd)
 
 
 def _safe_extract(blob, destination):
@@ -558,9 +882,11 @@ def _do_recovery(fd, txdir):
         _log("无法启动失主事务恢复监督器,需人工处理/重试恢复: " + repr(error))
         _state(running=False, ok=False, phase="recovery_required")
     finally:
-        _release_lock(fd)
-        if not handed_off:
-            (txdir / "environment.json").unlink(missing_ok=True)
+        try:
+            if not handed_off:
+                (txdir / "environment.json").unlink(missing_ok=True)
+        finally:
+            _release_lock(fd)
 
 
 def _helper_main(txdir):
@@ -591,9 +917,11 @@ def _helper_main(txdir):
         else:
             _run_transaction(txdir, tx)
     finally:
-        _release_lock(fd)
-        (txdir / "environment.json").unlink(missing_ok=True)
-        shutil.rmtree(txdir / "source", ignore_errors=True)
+        try:
+            (txdir / "environment.json").unlink(missing_ok=True)
+            shutil.rmtree(txdir / "source", ignore_errors=True)
+        finally:
+            _release_lock(fd)
 
 
 def _do_update(fd, force=False):
@@ -639,13 +967,15 @@ def _do_update(fd, force=False):
         _log("更新准备失败(未修改应用): " + repr(error))
         _state(running=False, ok=False, phase="error")
     finally:
-        # Persistent running stays true during handoff/restart/health/rollback.
-        _release_lock(fd)
-        if txdir and not handed_off:
-            env = txdir / "environment.json"
-            if env.exists():
-                env.unlink()
-            shutil.rmtree(txdir / "source", ignore_errors=True)
+        # 交接时及时释放给监督器；未交接的临时目录须清理完才释放。
+        try:
+            if txdir and not handed_off:
+                env = txdir / "environment.json"
+                if env.exists():
+                    env.unlink()
+                shutil.rmtree(txdir / "source", ignore_errors=True)
+        finally:
+            _release_lock(fd)
 
 
 def start_update(force=False):

@@ -150,6 +150,9 @@ def db_init():
         ("btn_emoji", "TEXT DEFAULT ''"),
         ("click_times", "INTEGER DEFAULT 1"),
         ("click_interval", "INTEGER DEFAULT 300"),
+        ("command_delay", "REAL DEFAULT 1.6"),
+        ("button_delay", "REAL DEFAULT 2.0"),
+        ("refresh_buttons", "INTEGER DEFAULT 1"),
         ("last_attempt", "INTEGER DEFAULT 0"),
         ("retry_count", "INTEGER DEFAULT 0"),
         ("retry_day", "TEXT DEFAULT ''"),
@@ -1189,6 +1192,45 @@ def _task_failure(a, message, content=""):
     return False
 
 
+def _signin_failed(text, configured=""):
+    defaults = "验证码错误,验证码不正确,验证码无效,验证码已过期,验证码过期,验证失败,签到失败,未签到成功,invalid captcha,wrong captcha,captcha expired,captcha error"
+    return match_keywords(configured + "," + defaults, text)
+
+
+def _signin_succeeded(text, configured=""):
+    defaults = "签到成功,签到完成,今日已签到,已经签到,已签到,check-in successful,check in successful,already checked in"
+    return match_keywords(configured or defaults, text)
+
+
+async def _await_signin_result(ent, min_id, success_kw="", fail_kw="", baseline=None, require_success=False, timeout=12):
+    """等待本轮新回复；明确错误优先，验证码提交不能仅因发送成功而成功。"""
+    deadline = time.monotonic() + timeout
+    last_text = ""
+    polls = 0
+    while time.monotonic() < deadline and polls < max(1, math.ceil(timeout) + 1):
+        polls += 1
+        try:
+            fresh = [m for m in await client.get_messages(ent, limit=12) if _fresh_reply(m, min_id, baseline)]
+            text = "\n".join(str(getattr(m, "raw_text", "") or "") for m in reversed(fresh)).strip()
+            if text:
+                last_text = text
+                if _signin_failed(text, fail_kw):
+                    return text, "failed"
+                if _signin_succeeded(text, success_kw):
+                    return text, "success"
+                if not require_success and not success_kw:
+                    return text, "received"
+        except errors.FloodWaitError as error:
+            raise _RetryLater(error.seconds) from error
+        except Exception:
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(1.0, remaining))
+    return last_text, "unknown"
+
+
 async def run_signin(a):
     """单次签到尝试;重试/成功时间由统一执行器管理,不在协程内无限重发。"""
     target = str(a["target"] or "").strip()
@@ -1198,21 +1240,24 @@ async def run_signin(a):
     ent = await resolve_entity(target)
     if ent is None:
         return _task_failure(a, "签到目标解析失败", cmd)
+    captcha_baseline = await _message_snapshot(ent) if a["signin_captcha"] else None
     try:
         sent_msg = await client.send_message(ent, cmd)
         min_id = sent_msg.id
+        captcha_min_id = min_id
     except errors.FloodWaitError as e:
         raise _RetryLater(e.seconds) from e
     except Exception as e:
         return _task_failure(a, f"签到发送失败: {e}", cmd)
 
-    # 可选:点击回复按钮(bot 回复消息上的键盘,不区分是否自己发出)
+    # 两段延迟都使用异步等待，不阻塞面板和其它任务。
+    await asyncio.sleep(float(a["command_delay"]))
+    # 可选:点击本轮回复按钮。
     clicked_btn = False
     btn_text_clicked = ""
     if a["click_btn"]:
         try:
-            await asyncio.sleep(1.6)
-            _, btns = await _find_latest_buttons(ent, min_id=min_id)
+            button_message, btns = await _find_latest_buttons(ent, min_id=min_id)
             b = _find_btn(btns, a["btn_text"], a["btn_emoji"])
             if not b:
                 return _task_failure(a, "本轮签到未找到匹配按钮", cmd)
@@ -1222,34 +1267,44 @@ async def run_signin(a):
                 for i in range(times):
                     if i:
                         await asyncio.sleep(gap)
-                        # 每点一次消息会更新,重新取最新按钮再点
-                        try:
-                            _, btns2 = await _find_latest_buttons(ent, min_id=min_id)
-                            nb = _find_btn(btns2, a["btn_text"], a["btn_emoji"])
-                            if nb:
-                                b = nb
-                        except Exception:
-                            pass
+                        if a["refresh_buttons"]:
+                            # 刷新模式重新读取按钮；固定模式直接复用原按钮。
+                            try:
+                                latest_button_message, btns2 = await _find_latest_buttons(ent, min_id=min_id)
+                                nb = _find_btn(btns2, a["btn_text"], a["btn_emoji"])
+                                if nb:
+                                    b = nb
+                                    button_message = latest_button_message
+                            except Exception:
+                                pass
+                    if a["signin_captcha"] and (i == 0 or a["refresh_buttons"]):
+                        # 必须在点击前取快照，点击产生的新消息不能被误纳入旧边界。
+                        captcha_baseline = await _message_snapshot(ent)
+                        if button_message is not None:
+                            captcha_baseline.setdefault(button_message.id, _message_signature(button_message))
+                        captcha_min_id = max([min_id] + list(captcha_baseline))
                     await b.click()
                 clicked_btn = True
                 btn_text_clicked = getattr(b, "text", "") or ""
                 log.info("签到点击按钮: %s ×%s", b.text, times)
+                await asyncio.sleep(float(a["button_delay"]))
         except errors.FloodWaitError as e:
             raise _RetryLater(e.seconds) from e
         except Exception as e:
             return _task_failure(a, f"签到点按钮失败: {e}", cmd)
 
     # 可选:点签到后出现图片验证码,自动识别并回复
-    cap_ans = ""
+    cap_ans, cap_m = "", None
+    outcome_baseline = None
     if a["signin_captcha"]:
-        # 刚点完按钮,给 bot 一点时间发验证码;若没点按钮则直接等
-        cap_m, img = await _await_signin_captcha(ent, 25, min_id=min_id)
+        cap_m, img = await _await_signin_captcha(ent, 25, min_id=captcha_min_id, baseline=captcha_baseline)
         if not img:
-            return _task_failure(a, "本轮未等到验证码图片", cmd)
+            return _task_failure(a, "本轮未收到带验证提示的新图片；已忽略欢迎图和旧图，未提交识别结果", cmd)
         cap_ans = await recognize_image_text(img)
         if not cap_ans:
             return _task_failure(a, "验证码识别为空(检查 AI/本地 OCR 开关)", cmd)
         try:
+            outcome_baseline = await _message_snapshot(ent)
             cap_sent = await client.send_message(ent, cap_ans)
             min_id = cap_sent.id
             log.info("签到验证码已回复")
@@ -1258,28 +1313,34 @@ async def run_signin(a):
         except Exception as e:
             return _task_failure(a, f"验证码回复失败: {e}", cmd)
 
-    # 成功/失败关键词判定 + 积分提取
+    # 未配置关键词也识别常见明确错误；验证码提交后必须有成功确认。
     ok, points, fail = True, "", False
     skw = str(a["success_kw"] or "").strip()
     fkw = str(a["fail_kw"] or "").strip()
     ppat = str(a["points_pat"] or "").strip()
-    reply_txt = ""
-    if skw or fkw or ppat:
-        # 刚回复验证码后多等一点,让 bot 出最终结果
-        await asyncio.sleep(2.5 if cap_ans else 1.5)
+    reply_txt, failure_reason = "", ""
+    if skw or fkw or ppat or cap_ans:
+        reply_txt, result_status = await _await_signin_result(ent, min_id, skw, fkw,
+            baseline=outcome_baseline, require_success=bool(cap_ans or skw))
+        fail = result_status == "failed"
+        ok = result_status in ("success", "received")
+        if fail:
+            failure_reason = "机器人明确拒绝本次请求：" + reply_txt[:120]
+        elif not ok:
+            failure_reason = "未收到本轮签到成功确认" + ("，请配置正确的成功关键词" if not skw else "（" + skw + "）")
+    else:
         reply_txt, _ = await _fetch_reply(ent, min_id=min_id)
-        rl = reply_txt.lower()
-        if fkw and any(k.strip().lower() in rl for k in re.split(r"[,，]", fkw) if k.strip()):
-            ok, fail = False, True
-        elif skw:
-            ok = any(k.strip().lower() in rl for k in re.split(r"[,，]", skw) if k.strip())
-        if ppat:
-            try:
-                m = re.search(ppat, reply_txt)
-                if m:
-                    points = m.group(1) if m.groups() else m.group(0)
-            except re.error:
-                pass
+        fail = _signin_failed(reply_txt, fkw)
+        ok = not fail
+        if fail:
+            failure_reason = "机器人明确拒绝本次请求：" + reply_txt[:120]
+    if ppat and reply_txt:
+        try:
+            m = re.search(ppat, reply_txt)
+            if m:
+                points = m.group(1) if m.groups() else m.group(0)
+        except re.error:
+            pass
     desc = f"发送: {cmd}"
     if a["click_btn"]:
         desc += " + 点按钮"
@@ -1289,10 +1350,10 @@ async def run_signin(a):
         desc += f" · 积分 {points}"
     if fail:
         desc += " (失败)"
-        notify_event("fail", a["name"], f"回复含失败词「{fkw}」: {reply_txt[:120]}")
+        notify_event("fail", a["name"], failure_reason)
     elif ok is False:
         desc += " (未达成功条件)"
-        notify_event("fail", a["name"], f"未找到成功词「{skw}」: {reply_txt[:120]}")
+        notify_event("fail", a["name"], failure_reason)
     else:
         notify_event("success", a["name"], f"签到成功{('· 积分 '+points) if points else ''} · {target}")
     add_hit("signin", not (fail or ok is False), chat_id=target, rule_id=-a["id"], grp_name=a["name"],
@@ -1300,6 +1361,10 @@ async def run_signin(a):
             detail={"kind": "signin", "task": a["name"], "bot": target, "command": cmd,
                     "reply": reply_txt, "button": btn_text_clicked,
                     "clicks": (int(a["click_times"] or 1) if a["click_btn"] else 0), "captcha": cap_ans,
+                    "captcha_message_id": cap_m.id if cap_m is not None else None,
+                    "captcha_prompt": str(getattr(cap_m, "raw_text", "") or "")[:160],
+                    "command_delay": a["command_delay"], "button_delay": a["button_delay"],
+                    "refresh_buttons": a["refresh_buttons"], "error": failure_reason,
                     "points": points, "note": desc})
     log.info("签到%s 任务=%s 目标=%s", "失败" if fail or ok is False else "成功", a["name"], target)
     return not (fail or ok is False)
@@ -1360,27 +1425,77 @@ async def _find_latest_buttons(ent, limit=6, min_id=0):
     return None, []
 
 
-async def _await_signin_captcha(ent, timeout=25, min_id=0):
-    """等待本轮目标发来的图片验证码,超时返回 (None,None)。"""
+def _message_signature(message):
+    photo = getattr(message, "photo", None)
+    document = getattr(message, "document", None)
+    return (str(getattr(message, "raw_text", "") or ""),
+            getattr(photo, "id", bool(photo)), getattr(document, "id", bool(document)),
+            str(getattr(message, "edit_date", "") or ""))
+
+
+async def _message_snapshot(ent):
+    try:
+        return {m.id: _message_signature(m) for m in await client.get_messages(ent, limit=12) if not m.out}
+    except Exception:
+        return {}
+
+
+def _fresh_reply(message, min_id, baseline=None):
+    if message.out:
+        return False
+    if message.id > min_id:
+        return True
+    return bool(baseline and message.id in baseline and _message_signature(message) != baseline[message.id])
+
+
+def _captcha_prompt(text):
+    text = str(text or "").lower()
+    if any(term in text for term in ("验证码错误", "验证码无效", "验证码过期", "欢迎使用", "选择您要使用的功能")):
+        return False
+    return (any(term in text for term in ("验证码", "校验码", "captcha", "verification code"))
+            and any(term in text for term in ("输入", "填写", "回复", "发送", "enter", "input", "send", "type")))
+
+
+async def _await_signin_captcha(ent, timeout=25, min_id=0, baseline=None):
+    """只选本次动作后带明确验证提示的图片，欢迎图和错误卡片不进入识别。"""
     deadline = time.monotonic() + timeout
     checked = set()
-    while time.monotonic() < deadline:
+    polls = 0
+    while time.monotonic() < deadline and polls < max(1, math.ceil(timeout) + 1):
+        polls += 1
         try:
-            for m in await client.get_messages(ent, limit=8):
-                if m.out or m.id <= min_id or m.id in checked:
+            messages = list(await client.get_messages(ent, limit=12))
+            for m in messages:
+                signature = (m.id, _message_signature(m))
+                if not _fresh_reply(m, min_id, baseline) or signature in checked:
                     continue
-                checked.add(m.id)
                 has_img = bool(getattr(m, "photo", None))
                 if not has_img and getattr(m, "document", None):
                     has_img = str(getattr(m.document, "mime_type", "")).startswith("image/")
                 if not has_img:
                     continue
+                if m.id <= min_id and baseline and m.id in baseline and _message_signature(m)[1:3] == baseline[m.id][1:3]:
+                    continue  # 只编辑欢迎卡片文字不代表换了图片，必须媒体本身变化。
+                prompt = _captcha_prompt(getattr(m, "raw_text", ""))
+                # 支持图片和提示分开发送，但提示必须是同一发送者的相邻新消息。
+                if not prompt and not str(getattr(m, "raw_text", "") or "").strip() and not getattr(m, "reply_markup", None):
+                    prompt = any(hint.id - m.id == 1 and _fresh_reply(hint, min_id, baseline)
+                                 and getattr(hint, "sender_id", None) == getattr(m, "sender_id", None)
+                                 and _captcha_prompt(getattr(hint, "raw_text", "")) for hint in messages)
+                if not prompt:
+                    continue  # 后续编辑/新提示到来仍可重新检查，不能永久按 id 忽略。
+                checked.add(signature)
                 img = await client.download_media(m, file=bytes)
                 if img:
                     return m, img
+        except errors.FloodWaitError as error:
+            raise _RetryLater(error.seconds) from error
         except Exception:
             pass
-        await asyncio.sleep(1.5)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(1.0, remaining))
     return None, None
 
 
@@ -2295,6 +2410,9 @@ class AutoIn(BaseModel):
     btn_emoji: str = ""           # signin: 按钮里的表情(文字会变、图标不变时用它)
     click_times: int = 1          # signin: 连点次数
     click_interval: int = 300     # signin: 连点间隔(毫秒)
+    command_delay: float = Field(1.6, ge=0, le=120)  # 命令后等待秒数
+    button_delay: float = Field(2.0, ge=0, le=120)   # 点击按钮后等待秒数
+    refresh_buttons: int = Field(1, ge=0, le=1)       # 连点前刷新/固定按钮
     success_kw: str = ""          # signin: 成功关键词
     fail_kw: str = ""             # signin: 失败关键词(回复含它判失败)
     points_pat: str = ""          # signin: 积分提取正则
@@ -2330,6 +2448,10 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "连点次数需在 1-20 之间")
         if body.click_interval < 50 or body.click_interval > 3000:
             raise HTTPException(400, "连点间隔需在 50-3000 毫秒之间")
+        if not all(math.isfinite(value) and 0 <= value <= 120 for value in (body.command_delay, body.button_delay)):
+            raise HTTPException(400, "命令后和按钮后延迟需为 0-120 秒")
+        if body.refresh_buttons not in (0, 1):
+            raise HTTPException(400, "按钮刷新模式只能为 0 或 1")
     if body.type == "keepalive":
         if not body.target.strip():
             raise HTTPException(400, "保号任务需要填写群(@用户名 或群ID)")
@@ -2360,7 +2482,7 @@ def _valid_auto(body: AutoIn):
 
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
-              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled")
+              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons")
 
 
 def _auto_vals(body: AutoIn, extra=None):
@@ -2372,7 +2494,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.points_pat.strip(), body.is_chat, body.retries, body.signin_captcha,
         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
         body.poll_interval, body.custom_steps.strip(), body.chain_retry,
-        body.cooldown, body.enabled,
+        body.cooldown, body.enabled, body.command_delay, body.button_delay, body.refresh_buttons,
     ] + (extra or [])
 
 
@@ -2691,6 +2813,31 @@ async def get_version(check: int = 0):
         except Exception as e:
             raise HTTPException(502, f"检查更新失败:{e}")
     return updater.snapshot()
+
+
+class BackupCleanupInput(BaseModel):
+    mode: str = "keep_latest"
+    keep: int = Field(1, ge=0, le=20, strict=True)
+
+
+@app.get("/api/backups")
+async def get_backup_files():
+    try:
+        return await asyncio.get_running_loop().run_in_executor(None, updater.list_backups)
+    except RuntimeError as error:
+        raise HTTPException(409, str(error)) from None
+
+
+@app.post("/api/backups/cleanup")
+async def cleanup_backup_files(body: BackupCleanupInput):
+    """只清理识别到的历史备份；活动更新/待恢复事务由更新锁二次保护。"""
+    try:
+        return await asyncio.get_running_loop().run_in_executor(None,
+            lambda: updater.cleanup_backups(body.mode, body.keep))
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from None
+    except RuntimeError as error:
+        raise HTTPException(409, str(error)) from None
 
 
 @app.post("/api/update")

@@ -110,6 +110,26 @@ def probe():
             check(image_test.status_code==200 and image_test.json()['channel']=='ocr', '仅本地OCR的完整接口可用')
         check(https_client.post('/api/captcha/test',json={**cfg,'image':'invalid'}).status_code==400, '损坏图片参数拒绝')
         check(https_client.post('/api/captcha/test',json={**cfg,'image':captcha['image'],'length':17}).status_code==422, '字符长度上限校验')
+        check(guest.get('/api/backups').status_code==401, '备份查询必须登录')
+        check(guest.post('/api/backups/cleanup',json={'mode':'all'}).status_code==401, '备份清理必须登录')
+        with patch.object(main.updater,'list_backups',return_value={'items':[],'count':0,'total_bytes':0,'cleanup_allowed':True,'reason':''}):
+            check(https_client.get('/api/backups').status_code==200, '鉴权后的备份查询可用')
+        with patch.object(main.updater,'cleanup_backups',return_value={'ok':True,'deleted':[],'freed_bytes':0,'remaining':1}) as cleanup:
+            check(https_client.post('/api/backups/cleanup',json={'mode':'keep_latest','keep':1}).status_code==200, '保留最新备份接口可用')
+            check(cleanup.call_args.args==('keep_latest',1), '保留策略参数正确')
+            check(https_client.post('/api/backups/cleanup',json={'mode':'all'}).status_code==200, '清全部接口显式模式可用')
+            check(cleanup.call_args.args==('all',1), '全部清理不调用其它数据路径')
+            check(https_client.post('/api/backups/cleanup',json={'mode':'all','keep':True}).status_code==422, '清理保留数拒绝布尔值')
+        with patch.object(main.updater,'cleanup_backups',side_effect=RuntimeError('更新正在运行')):
+            check(https_client.post('/api/backups/cleanup',json={'mode':'all'}).status_code==409, '更新冲突时服务器拒绝清理')
+        new_task={'name':'delay-fixture','target':'@dummy','command':'/start','enabled':0,'command_delay':0,'button_delay':3.5,'refresh_buttons':0}
+        delayed=https_client.post('/api/autos',json=new_task)
+        check(delayed.status_code==200, '两段延迟任务创建可用')
+        delayed_row=next(a for a in https_client.get('/api/autos').json()['autos'] if a['id']==delayed.json()['id'])
+        check(delayed_row['command_delay']==0 and delayed_row['button_delay']==3.5 and delayed_row['refresh_buttons']==0, '延迟零值和固定按钮模式真实持久保存')
+        check(https_client.post('/api/autos',json={**new_task,'command_delay':-1}).status_code==422, '拒绝负数延迟')
+        check(https_client.post('/api/autos',json={**new_task,'button_delay':121}).status_code==422, '拒绝超长延迟')
+        check(https_client.post('/api/autos',json={**new_task,'refresh_buttons':2}).status_code==422, '拒绝未知连点模式')
         guest.close()
         main.conn.close(); client.close();https_client.close()
         print(f'隔离HTTP接口 {assertions} 项通过；无Telegram/线上操作')
