@@ -435,8 +435,9 @@ input[readonly]:focus{border-color:var(--acc)}
   <section id="tab-autos">
     <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>自动化</h2>
     <div class="sub">定时签到 · 抢注邀请码 · 抢红包 · 自定义多步任务</div>
-    <div class="card">
-      <h3>批量操作与配置备份</h3>
+    <div class="card fold">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">批量操作与配置备份</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="autoSelectAll" style="width:auto" onchange="selectAllAutos(this.checked)"> 全选 / 取消全选 <span id="autoSelectedCount">已选 0 项</span></label>
       <label for="batchKind">批量操作</label>
       <select id="batchKind" onchange="invalidateBatchPreview();renderBatchFields()">
@@ -465,7 +466,7 @@ input[readonly]:focus{border-color:var(--acc)}
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="configActivate" style="width:auto" onchange="invalidateImportPreview()"> 恢复备份中的启用状态（可能立即执行，确认前请复核）</label>
       <div class="hint">默认导入的任务和规则禁用，复核后再手动启用。导入仅配置，不含密钥、手机号、会话或历史状态。</div>
       <div class="flex" style="gap:8px;margin-top:12px"><button class="ghost" id="configPreviewBtn" disabled onclick="previewImport()">预览导入</button><button class="btn" id="configApplyBtn" disabled onclick="applyImport()">确认导入</button><button class="ghost" onclick="cancelConfigImport()">取消</button></div>
-      <pre id="configResult" class="hint" style="white-space:pre-wrap" role="status" aria-live="polite"></pre>
+      <pre id="configResult" class="hint" style="white-space:pre-wrap" role="status" aria-live="polite"></pre>      </div>
     </div>
 
     <div class="card fold">
@@ -812,8 +813,9 @@ input[readonly]:focus{border-color:var(--acc)}
   <section id="tab-settings">
     <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</h2>
     <div class="sub">触发行为与面板安全</div>
-    <div class="card">
-      <h3>Telegram 多账号</h3>
+    <div class="card fold">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">Telegram 多账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
       <label for="accountSettings">当前账号（客户端可同时登录，切换只改变面板范围）</label>
       <select id="accountSettings" onchange="switchAccount(this.value)"><option value="default">默认账号</option></select>
       <div id="accountStatus" class="hint" role="status" aria-live="polite">默认账号</div>
@@ -825,7 +827,7 @@ input[readonly]:focus{border-color:var(--acc)}
         <button class="danger" id="accountDelete" disabled onclick="manageAccount('delete')">删除当前</button>
       </div>
       <div id="accountResult" class="hint" role="status" aria-live="polite"></div>
-      <div class="hint">新账号使用下方原有 Telegram 登录流程。默认账号禁止删除；删除账号需两次确认。</div>
+      <div class="hint">新账号使用下方原有 Telegram 登录流程。默认账号禁止删除；删除账号需两次确认。</div>      </div>
     </div>
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">共享图标库</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
