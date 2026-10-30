@@ -3050,6 +3050,16 @@ def root_set_setting(key, value):
 
 app.include_router(build_icon_router(root_get_setting, root_set_setting))
 
+from ai_assistant import build_ai_assistant_router
+
+async def assistant_call_ai(*args, **kwargs):
+    return await _call_ai(*args, **kwargs)
+
+app.include_router(build_ai_assistant_router(
+    get_account_db, AutoIn, _valid_auto, _auto_vals, _AUTO_COLS,
+    _test_ai_settings, assistant_call_ai, _safe_ai_error, root_get_setting,
+))
+
 # ---------------- 启动 ----------------
 if __name__ == "__main__":
     import uvicorn

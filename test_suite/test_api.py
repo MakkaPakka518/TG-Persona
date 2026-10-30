@@ -25,7 +25,7 @@ def probe():
     from fastapi.testclient import TestClient
     with tempfile.TemporaryDirectory(prefix='tg-api-test-') as tmp:
         base = Path(tmp)
-        for name in ('main.py', 'updater.py', 'VERSION', 'account_runtime.py', 'task_management.py', 'icon_library.py'):
+        for name in ('main.py', 'updater.py', 'VERSION', 'account_runtime.py', 'task_management.py', 'icon_library.py', 'ai_assistant.py'):
             (base / name).write_bytes((ROOT / name).read_bytes())
         (base / 'web').mkdir()
         (base / 'web/index.html').write_bytes((ROOT / 'web/index.html').read_bytes())
@@ -130,6 +130,17 @@ def probe():
         check(https_client.post('/api/autos',json={**new_task,'command_delay':-1}).status_code==422, '拒绝负数延迟')
         check(https_client.post('/api/autos',json={**new_task,'button_delay':121}).status_code==422, '拒绝超长延迟')
         check(https_client.post('/api/autos',json={**new_task,'refresh_buttons':2}).status_code==422, '拒绝未知连点模式')
+        check(guest.post('/api/ai/task-draft',json={'text':'任务'}).status_code==401, 'AI生成必须经过面板鉴权')
+        check(guest.post('/api/ai/diagnose',json={'id':delayed.json()['id']}).status_code==401, 'AI排障必须经过面板鉴权')
+        with patch.object(main,'_call_ai',new=AsyncMock(return_value='{"type":"signin","name":"AI草稿","target":"@dummy","command":"/start"}')):
+            draft=https_client.post('/api/ai/task-draft',json={'text':'给 @dummy 发 /start'})
+            check(draft.status_code==200 and draft.json()['draft']['enabled']==0,'真实路由只生成停用草稿')
+            check(len(https_client.get('/api/autos').json()['autos'])==2,'生成草稿不修改任务数据库')
+            check(https_client.post('/api/ai/task-draft',headers={'X-Account-ID':'f'*32},json={'text':'test'}).status_code==404,'助手不会回退到其他账号')
+        with patch.object(main,'_call_ai',new=AsyncMock(return_value='{"analysis":"暂无失败日志","suggestions":[]}')):
+            diagnosed=https_client.post('/api/ai/diagnose',json={'id':delayed.json()['id']})
+            check(diagnosed.status_code==200 and diagnosed.json()['ok'],'真实路由可返回排障结果')
+            check(https_client.post('/api/ai/diagnose',json={'id':99999}).status_code==404,'排障拒绝不存在任务')
         guest.close()
         main.conn.close(); client.close();https_client.close()
         print(f'隔离HTTP接口 {assertions} 项通过；无Telegram/线上操作')

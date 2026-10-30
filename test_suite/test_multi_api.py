@@ -34,7 +34,7 @@ def probe():
     from fastapi.testclient import TestClient
     with tempfile.TemporaryDirectory(prefix='tg-multi-api-') as tmp:
         base=Path(tmp)
-        required=('main.py','updater.py','VERSION','account_runtime.py','task_management.py','icon_library.py')
+        required=('main.py','updater.py','VERSION','account_runtime.py','task_management.py','icon_library.py','ai_assistant.py')
         for name in required:
             source=ROOT/name
             if not source.exists():raise AssertionError('新增模块尚未完成：'+name)

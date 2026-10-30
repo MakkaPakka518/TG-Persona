@@ -846,5 +846,59 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     let oldGet;app.api=(p,o)=>o?.method==='POST'?Promise.resolve({ok:true}):new Promise(r=>oldGet=r);const pending=ex('loadSettings()');q('#signinGlobalEnabled').checked=true;q('#signinGlobalStart').value='05:00';q('#signinGlobalEnd').value='05:30';await ex('saveSigninGlobal()');
     oldGet({signin_global_enabled:'0',signin_global_start:'00:05',signin_global_end:'00:41'});await pending;assert.strictEqual(ex('signinGlobal.enabled'),true);assert.strictEqual(q('#signinGlobalStart').value,'05:00');assert.strictEqual(q('#signinGlobalEnd').value,'05:30');
   });
+  await test('AI助手默认折叠且生成预览不保存、恶意文本只作为文字',async()=>{
+    assert(/class="card fold" id="aiAssistantCard"/.test(html));
+    assert(html.includes('onclick="foldToggle(this)"><span class="lbl">AI 助手'));
+    ex("selectedAccount='default';accountEpoch++;resetAIAssistant();autos=[]");
+    q('#aiDraftText').value='给 @dummy 发 /start';
+    app.currentAIConfig=()=>({ai_base:'https://dummy.invalid',ai_key:'',ai_model:'fixture'});
+    app.generated={type:'signin',name:'<img src=x onerror=bad()>',target:'@dummy',command:'/start',enabled:0,command_delay:2,button_delay:3,retries:0};
+    let requests=[];app.api=async(p,o)=>{requests.push([p,JSON.parse(o.body),o._account]);return {ok:true,draft:app.generated,summary:app.generated.name,warnings:['核对后启用'],elapsed_ms:25}};
+    await ex('generateAIDraft()');assert.strictEqual(requests.length,1);assert.strictEqual(requests[0][0],'/api/ai/task-draft');assert.strictEqual(requests[0][2].id,'default');
+    assert(q('#aiDraftResult').textContent.includes('<img'));assert(q('#aiDraftResult').textContent.includes('命令后等待（秒）'));assert(q('#aiDraftResult').textContent.includes('核对后启用'));assert(!q('#aiDraftBtn').disabled);
+  });
+  await test('AI填入表单不是编辑已有任务，保存仍默认停用且保留零次重试',async()=>{
+    let sent=[];app.api=async(p,o)=>{sent.push([p,JSON.parse(o.body)]);return {ok:true}};
+    ex('fillAIDraft()');assert.strictEqual(sent.length,0);assert.strictEqual(ex('editAuto'),null);
+    assert.strictEqual(q('#sName').value,app.generated.name);assert.strictEqual(q('#sRetries').value,'0');
+    assert(q('#af-signin').classList.contains('show'));await ex("saveAuto('signin')");
+    assert.strictEqual(sent[0][0],'/api/autos');assert.strictEqual(sent[0][1].enabled,0);assert.strictEqual(sent[0][1].retries,0);
+  });
+  await test('AI直接保存二次确认，拒绝不提交、允许仅保存配置',async()=>{
+    ex('aiDraft={account:accountContext(),draft:generated};aiDraftBusy=false');
+    let sent=[];app.api=async(p,o)=>{sent.push([p,JSON.parse(o.body)]);return {ok:true}};
+    app.window.confirm=()=>false;await ex('saveAIDraft()');assert.strictEqual(sent.length,0);
+    app.window.confirm=()=>true;await ex('saveAIDraft()');assert.strictEqual(sent.length,1);assert.strictEqual(sent[0][1].enabled,0);assert.strictEqual(sent[0][1].signin_captcha,0);
+  });
+  await test('AI草稿请求防重复，描述改变后丢弃旧结果并恢复按钮',async()=>{
+    ex('resetAIAssistant()');q('#aiDraftText').value='old';let resolve,hits=0;
+    app.api=()=>{hits++;return new Promise(r=>resolve=r)};const pending=ex('generateAIDraft()');await ex('generateAIDraft()');assert.strictEqual(hits,1);
+    q('#aiDraftText').value='new';ex('invalidateAIDraft()');resolve({ok:true,draft:app.generated});await pending;
+    assert.strictEqual(ex('aiDraft'),null);assert(!q('#aiDraftBtn').disabled);
+    app.api=async()=>({ok:false,error:'接口不可用'});await ex('generateAIDraft()');assert(q('#aiDraftResult').textContent.includes('接口不可用'));
+  });
+  await test('AI排障读取当前任务并展示应用按钮，不保存任务',async()=>{
+    ex("resetAIAssistant();autos=[{...generated,id:91,name:'AI排障任务',enabled:1}]");
+    app.api=async(p,o)=>{assert.strictEqual(p,'/api/ai/diagnose');assert.strictEqual(JSON.parse(o.body).id,91);return {ok:true,analysis:'<img src=x>',suggestions:[{field:'button_delay',value:4,reason:'等待回复'},{field:'enabled',value:1,reason:'越权字段'}],elapsed_ms:30}};
+    await ex('diagnoseAuto(91)');assert.strictEqual(ex('aiDiagnoses.get(91).suggestions.length'),1);
+    assert(q('#aiDiagResult91').textContent.includes('<img'));assert.strictEqual(q('#aiDiagActions91').children.length,1);
+    assert.strictEqual(q('#aiDiagActions91').children[0].children[1].textContent,'应用此建议');
+  });
+  await test('AI建议先核对最新配置，仅修改允许字段且取消不提交',async()=>{
+    let puts=[],gets=0;app.api=async(p,o)=>{if(o?.method==='PUT'){puts.push(JSON.parse(o.body));return {ok:true}}gets++;return {autos:copy(ex('autos'))}};
+    app.window.confirm=()=>false;await ex('applyAISuggestion(91,0)');assert.strictEqual(puts.length,0);assert.strictEqual(gets,0);
+    app.window.confirm=()=>true;const before=copy(ex('taskConfig(autos[0])'));await ex('applyAISuggestion(91,0)');assert.strictEqual(gets,1);assert.strictEqual(puts.length,1);
+    assert.deepStrictEqual(puts[0],{...before,button_delay:4});
+  });
+  await test('AI建议不能覆盖分析后已修改的配置或另一个账号',async()=>{
+    ex("aiDiagnoses.set(91,{account:accountContext(),fingerprint:taskFingerprint(autos[0]),applied:new Set(),suggestions:[{field:'button_delay',value:4}]})");
+    let writes=0;app.api=async(p,o)=>{if(o?.method==='PUT')writes++;return {autos:[{...copy(ex('autos[0]')),command:'/changed'}]}};
+    await ex('applyAISuggestion(91,0)');assert.strictEqual(writes,0);
+    ex("selectedAccount='switched';accountEpoch++");await ex('applyAISuggestion(91,0)');assert.strictEqual(writes,0);ex('resetAIAssistant()');assert.strictEqual(ex('aiDiagnoses.size'),0);
+  });
+  await test('AI草稿切换账号时丢弃迟到结果',async()=>{
+    q('#aiDraftText').value='task';let resolve;app.api=()=>new Promise(r=>resolve=r);const pending=ex('generateAIDraft()');
+    ex("selectedAccount='another';accountEpoch++;resetAIAssistant()");resolve({ok:true,draft:app.generated});await pending;assert.strictEqual(ex('aiDraft'),null);assert(!q('#aiDraftBtn').disabled);
+  });
   console.log(`前端回归 ${count} 项全部通过`);
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -435,6 +435,20 @@ input[readonly]:focus{border-color:var(--acc)}
   <section id="tab-autos">
     <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>自动化</h2>
     <div class="sub">定时签到 · 抢注邀请码 · 抢红包 · 自定义多步任务</div>
+    <div class="card fold" id="aiAssistantCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">AI 助手 · 说人话建任务</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <label for="aiDraftText">告诉我你想做什么</label>
+        <textarea id="aiDraftText" rows="4" maxlength="2000" placeholder="每天 08:00–09:00 给 @xxxbot 发 /start，等 2 秒点签到按钮，点完再等 3 秒，成功回复包含签到成功。" oninput="invalidateAIDraft()"></textarea>
+        <div class="hint">使用已保存的 AI 配置；也可使用验证码识别卡片中当前填写的配置。描述会发送给所配置的 AI，可能产生费用，请勿填写密码、密钥或登录码。只生成配置，不会发 Telegram 消息。</div>
+        <button type="button" class="btn" id="aiDraftBtn" onclick="generateAIDraft()">生成预览</button>
+        <pre class="hint" id="aiDraftResult" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
+        <div class="flex" style="gap:8px;flex-wrap:wrap">
+          <button class="ghost" type="button" id="aiDraftFill" disabled onclick="fillAIDraft()">填入新建表单</button>
+          <button class="ghost" type="button" id="aiDraftSave" disabled onclick="saveAIDraft()">确认保存为停用任务</button>
+        </div>
+      </div>
+    </div>
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">批量操作与配置备份</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
@@ -1031,7 +1045,7 @@ function resetAccountCaches(){
   autos=[];openedAutoIds.clear();persistAutoExpanded();closeIconPicker();signinGlobalDirty=false;signinGlobalBusy=false;$('#signinGlobalSave').disabled=false;$('#signinGlobalResult').textContent='';renderSigninGlobal();
   allGroups=[];allRules=[];watchedGroups=[];ruleGroupSel.clear();
   autoGroupSel.grabcodes.clear();autoGroupSel.redpacket.clear();selectedAutoIds.clear();
-  editingRule=null;editAuto=null;editAutoAccount=null;ruleEditAccount=null;tgPhase='idle';window._prevLoggedIn=null;
+  editingRule=null;editAuto=null;editAutoAccount=null;ruleEditAccount=null;tgPhase='idle';window._prevLoggedIn=null;if(typeof resetAIAssistant==='function')resetAIAssistant();
   logQ='';logKind='reply';clearTimeout(logQtimer);$('#logQ').value='';$('#gSearch').value='';
   batchBusy=false;exportBusy=false;$('#configExportAll').disabled=false;
   for(const id of ['gAll','gWatched','rList','logList','tgCard'])$('#'+id).replaceChildren();
@@ -1464,17 +1478,20 @@ function renderAutoList(type){
         ${['signin','custom','keepalive'].includes(a.type)?action('run','执行'):''}
         ${action('expand','▸',`aria-label="${open?'收起':'展开'}任务详情" aria-expanded="${open}"`)}
       </div>
-      ${open?`<div class="auto-details"><div class="s">${autoDesc(a)}</div><div class="s">归属当前账号：${esc(label)}（${esc(c.id)}）</div><div class="s">有效窗口：${esc(autoWindow(a))}</div><pre class="auto-result">${esc(autoLastResult(a))}</pre></div>`:''}
+
+      ${open?`<div class="auto-details"><div class="s">${autoDesc(a)}</div><div class="s">归属当前账号：${esc(label)}（${esc(c.id)}）</div><div class="s">有效窗口：${esc(autoWindow(a))}</div><pre class="auto-result">${esc(autoLastResult(a))}</pre>${assistantBlock(a)}</div>`:''}
       <div class="auto-actions">${action('toggle',a.enabled?'停用':'启用')}${action('edit','编辑')}${action('duplicate','复制')}${action('delete','删除')}</div>
     </div>`;
   }).join('');
   for(const holder of box.querySelectorAll('[data-task-icon]')){const a=list.find(x=>x.id===Number(holder.dataset.taskIcon));if(a)holder.appendChild(makeTaskIcon(a.name,a.icon_url))}
+  if(typeof renderDiagnosisUI==='function')for(const a of list)renderDiagnosisUI(a.id);
   box.onclick=e=>{
     const button=e.target.closest('[data-auto-action]');if(!button||!box.contains(button)||!isCurrentAccount(c))return;
     const id=Number(button.dataset.autoId);if(!Number.isSafeInteger(id)||!autos.some(a=>a.id===id&&a.type===type))return;
     const action=button.dataset.autoAction;
     if(action==='select')toggleAutoSelection(id,button.checked);
     else if(action==='expand')toggleAutoExpanded(id);
+    else if(action==='aidiag'){if(typeof diagnoseAuto==='function')diagnoseAuto(id)}
     else ({run:runAuto,toggle:toggleAuto,edit:editAutoItem,duplicate:dupAuto,delete:delAuto}[action])?.(id);
   };
 }
@@ -1490,13 +1507,17 @@ function autoDesc(a){
   }
   return `${esc(a.target||'--')} · ${(a.custom_steps||'').split('"t"').length-1} 步${a.chain_retry>1?' · 重试'+a.chain_retry:''}`;
 }
+function assistantBlock(a){
+  if(!['signin','custom','keepalive'].includes(a.type))return '';
+  return `<div><button class="ghost" type="button" data-auto-action="aidiag" data-auto-id="${a.id}">AI 排障</button><div class="hint">将最近日志脱敏后发送给已配置的 AI，可能产生费用；不会发送图片。</div><pre class="hint" id="aiDiagResult${a.id}" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre><div id="aiDiagActions${a.id}"></div></div>`;
+}
 function dupAuto(id){
   const a=autos.find(x=>x.id===id);if(!a)return;
   api('/api/autos/'+id+'/duplicate',{method:'POST'}).then(()=>{toast('已复制「'+a.name+'」');loadAutos()}).catch(e=>toast(e.message,1));
 }
 function editAutoItem(id){
   const a=autos.find(x=>x.id===id);if(!a)return;
-  editAuto=a;editAutoAccount=accountContext();
+  editAuto=a;editAutoAccount=accountContext();if(typeof assistantFormDraft!=='undefined')assistantFormDraft=null;
   const t=a.type;
   if(t==='signin'){
     $('#sName').value=a.name;$('#sTarget').value=a.target;$('#sCmd').value=a.command;
@@ -1541,7 +1562,7 @@ function editAutoItem(id){
   toast('编辑中,改完点保存');
 }
 function cancelAutoEdit(t){
-  editAuto=null;editAutoAccount=null;
+  editAuto=null;editAutoAccount=null;if(typeof assistantFormDraft!=='undefined')assistantFormDraft=null;
   ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';setVisualSteps('[]');$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cCancel').style.display='none'},
@@ -1696,7 +1717,7 @@ async function saveAuto(type){
       command_delay:$('#sCommandDelay').value.trim()===''?1.6:Number($('#sCommandDelay').value),
       button_delay:$('#sButtonDelay').value.trim()===''?2:Number($('#sButtonDelay').value),
       success_kw:$('#sKw').value.trim(),fail_kw:$('#sFw').value.trim(),
-      points_pat:$('#sPts').value.trim(),retries:+$('#sRetries').value||2,
+      points_pat:$('#sPts').value.trim(),retries:$('#sRetries').value.trim()===''?2:Number($('#sRetries').value),
       signin_captcha:$('#sCap').checked?1:0};
     if(body.icon_url&&!safeHttpUrl(body.icon_url))return toast('图标仅支持安全的 HTTP / HTTPS URL',1);
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
@@ -1728,6 +1749,10 @@ async function saveAuto(type){
     body={type,name:$('#pName').value.trim(),groups:getAutoGroups('redpacket'),keywords:$('#pKeywords').value.trim(),
       cooldown:+$('#pCd').value||5};
     if(!body.name)return toast('请填写任务名称',1);
+  }
+  if(typeof assistantFormDraft!=='undefined'&&assistantFormDraft&&!wasEditing){
+    if(!isCurrentAccount(assistantFormDraft.account))return toast('草稿所属账号已切换',1);
+    body={...taskConfig(assistantFormDraft.draft),...body,enabled:0};
   }
   if(editAuto){url='/api/autos/'+editAuto.id;body=Object.assign(body,{enabled:editAuto.enabled})}
   try{
@@ -1841,6 +1866,148 @@ async function exportConfig(selected){
     toast('配置已下载到本机');
   }catch(e){if(isCurrentAccount(c))toast('导出失败：'+e.message,1)}
   finally{if(isCurrentAccount(c)){exportBusy=false;$('#configExportAll').disabled=false;syncAutoSelection()}}
+}
+
+// ---------- AI 助手：所有保存和应用均由用户确认 ----------
+const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,command_delay,button_delay,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled'.split(',');
+const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
+const AI_RANGES={command_delay:[0,120],button_delay:[0,120],refresh_buttons:[0,1],click_times:[1,20],click_interval:[50,3000],retries:[0,5],poll_interval:[60,7776000]};
+const AI_TEXT_FIELDS=['win_start','win_end','success_kw','fail_kw','btn_text','btn_emoji','command'];
+let aiDraft=null,aiDraftBusy=false,aiDraftSeq=0,assistantFormDraft=null,aiDiagnoses=new Map();
+function taskConfig(a){const out={};for(const k of AI_TASK_FIELDS)if(Object.prototype.hasOwnProperty.call(a,k))out[k]=a[k];return out}
+function taskFingerprint(a){return JSON.stringify(taskConfig(a))}
+function aiSuggestionValid(s,type){
+  if(!s||typeof s.field!=='string')return false;
+  if(type!=='signin'&&(type!=='keepalive'||s.field!=='poll_interval'))return false;
+  if(s.field==='poll_interval'&&type!=='keepalive')return false;
+  if(AI_RANGES[s.field]){const [lo,hi]=AI_RANGES[s.field];return typeof s.value==='number'&&Number.isFinite(s.value)&&s.value>=lo&&s.value<=hi&&(['command_delay','button_delay'].includes(s.field)||Number.isInteger(s.value))}
+  return AI_TEXT_FIELDS.includes(s.field)&&typeof s.value==='string'&&s.value.length<=500&&(!s.field.startsWith('win_')||/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(s.value));
+}
+function syncAIDraftButtons(){const ready=!!aiDraft&&!aiDraftBusy&&isCurrentAccount(aiDraft.account);$('#aiDraftBtn').disabled=aiDraftBusy;$('#aiDraftFill').disabled=!ready;$('#aiDraftSave').disabled=!ready}
+function invalidateAIDraft(){aiDraftSeq++;aiDraft=null;syncAIDraftButtons();$('#aiDraftResult').textContent=''}
+function resetAIAssistant(){aiDraftSeq++;aiDraftBusy=false;aiDraft=null;assistantFormDraft=null;aiDiagnoses.clear();$('#aiDraftText').value='';$('#aiDraftResult').textContent='';syncAIDraftButtons()}
+function readableAIDraft(d){
+ const rows=[d.summary||'任务草稿'];for(const [k,v] of Object.entries(d.draft||{})){if(v===''||v==null)continue;let value=v;if(k==='type')value=AUTO_TYPE[v]||v;if(k==='enabled')value='停用（复核后手动开启）';if(k==='custom_steps'){try{value=JSON.parse(v).map((s,i)=>`${i+1}. ${{send:'发送',wait:'等待（毫秒）',click:'点击',until:'等待回复'}[s.t]||s.t}：${s.v??s.success??''}`).join('\n')}catch(e){value='请在步骤编辑器核对'}}rows.push((AI_LABELS[k]||k)+'：'+String(value))}
+ if(Array.isArray(d.warnings))rows.push('\n注意：\n'+d.warnings.map(String).join('\n'));rows.push('耗时：'+testElapsed(d.elapsed_ms));return rows.join('\n');
+}
+async function generateAIDraft(){
+  if(aiDraftBusy)return;
+  const c=accountContext(),text=$('#aiDraftText').value.trim();
+  if(!text)return toast('先描述你想做的任务',1);
+  if(text.length>2000)return toast('描述太长，请精简到 2000 字以内',1);
+  const seq=++aiDraftSeq;
+  aiDraftBusy=true;syncAIDraftButtons();$('#aiDraftResult').textContent='正在解析描述…';
+  try{
+    const body={text,...currentAIConfig()};
+    const d=await api('/api/ai/task-draft',{method:'POST',body:JSON.stringify(body),_account:c});
+    if(seq!==aiDraftSeq||!isCurrentAccount(c))return;
+    if(d&&d.ok===true&&d.draft&&typeof d.draft==='object'&&['signin','custom','keepalive'].includes(d.draft.type)){
+      aiDraft={account:c,draft:d.draft};$('#aiDraftResult').textContent=readableAIDraft(d);
+    }else{aiDraft=null;$('#aiDraftResult').textContent='生成失败：'+(d?.error||'AI 未返回可用任务，请明确目标、指令和时间。')}
+  }catch(e){if(seq===aiDraftSeq&&isCurrentAccount(c)){aiDraft=null;$('#aiDraftResult').textContent='生成失败：'+e.message}}
+  finally{if(isCurrentAccount(c))aiDraftBusy=false;syncAIDraftButtons()}
+}
+function applyDraftToForm(d){
+  const type=d.type;
+  if(type==='signin'){
+    $('#sName').value=String(d.name||'AI 任务');$('#sTarget').value=String(d.target||'');$('#sCmd').value=String(d.command||'/start');
+    $('#sIconUrl').value=typeof d.icon_url==='string'?d.icon_url:'';renderSigninIconPreview();syncSigninWindow();
+    $('#sIsChat').checked=!!d.is_chat;$('#sWinStart').value=d.win_start||'08:00';$('#sWinEnd').value=d.win_end||'12:00';
+    $('#sCommandDelay').value=d.command_delay??1.6;$('#sButtonDelay').value=d.button_delay??2;
+    $('#sClickBtn').checked=!!d.click_btn;$('#sBtnWrap').classList.toggle('hidden',!d.click_btn);
+    $('#sBtnText').value=typeof d.btn_text==='string'?d.btn_text:'';$('#sBtnEmoji').value=typeof d.btn_emoji==='string'?d.btn_emoji:'';
+    $('#sClicks').value=d.click_times??1;$('#sClickGap').value=d.click_interval??300;
+    $('#sRefreshButtons').value=String(d.refresh_buttons??1);$('#sCap').checked=false;
+    $('#sKw').value=typeof d.success_kw==='string'?d.success_kw:'';$('#sFw').value=typeof d.fail_kw==='string'?d.fail_kw:'';
+    $('#sPts').value=typeof d.points_pat==='string'?d.points_pat:'';$('#sRetries').value=d.retries??2;
+  }else if(type==='custom'){
+    $('#cName').value=String(d.name||'AI 任务');$('#cTarget').value=String(d.target||'');setVisualSteps(String(d.custom_steps||'[]'));
+    $('#cRetry').value=d.chain_retry??1;
+  }else{
+    $('#kName').value=String(d.name||'AI 任务');$('#kTarget').value=String(d.target||'');$('#kText').value=String(d.reply_text||'');
+    const iv=+d.poll_interval||86400,unit=iv%86400===0?86400:(iv%3600===0?3600:60);
+    $('#kUnit').value=String(unit);$('#kEvery').value=Math.max(1,Math.round(iv/unit));$('#kDel').value=d.cooldown??0;
+  }
+}
+function fillAIDraft(){
+  if(!aiDraft||aiDraftBusy||!isCurrentAccount(aiDraft.account))return;
+  assistantFormDraft=aiDraft;editAuto=null;editAutoAccount=aiDraft.account;
+  applyDraftToForm(aiDraft.draft);openAutoForm(aiDraft.draft.type);
+  toast('已填入表单，请核对后再保存');
+}
+async function saveAIDraft(){
+  if(!aiDraft||aiDraftBusy||!isCurrentAccount(aiDraft.account))return;
+  if(!window.confirm('保存为停用任务？不会发送 Telegram 消息，确认无误后需手动启用。'))return;
+  const c=aiDraft.account,draft=taskConfig(aiDraft.draft);aiDraftBusy=true;syncAIDraftButtons();
+  delete draft.id;draft.enabled=0;draft.signin_captcha=0;
+  try{
+    await api('/api/autos',{method:'POST',body:JSON.stringify(draft),_account:c});
+    if(!isCurrentAccount(c))return;
+    $('#aiDraftText').value='';invalidateAIDraft();toast('已保存为停用任务，请复核后启用');loadAutos();
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}finally{if(isCurrentAccount(c))aiDraftBusy=false;syncAIDraftButtons()}
+}
+const AI_DIAG_LABELS={command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',refresh_buttons:'连点模式（0=复用按钮，1=刷新）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',retries:'额外重试次数',poll_interval:'保号间隔（秒）',win_start:'开始时间',win_end:'结束时间',success_kw:'成功关键词',fail_kw:'失败关键词',btn_text:'按钮文字',btn_emoji:'按钮表情',command:'发送指令'};
+function renderDiagnosisText(d){
+ const rows=['AI 分析：\n'+String(d.analysis||'（无分析）')];
+ if(Array.isArray(d.suggestions)&&d.suggestions.length){
+  rows.push('\n参数建议（仅供参考，应用前请核对）：');
+  d.suggestions.forEach((s,i)=>rows.push((i+1)+'. '+(AI_DIAG_LABELS[s.field]||s.field)+' → '+String(s.value)+(s.reason?'（'+s.reason+'）':'')));
+ }else rows.push('\n没有给出参数建议，可结合上面分析手动调整。');
+ rows.push('\n耗时：'+testElapsed(d.elapsed_ms)+' · 仅分析，未改动任务');
+ return rows.join('\n');
+}
+function renderDiagnosisUI(id){
+  const entry=aiDiagnoses.get(id),text=$('#aiDiagResult'+id),actions=$('#aiDiagActions'+id);
+  if(!text||!actions)return;actions.replaceChildren();
+  if(!entry||!isCurrentAccount(entry.account)){text.textContent='';return}
+  text.textContent=entry.result;
+  entry.suggestions.forEach((s,i)=>{
+    const row=document.createElement('div');row.className='hint';row.style.marginBottom='10px';
+    const desc=document.createElement('div');desc.textContent=(AI_DIAG_LABELS[s.field]||s.field)+' → '+String(s.value)+(s.reason?' · '+s.reason:'');
+    const button=document.createElement('button');button.type='button';button.className='ghost';button.textContent='应用此建议';button.disabled=!!entry.applying;
+    button.addEventListener('click',()=>{if(isCurrentAccount(entry.account)&&aiDiagnoses.get(id)===entry)applyAISuggestion(id,i)});
+    row.appendChild(desc);row.appendChild(button);actions.appendChild(row);
+  });
+}
+async function diagnoseAuto(id){
+  const a=autos.find(x=>x.id===id);if(!a||aiDraftBusy)return;
+  const c=accountContext(),seq=++aiDraftSeq;
+  const btn=document.querySelector(`[data-auto-action="aidiag"][data-auto-id="${id}"]`);
+  aiDraftBusy=true;syncAIDraftButtons();
+  if(btn){btn.disabled=true;btn.textContent='AI 分析中…'}
+  const holder=$('#aiDiagResult'+id);if(holder){holder.style.display='block';holder.textContent='正在读取日志并分析…'}
+  try{
+    const d=await api('/api/ai/diagnose',{method:'POST',body:JSON.stringify({id}),_account:c});
+    if(seq!==aiDraftSeq||!isCurrentAccount(c))return;
+    if(d&&d.ok===true){
+      const suggestions=(Array.isArray(d.suggestions)?d.suggestions:[]).filter(s=>aiSuggestionValid(s,a.type));
+      const result=renderDiagnosisText({...d,suggestions})+(suggestions.length!==(d.suggestions?.length||0)?'\n已忽略不适用或无效的参数建议':'');
+      aiDiagnoses.set(id,{account:c,suggestions,applied:new Set(),result,fingerprint:taskFingerprint(a)});
+      renderDiagnosisUI(id);
+    }else{aiDiagnoses.delete(id);if(holder){holder.style.display='block';holder.textContent='分析失败：'+(d&&d.error?d.error:'未获得结果')}}
+  }catch(e){if(seq===aiDraftSeq&&isCurrentAccount(c)){aiDiagnoses.delete(id);if(holder){holder.style.display='block';holder.textContent='分析失败：'+e.message}}}
+  finally{if(isCurrentAccount(c)){aiDraftBusy=false;syncAIDraftButtons()}
+    const b=btn;if(b){b.disabled=false;b.textContent='AI 排障'}}
+}
+async function applyAISuggestion(id,index){
+  const state=aiDiagnoses.get(id),a=autos.find(x=>x.id===id);
+  if(!state||!a||!isCurrentAccount(state.account)||state.applied.has(index)||state.applying)return;
+  if(state.fingerprint!==taskFingerprint(a))return toast('任务配置已改变，请重新分析后应用',1);
+  const s=state.suggestions[index];
+  if(!s||!aiSuggestionValid(s,a.type))return toast('该建议无效或与任务类型不符',1);
+  const label=AI_DIAG_LABELS[s.field]||s.field;
+  if(!window.confirm('将「'+a.name+'」的'+label+'改为 '+String(s.value)+'？只修改这一项。'))return;
+  const c=state.account,patch=taskConfig(a);patch[s.field]=s.value;state.applying=true;
+  if(!('enabled' in patch))patch.enabled=a.enabled;
+  try{
+    const latest=await api('/api/autos',{_account:c});
+    if(!isCurrentAccount(c))return;
+    const current=latest.autos?.find(x=>x.id===id);
+    if(!current||taskFingerprint(current)!==state.fingerprint)throw new Error('任务配置已变化，请刷新并重新分析');
+    await api('/api/autos/'+id,{method:'PUT',body:JSON.stringify(patch),_account:c});
+    if(!isCurrentAccount(c))return;
+    state.applied.add(index);aiDiagnoses.delete(id);toast('已应用：'+label+' = '+String(s.value));loadAutos();
+  }catch(e){if(isCurrentAccount(c))toast('应用失败：'+e.message,1)}finally{state.applying=false}
 }
 
 // ---------- 面板登录 ----------
