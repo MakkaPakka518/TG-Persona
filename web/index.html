@@ -53,6 +53,7 @@ header{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px
 .logo .dot.on{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
 .logo small{color:var(--dim);font-weight:400;font-size:11px;letter-spacing:1.4px}
 .spacer{flex:1}
+@media(max-width:560px){header{gap:6px;padding:10px}.logo{font-size:12px;gap:5px}.logo small{display:none}#accountTop{max-width:112px!important;min-width:0;padding:7px}#btnPanelOut{padding:8px;font-size:11px}#btnTheme{flex-shrink:0}}
 
 /* ---------- 按钮 ---------- */
 button{font-family:inherit}
@@ -223,9 +224,20 @@ select{appearance:none;-webkit-appearance:none;
 .search input{padding-left:38px}
 .search svg{position:absolute;left:13px;top:12px;width:16px;height:16px;stroke:var(--dim);fill:none;stroke-width:1.9;stroke-linecap:round}
 
-/* 自动化任务卡(统一卡:信息+操作) */
-.auto-card{padding:0;margin-bottom:11px;overflow:hidden}
-.auto-top{display:flex;align-items:center;gap:12px;padding:14px 15px}
+/* 自动化任务卡：紧凑头部，详情默认收起 */
+.auto-card{padding:0;margin-bottom:9px;overflow:hidden}
+.auto-top{display:flex;align-items:center;gap:8px;padding:10px 12px}
+.auto-top .grow{min-width:0}.auto-title{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.auto-top .tag{flex:none;font-size:10px;padding:3px 6px}.auto-top button{flex:none;min-height:32px;padding:5px 8px;font-size:12px}
+.auto-chevron{width:28px;color:var(--dim)}.auto-chevron[aria-expanded="true"]{transform:rotate(90deg)}
+.auto-details{border-top:1px solid var(--hair);padding:11px 12px;font-size:12px;overflow-wrap:anywhere}
+.auto-details .s{line-height:1.6;margin-bottom:6px}.auto-result{white-space:pre-wrap;line-height:1.6;margin:8px 0 0}
+.task-icon{width:32px;height:32px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;background:var(--acc-soft);color:var(--acc);font-size:15px;font-weight:600;overflow:hidden}
+.task-icon img{width:100%;height:100%;object-fit:contain}.icon-preview .task-icon{width:46px;height:46px}
+.icon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(94px,1fr));gap:8px;max-height:360px;overflow:auto;margin-top:10px}
+.icon-choice{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0;padding:9px 5px}.icon-choice span:last-child{font-size:11px;overflow-wrap:anywhere;max-width:100%}
+.library-row{padding:10px 0;border-bottom:1px solid var(--hair);overflow-wrap:anywhere}.library-row .flex{flex-wrap:wrap;gap:8px}.library-row button{font-size:12px;padding:6px 9px;flex:none}
+@media(max-width:400px){.auto-top{gap:5px;padding:9px 8px}.auto-top .tag{font-size:9px}.task-icon{width:27px;height:27px}.auto-top button{padding:5px 6px}}
 .auto-actions{display:flex;gap:1px;background:var(--hair);border-top:1px solid var(--hair)}
 .auto-actions button{flex:1;min-width:0;border:0;border-radius:0;background:var(--panel);
   padding:11px 2px;font-size:12px;white-space:nowrap;gap:4px;justify-content:center}
@@ -349,6 +361,7 @@ input[readonly]:focus{border-color:var(--acc)}
 <header>
   <div class="logo"><span class="dot" id="dotHead"></span>TG PERSONA <small>人形分身</small></div>
   <div class="spacer"></div>
+  <select id="accountTop" aria-label="当前 Telegram 账号" onchange="switchAccount(this.value)" style="width:auto;max-width:160px"><option value="default">默认账号</option></select>
   <button class="icon" id="btnTheme" onclick="toggleTheme()" title="切换主题">
     <svg id="icMoon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
     <svg id="icSun" class="hidden" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
@@ -421,6 +434,38 @@ input[readonly]:focus{border-color:var(--acc)}
   <section id="tab-autos">
     <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>自动化</h2>
     <div class="sub">定时签到 · 抢注邀请码 · 抢红包 · 自定义多步任务</div>
+    <div class="card">
+      <h3>批量操作与配置备份</h3>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="autoSelectAll" style="width:auto" onchange="selectAllAutos(this.checked)"> 全选 / 取消全选 <span id="autoSelectedCount">已选 0 项</span></label>
+      <label for="batchKind">批量操作</label>
+      <select id="batchKind" onchange="invalidateBatchPreview();renderBatchFields()">
+        <option value="window">修改签到窗口（仅签到）</option><option value="interval">修改保号 / 轮询间隔</option>
+        <option value="enable">启用</option><option value="disable">停用</option><option value="delete">删除</option>
+      </select>
+      <div id="batchWindow" class="flex">
+        <div><label for="batchStart">开始</label><input type="time" id="batchStart" value="08:00" onchange="invalidateBatchPreview()"></div>
+        <div><label for="batchEnd">结束</label><input type="time" id="batchEnd" value="12:00" onchange="invalidateBatchPreview()"></div>
+      </div>
+      <div id="batchInterval" class="flex hidden">
+        <div><label for="batchEvery">间隔（轮询 0 = 关闭，保号最少 1 分钟）</label><input type="number" min="0" step="any" id="batchEvery" value="1" oninput="invalidateBatchPreview()"></div>
+        <div><label for="batchUnit">单位</label><select id="batchUnit" onchange="invalidateBatchPreview()"><option value="60">分钟</option><option value="3600">小时</option><option value="86400">天</option></select></div>
+      </div>
+      <div class="hint" id="batchTz">签到窗口使用当前设置的时区；不适用的任务将跳过。</div>
+      <div class="flex" style="gap:8px;margin-top:12px">
+        <button class="ghost" id="batchPreviewBtn" onclick="previewBatch()">预览修改</button>
+        <button class="btn" id="batchApplyBtn" disabled onclick="applyBatch()">确认提交</button>
+      </div>
+      <pre id="batchResult" class="hint" style="white-space:pre-wrap" role="status" aria-live="polite"></pre>
+      <hr style="border:0;border-top:1px solid var(--hair)">
+      <div class="flex" style="gap:8px"><button class="ghost" id="configExportAll" onclick="exportConfig(false)">导出当前账号全部配置</button><button class="ghost" id="configExportSelected" onclick="exportConfig(true)">导出选中任务</button></div>
+      <div class="hint">JSON 标准 tg-persona-config：仅任务、规则、监听群，不含系统登录密钥、手机号、会话或历史状态。备份只下载到本机。任务消息或规则文本可能包含你自行填写的敏感内容，请妥善保存备份文件，勿公开分享。</div>
+      <label for="configFile">导入配置（JSON，最大 2MB）</label><input type="file" id="configFile" accept=".json,application/json" onchange="readConfigFile()">
+      <label for="configMode">导入方式</label><select id="configMode" onchange="invalidateImportPreview()"><option value="merge">追加（默认，保留现配置）</option><option value="replace">覆盖当前账号配置（不可恢复）</option></select>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="configActivate" style="width:auto" onchange="invalidateImportPreview()"> 恢复备份中的启用状态（可能立即执行，确认前请复核）</label>
+      <div class="hint">默认导入的任务和规则禁用，复核后再手动启用。导入仅配置，不含密钥、手机号、会话或历史状态。</div>
+      <div class="flex" style="gap:8px;margin-top:12px"><button class="ghost" id="configPreviewBtn" disabled onclick="previewImport()">预览导入</button><button class="btn" id="configApplyBtn" disabled onclick="applyImport()">确认导入</button><button class="ghost" onclick="cancelConfigImport()">取消</button></div>
+      <pre id="configResult" class="hint" style="white-space:pre-wrap" role="status" aria-live="polite"></pre>
+    </div>
 
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M7 21h10M12 17a5 5 0 0 0 5-5V5a2 2 0 0 0-4 0v6M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7"/></svg>验证码识别</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
@@ -458,12 +503,29 @@ input[readonly]:focus{border-color:var(--acc)}
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12a9 9 0 1 1-9-9"/></svg>签到任务</span><span class="cnt" id="aCntSign">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
+        <div class="card" id="signinGlobalCard" style="margin-bottom:12px">
+          <div class="flex" style="gap:10px;align-items:center">
+            <label style="display:flex;align-items:center;gap:8px;margin:0"><input type="checkbox" id="signinGlobalEnabled" style="width:auto" onchange="markSigninGlobalDirty()"> 统一执行时间（所有账号）</label>
+            <button class="ghost" type="button" aria-expanded="false" onclick="toggleSigninGlobalFields(this)">时间 ▸</button>
+          </div>
+          <div class="hint" id="signinGlobalSummary">未启用 · 默认 00:05–00:41</div>
+          <div id="signinGlobalFields" class="hidden">
+            <div class="flex"><div><label for="signinGlobalStart">开始（HH:MM）</label><input type="time" id="signinGlobalStart" value="00:05" onchange="markSigninGlobalDirty()"></div><div><label for="signinGlobalEnd">结束（HH:MM）</label><input type="time" id="signinGlobalEnd" value="00:41" onchange="markSigninGlobalDirty()"></div></div>
+            <div class="hint">在时间段内随机开始，按设置时区执行。默认 00:05–00:41，未启用。启用后所有账号的签到任务跟随统一窗口；各任务原窗口保留但不生效。保存不会强行中断正在执行的任务。</div>
+          </div>
+          <button class="btn" type="button" id="signinGlobalSave" style="margin-top:10px" onclick="saveSigninGlobal()">保存统一时间</button>
+          <div class="hint" id="signinGlobalResult" role="status" aria-live="polite"></div>
+        </div>
         <button class="btn addtask" type="button" onclick="openAutoForm('signin')">＋ 添加签到任务</button>
         <div id="aListSign"></div>
         <div class="empty" id="aEmptySign">暂无签到任务,点上面按钮添加</div>
         <div class="autof" id="af-signin"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑签到任务</b><button class="ghost" type="button" onclick="closeAutoForm('signin')">关闭</button></div><form onsubmit="saveAuto('signin');return false">
           <label>任务名称</label>
-          <input type="text" id="sName" placeholder="如: 某站每日签到">
+          <input type="text" id="sName" placeholder="如: 某站每日签到" oninput="renderSigninIconPreview()">
+          <label for="sIconUrl">任务图标 URL（可选，仅 HTTP / HTTPS）</label>
+          <input type="url" id="sIconUrl" placeholder="https://example.com/icon.png" oninput="renderSigninIconPreview()">
+          <div class="flex" style="gap:8px;align-items:center;margin-top:8px"><div class="icon-preview" id="sIconPreview"></div><button class="ghost" type="button" onclick="openIconPicker()">选择图标</button><button class="ghost" type="button" onclick="clearSigninIcon()">清空图标</button></div>
+          <div class="hint">仅保存图标 URL，不保存图片；加载失败显示任务名首字母。</div>
           <label>目标机器人(@username 或群ID)</label>
           <input type="text" id="sTarget" placeholder="如: @checkin_bot">
           <label style="display:flex;align-items:center;gap:8px;margin-top:4px"><input type="checkbox" id="sIsChat" style="width:auto"> 目标是群组(命令发到群里)</label>
@@ -473,6 +535,7 @@ input[readonly]:focus{border-color:var(--acc)}
             <div><label>每天时间窗口(开始)</label><input type="text" id="sWinStart" value="08:00" readonly onclick="openTimePicker('sWinStart')"></div>
             <div><label>窗口(结束)</label><input type="text" id="sWinEnd" value="12:00" readonly onclick="openTimePicker('sWinEnd')"></div>
           </div>
+          <div class="hint" id="sWindowHint">单任务窗口：在每天时间段内随机开始。</div>
           <div class="flex">
             <div><label for="sCommandDelay">发送命令后延迟（秒）</label><input type="number" id="sCommandDelay" value="1.6" min="0" max="120" step="0.1" required></div>
             <div><label for="sButtonDelay">点击按钮后延迟（秒）</label><input type="number" id="sButtonDelay" value="2" min="0" max="120" step="0.1" required></div>
@@ -573,15 +636,23 @@ input[readonly]:focus{border-color:var(--acc)}
           <input type="text" id="cName" placeholder="如: 注册流程">
           <label>目标(@机器人 或群ID)</label>
           <input type="text" id="cTarget" placeholder="如: @invite_bot">
-          <label>步骤(JSON 数组,按顺序执行)</label>
-          <textarea id="cSteps" rows="5" placeholder='[{"t":"send","v":"/start"},{"t":"wait","v":"2000"},{"t":"until","v":"","success":"欢迎","timeout":30000}]'></textarea>
+          <label>步骤卡片（按顺序执行，最多 50 步）</label>
+          <div id="stepCards"></div>
+          <div id="stepError" class="hint" role="alert"></div>
           <div class="flex" style="gap:6px;flex-wrap:wrap">
-            <button class="ghost" type="button" style="flex:none;min-height:34px" onclick="fillStep('send')">+ 发消息</button>
-            <button class="ghost" type="button" style="flex:none;min-height:34px" onclick="fillStep('wait')">+ 等待</button>
-            <button class="ghost" type="button" style="flex:none;min-height:34px" onclick="fillStep('click')">+ 点按钮</button>
-            <button class="ghost" type="button" style="flex:none;min-height:34px" onclick="fillStep('captcha')">+ 验证码</button>
-            <button class="ghost" type="button" style="flex:none;min-height:34px" onclick="fillStep('until')">+ 等回复</button>
+            <button class="ghost" type="button" onclick="fillStep('send')">＋ 发送消息</button>
+            <button class="ghost" type="button" onclick="fillStep('wait')">＋ 等待</button>
+            <button class="ghost" type="button" onclick="fillStep('click')">＋ 点击按钮</button>
+            <button class="ghost" type="button" onclick="fillStep('until')">＋ 等待回复</button>
+            <button class="ghost" type="button" onclick="fillStep('manual')">＋ 人工验证等待</button>
           </div>
+          <label for="stepTemplate">示例模板（替换前会确认）</label>
+          <div class="flex"><select id="stepTemplate"><option value="basic">发命令 → 等待 → 点击 → 等回复</option><option value="manual">发命令 → 等人工处理后机器人确认</option></select><button class="ghost" type="button" onclick="applyStepTemplate()">使用模板</button></div>
+          <div class="hint">人工验证请自行到 Telegram 处理，这里只等待机器人的确认回复；不会识别或破解验证。</div>
+          <details id="stepAdvanced" style="margin-top:12px"><summary>高级：原始 JSON（可选；旧版配置无损保留）</summary>
+            <textarea id="cSteps" rows="5" oninput="readStepJSON()" placeholder="[]"></textarea>
+            <div class="hint">不认识 JSON 无需使用这里。旧版验证步骤仅保留，不提供新增入口。</div>
+          </details>
           <div class="flex">
             <div><label>整条失败重试(1-5)</label><input type="number" id="cRetry" value="1" min="1" max="5"></div>
           </div>
@@ -740,6 +811,33 @@ input[readonly]:focus{border-color:var(--acc)}
   <section id="tab-settings">
     <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</h2>
     <div class="sub">触发行为与面板安全</div>
+    <div class="card">
+      <h3>Telegram 多账号</h3>
+      <label for="accountSettings">当前账号（客户端可同时登录，切换只改变面板范围）</label>
+      <select id="accountSettings" onchange="switchAccount(this.value)"><option value="default">默认账号</option></select>
+      <div id="accountStatus" class="hint" role="status" aria-live="polite">默认账号</div>
+      <label for="accountLabel">账号标签（新建或重命名）</label><input id="accountLabel" maxlength="80" placeholder="如：工作账号">
+      <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:12px">
+        <button class="ghost" id="accountReload" onclick="loadAccounts()">刷新账号</button>
+        <button class="btn" id="accountCreate" onclick="manageAccount('create')">新建账号</button>
+        <button class="ghost" id="accountRename" onclick="manageAccount('rename')">重命名当前</button>
+        <button class="danger" id="accountDelete" disabled onclick="manageAccount('delete')">删除当前</button>
+      </div>
+      <div id="accountResult" class="hint" role="status" aria-live="polite"></div>
+      <div class="hint">新账号使用下方原有 Telegram 登录流程。默认账号禁止删除；删除账号需两次确认。</div>
+    </div>
+    <div class="card fold">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">共享图标库</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div class="hint">图标库配置跨账号、跨设备共享。默认 TFEL：https://emby-icon.vercel.app/TFEL-Emby.json。内置库可禁用，不可删除。仅点击按钮时加载或刷新，不定时拉取。</div>
+        <div class="flex" style="gap:8px;flex-wrap:wrap;margin-top:10px"><button class="ghost" type="button" id="iconLibrariesLoad" onclick="loadIconLibraries()">加载图标库</button><button class="ghost" type="button" id="iconLibrariesRefresh" onclick="refreshIcons()">刷新全部图标</button></div>
+        <div id="iconLibrariesList"></div>
+        <label for="iconLibraryName">外部图标库名称（可空）</label><input id="iconLibraryName" maxlength="80" placeholder="如：我的图标库">
+        <label for="iconLibraryUrl">图标库 JSON URL</label><input type="url" id="iconLibraryUrl" placeholder="https://example.com/icons.json">
+        <button class="btn" type="button" id="iconLibraryAdd" style="margin-top:10px" onclick="addIconLibrary()">保存共享图标库</button>
+        <div id="iconLibrariesResult" class="hint" role="status" aria-live="polite"></div><pre id="iconLibraryErrors" class="hint" style="white-space:pre-wrap"></pre>
+      </div>
+    </div>
     <div class="card fold open">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>系统更新</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
@@ -846,6 +944,14 @@ input[readonly]:focus{border-color:var(--acc)}
   <div class="tb" id="t-settings" onclick="goTab('settings')"><span class="tb-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>设置</div>
 </div>
 
+<div class="autof" id="iconPicker"><div class="autof-card"><div class="autof-head"><b>选择任务图标</b><button class="ghost" type="button" onclick="closeIconPicker()">关闭</button></div>
+  <div class="hint">只展示图标库返回的图片 URL，不下载保存图片。加载失败用名称首字母代替。</div>
+  <button class="ghost" type="button" id="iconsLoad" onclick="loadIcons()">加载图标 / 重试</button>
+  <label for="iconSearch">搜索名称或图标库</label><input id="iconSearch" placeholder="搜索图标" oninput="resetIconSearch()">
+  <div id="iconPickerStatus" class="hint" role="status" aria-live="polite">点击加载图标，首次最多显示 80 项。</div>
+  <pre id="iconPickerErrors" class="hint" style="white-space:pre-wrap"></pre><div class="icon-grid" id="iconGrid"></div>
+  <button class="ghost" type="button" id="iconsMore" style="display:none;margin-top:10px" onclick="moreIcons()">再显示 80 项</button>
+</div></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -853,16 +959,116 @@ input[readonly]:focus{border-color:var(--acc)}
 const $=s=>document.querySelector(s);
 let state={tg:{},logged_in:false,running:true};
 const EMOJIS=["👍","👎","❤","🔥","🥰","👏","😁","🤔","🤯","😱","🤬","😢","🎉","🤩","🤮","💩","🙏","👌","🤡","🥱","🥴","😍","🐳","🌚","🌭","🍌","🍎","😘","😎","🆒","🆕","🏆","✌","🍾","🖖","😭","😅","🥳","🎃","🙃","🤝","🗿","🛸","🤗","😴","😂","💅","🎊","🥂","😈"];
-function toast(msg,err){const t=$('#toast');t.textContent=msg;t.classList.add('show');t.classList.toggle('err',!!err);setTimeout(()=>t.classList.remove('show'),2600)}
-async function api(path,opts={}){
-  const r=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});
-  if(r.status===401){showLoginGate();throw new Error('未登录面板')}
-  const d=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(d.error||d.detail||('请求失败 '+r.status));
-  return d;
+function toast(msg,err){if(!msg)return;const t=$('#toast');t.textContent=msg;t.classList.add('show');t.classList.toggle('err',!!err);setTimeout(()=>t.classList.remove('show'),2600)}
+// ---------- 账号请求范围 ----------
+let selectedAccount='default', accountEpoch=0;
+try{selectedAccount=localStorage.getItem('tgp_selected_id')||'default'}catch(e){}
+function accountContext(){return {id:selectedAccount,epoch:accountEpoch}}
+function isCurrentAccount(c){return c.id===selectedAccount&&c.epoch===accountEpoch}
+function accountScoped(path){return !/^\/api\/(?:panel(?:\/|$)|accounts(?:\/|$)|backups(?:\/|$)|icon-libraries(?:\/|$|\?)|icons(?:\/|$|\?)|version(?:\?|$)|update(?:\/|$|\?))/.test(path)}
+function staleAccountError(){const e=new Error('');e.staleAccount=true;return e}
+function apiErrorMessage(data,status){
+  for(const value of [data?.error,data?.detail,data?.message]){
+    const messages=(Array.isArray(value)?value:[value]).map(item=>{
+      const msg=typeof item==='string'?item:typeof item?.message==='string'?item.message:typeof item?.msg==='string'?item.msg:'';
+      if(msg==='Field required')return '请补齐必填项';
+      if(/^Input should be a valid integer/.test(msg))return '请填写有效的整数';
+      if(/^Input should be/.test(msg))return '填写内容不符合要求，请检查后重试';
+      return msg;
+    }).filter(Boolean);
+    if(messages.length)return messages.slice(0,5).join('；');
+  }
+  return '请求失败 '+status+'，请稍后重试';
 }
-const esc=s=>(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(path,opts={}){
+  const scoped=accountScoped(path), c=opts._account||accountContext();
+  const options={...opts,headers:{'Content-Type':'application/json',...(opts.headers||{})}};
+  delete options._account;
+  if(scoped)options.headers['X-Account-ID']=c.id||'default';
+  if(scoped&&!isCurrentAccount(c))throw staleAccountError();
+  try{
+    const r=await fetch(path,options);
+    if(scoped&&!isCurrentAccount(c))throw staleAccountError();
+    if(r.status===401){showLoginGate();throw new Error('未登录面板')}
+    const d=await r.json().catch(()=>({}));
+    if(scoped&&!isCurrentAccount(c))throw staleAccountError();
+    if(!r.ok)throw new Error(apiErrorMessage(d,r.status));
+    return d;
+  }catch(e){if(scoped&&!isCurrentAccount(c))throw staleAccountError();throw e}
+}
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function fmt(ts){const d=new Date(ts*1000);return (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
+
+// ---------- 多账号面板 ----------
+let accounts=[], accountsBusy=false, accountsLoadSeq=0;
+function renderAccounts(){
+  for(const selector of ['#accountTop','#accountSettings']){
+    const el=$(selector);el.replaceChildren();
+    const list=accounts.some(a=>a.id===selectedAccount)?accounts:[...accounts,{id:selectedAccount,label:selectedAccount}];
+    for(const a of list){const o=document.createElement('option');o.value=a.id;o.textContent=String(a.label||a.id)+(a.logged_in?' · 在线':' · 未登录');el.appendChild(o)}
+    el.value=selectedAccount;
+  }
+  const a=accounts.find(x=>x.id===selectedAccount)||{label:selectedAccount};
+  const phase=({ready:'就绪',idle:'未登录',code_sent:'等待登录验证码',need_password:'等待两步密码'})[a.phase]||String(a.phase||'');
+  $('#accountStatus').textContent=String(a.label||a.id)+' · '+(a.logged_in?(a.paused?'已登录 · 已暂停':'已登录 · 运行中'):'未登录')+(phase?' · '+phase:'');
+  $('#accountDelete').disabled=accountsBusy||selectedAccount==='default';
+}
+function syncAccountButtons(){for(const id of ['accountReload','accountCreate','accountRename'])$('#'+id).disabled=accountsBusy;renderAccounts()}
+async function loadAccounts(){
+  const seq=++accountsLoadSeq;
+  try{
+    const d=await api('/api/accounts');if(seq!==accountsLoadSeq)return;
+    accounts=Array.isArray(d.accounts)?d.accounts:[];
+    if(accounts.length&&!accounts.some(a=>a.id===selectedAccount))switchAccount(d.default_id||'default');
+    renderAccounts();$('#accountResult').textContent='';
+  }catch(e){if(seq===accountsLoadSeq)$('#accountResult').textContent='账号加载失败，可点击刷新重试：'+e.message}
+}
+function resetAccountCaches(){
+  state={tg:{},logged_in:false,running:false,stats:{watched_groups:0,rules:0,hits:0}};
+  autos=[];openedAutoIds.clear();persistAutoExpanded();closeIconPicker();signinGlobalDirty=false;signinGlobalBusy=false;$('#signinGlobalSave').disabled=false;$('#signinGlobalResult').textContent='';renderSigninGlobal();
+  allGroups=[];allRules=[];watchedGroups=[];ruleGroupSel.clear();
+  autoGroupSel.grabcodes.clear();autoGroupSel.redpacket.clear();selectedAutoIds.clear();
+  editingRule=null;editAuto=null;editAutoAccount=null;ruleEditAccount=null;tgPhase='idle';window._prevLoggedIn=null;
+  logQ='';logKind='reply';clearTimeout(logQtimer);$('#logQ').value='';$('#gSearch').value='';
+  batchBusy=false;exportBusy=false;$('#configExportAll').disabled=false;
+  for(const id of ['gAll','gWatched','rList','logList','tgCard'])$('#'+id).replaceChildren();
+  for(const id of ['ovName','ovUser','ovGroups','ovRules','ovHits','gCnt'])$('#'+id).textContent='--';
+  $('#ovNoTg').style.display='flex';$('#dotHead').classList.remove('on');$('#ovStatus').textContent='未登录';$('#hPause').textContent='未登录';$('#swPause').classList.remove('on');
+  for(const id of ['ovAvatar','tgAvatar']){const el=$('#'+id);if(el){el.replaceChildren();if(el.dataset)delete el.dataset.avkey}}
+  $('#gLoading').classList.add('hidden');
+  Object.keys(AUTO_TYPE).forEach(t=>{closeAutoForm(t);renderAutoList(t)});closeRuleForm();
+    const reset=$('#batchTz');reset.textContent='签到窗口使用当前账号设置的时区（加载中…）';$('#sTz').replaceChildren();$('#tzNow').textContent='';
+  invalidateBatchPreview();cancelConfigImport();resetAccountTests();
+  for(const id of ['sAiBase','sAiKey','sAiModel','sBark','sBt','sBc','sFlPool'])$('#'+id).value='';
+  syncAutoSelection();
+}
+function switchAccount(id){
+  id=String(id||'default');if(id===selectedAccount){renderAccounts();return}
+  selectedAccount=id;accountEpoch++;
+  try{localStorage.setItem('tgp_selected_id',id)}catch(e){}
+  resetAccountCaches();renderAccounts();
+  loadState();loadSettings();loadAutos();loadRules();loadRuleGroups();loadDialogs();loadLogs();renderTgCard();
+}
+async function manageAccount(action){
+  if(accountsBusy)return;
+  const id=selectedAccount,label=$('#accountLabel').value.trim();
+  if(action==='delete'){
+    if(id==='default')return;
+    const a=accounts.find(x=>x.id===id);
+    if(!window.confirm('删除账号「'+String(a?.label||id)+'」及其配置和会话？不可恢复。'))return;
+    if(!window.confirm('再次确认：永久删除此账号，不会删除默认账号。确定继续？'))return;
+  }else if(!label||label.length>80){$('#accountResult').textContent='请输入 1–80 字的账号标签';return}
+  if(!['create','rename','delete'].includes(action))return;
+  accountsBusy=true;syncAccountButtons();
+  try{
+    const url='/api/accounts'+(action==='create'?'':'/'+encodeURIComponent(id));
+    const d=await api(url,{method:action==='create'?'POST':action==='rename'?'PUT':'DELETE',...(action==='delete'?{}:{body:JSON.stringify({label})})});
+    if(action==='create'&&d.id)switchAccount(d.id);
+    if(action==='delete'&&selectedAccount===id)switchAccount('default');
+    $('#accountLabel').value='';await loadAccounts();$('#accountResult').textContent='账号操作成功';
+  }catch(e){$('#accountResult').textContent='账号操作失败，可重试：'+e.message}
+  finally{accountsBusy=false;syncAccountButtons()}
+}
 
 // ---------- Tab ----------
 function goTab(t){
@@ -1041,39 +1247,236 @@ function tpConfirm(){
 $('#tpOverlay').addEventListener('click',function(e){if(e.target===this)tpClose()});
 
 // ---------- 自动化 (签到/抢注/抢红包/自定义) ----------
-let autos=[], editAuto=null;
+// ---------- 安全图标与共享图标库 ----------
+function safeHttpUrl(value){
+  if(typeof value!=='string')return '';const raw=value.trim();
+  if(!/^https?:\/\//i.test(raw)||/[\u0000-\u0020\u007f<>"'`\\]/.test(raw))return '';
+  try{const url=new URL(raw);return ['http:','https:'].includes(url.protocol)&&url.hostname&&!url.username&&!url.password?raw:''}catch(e){return ''}
+}
+function makeTaskIcon(name,url){
+  const box=document.createElement('span');box.className='task-icon';box.textContent=Array.from(String(name||'?'))[0]||'?';
+  const safe=safeHttpUrl(url);if(safe){const img=document.createElement('img');img.alt=String(name||'任务图标');img.loading='lazy';img.referrerPolicy='no-referrer';img.src=safe;img.addEventListener('error',()=>{box.replaceChildren();box.textContent=Array.from(String(name||'?'))[0]||'?'});box.replaceChildren(img)}
+  return box;
+}
+function renderSigninIconPreview(){const box=$('#sIconPreview');box.replaceChildren(makeTaskIcon($('#sName').value,$('#sIconUrl').value))}
+function clearSigninIcon(){$('#sIconUrl').value='';renderSigninIconPreview()}
+let iconLibraries=[],iconItems=[],iconErrors=[],iconsLoaded=false,iconsLimit=80,iconsBusy=false,iconLibrariesBusy=false,iconPickerAccount=null,iconsRevision=0;
+function closeIconPicker(){iconPickerAccount=null;$('#iconPicker').classList.remove('show');if(!$('#af-signin').classList.contains('show'))document.body.style.overflow=''}
+function openIconPicker(){iconPickerAccount=editAutoAccount||accountContext();$('#iconPicker').classList.add('show');document.body.style.overflow='hidden';$('#iconSearch').value='';iconsLimit=80;renderIconChoices()}
+function iconErrorText(){return iconErrors.map(e=>{const lib=iconLibraries.find(l=>String(l.id)===String(e.library_id));return String(lib?.name||e.library_id||'未知图标库')+'：'+String(e.message||'加载失败')}).join('\n')}
+function renderIconErrors(){$('#iconLibraryErrors').textContent=iconErrorText();$('#iconPickerErrors').textContent=iconErrorText()}
+function acceptIcons(d){iconLibraries=Array.isArray(d.libraries)?d.libraries:[];iconItems=Array.isArray(d.icons)?d.icons:[];iconErrors=Array.isArray(d.errors)?d.errors.filter(e=>e&&typeof e==='object'):[];iconsLoaded=true;iconsLimit=80;renderIconLibraries();renderIconErrors();renderIconChoices()}
+function resetIconSearch(){iconsLimit=80;renderIconChoices()}
+function moreIcons(){iconsLimit+=80;renderIconChoices()}
+function renderIconChoices(){
+  const query=$('#iconSearch').value.trim().toLocaleLowerCase(),grid=$('#iconGrid');grid.replaceChildren();
+  const list=iconItems.filter(i=>{if(!i||typeof i!=='object')return false;const lib=iconLibraries.find(l=>String(l.id)===String(i.library_id));return (!lib||lib.enabled!==false&&String(lib.enabled)!=='0')&&(!query||(String(i.name||'')+' '+String(lib?.name||i.library_id||'')).toLocaleLowerCase().includes(query))});
+  for(const item of list.slice(0,iconsLimit)){
+    const button=document.createElement('button');button.type='button';button.className='ghost icon-choice';button.disabled=!safeHttpUrl(item.url);button.appendChild(makeTaskIcon(item.name,item.url));
+    const name=document.createElement('span');name.textContent=String(item.name||'未命名图标');button.appendChild(name);
+    const c=iconPickerAccount,revision=iconsRevision;button.addEventListener('click',()=>{if(!c||!isCurrentAccount(c)||!iconPickerAccount||!isCurrentAccount(iconPickerAccount)||revision!==iconsRevision)return;const url=safeHttpUrl(item.url);if(!url)return;$('#sIconUrl').value=url;renderSigninIconPreview();closeIconPicker()});grid.appendChild(button);
+  }
+  $('#iconsMore').style.display=list.length>iconsLimit?'block':'none';$('#iconPickerStatus').textContent=iconsLoaded?'显示 '+Math.min(iconsLimit,list.length)+' / '+list.length+' 项'+(iconErrors.length?' · 有图标库加载失败，见下方来源':''):'点击加载图标，首次最多显示 80 项。';
+}
+async function loadIcons(){
+  if(iconsBusy)return;iconsBusy=true;$('#iconsLoad').disabled=true;$('#iconPickerStatus').textContent='加载图标中…';const revision=iconsRevision;
+  try{const d=await api('/api/icons');if(revision===iconsRevision)acceptIcons(d)}catch(e){$('#iconPickerStatus').textContent='加载失败，可重试：'+e.message}
+  finally{iconsBusy=false;$('#iconsLoad').disabled=false}
+}
+function libraryEnabled(lib){return lib.enabled===true||String(lib.enabled)==='1'}
+function renderIconLibraries(){
+  const box=$('#iconLibrariesList');box.replaceChildren();
+  for(const lib of iconLibraries){
+    const row=document.createElement('div');row.className='library-row';const title=document.createElement('b');title.textContent=String(lib.name||lib.id)+' · '+(libraryEnabled(lib)?'已启用':'已禁用')+(lib.builtin?' · 内置':'');row.appendChild(title);
+    const source=document.createElement('div');source.className='hint';source.textContent=String(lib.url||'');row.appendChild(source);const actions=document.createElement('div');actions.className='flex';
+    for(const [text,fn] of [[libraryEnabled(lib)?'禁用':'启用',()=>updateIconLibrary(lib.id,{enabled:!libraryEnabled(lib)})],['刷新此库',()=>refreshIcons(lib.id)],...(!lib.builtin?[['删除',()=>deleteIconLibrary(lib.id)]]:[])]){const b=document.createElement('button');b.type='button';b.className=text==='删除'?'danger':'ghost';b.textContent=text;b.disabled=iconLibrariesBusy;b.addEventListener('click',fn);actions.appendChild(b)}
+    row.appendChild(actions);box.appendChild(row);
+  }
+  if(!iconLibraries.length)box.textContent='尚无已加载图标库；点击加载查看共享配置。';renderIconErrors();
+}
+function syncIconLibraryButtons(){for(const id of ['iconLibrariesLoad','iconLibrariesRefresh','iconLibraryAdd'])$('#'+id).disabled=iconLibrariesBusy;renderIconLibraries()}
+async function loadIconLibraries(){
+  if(iconLibrariesBusy)return;iconLibrariesBusy=true;syncIconLibraryButtons();$('#iconLibrariesResult').textContent='加载共享图标库中…';
+  try{const d=await api('/api/icon-libraries');iconLibraries=Array.isArray(d.libraries)?d.libraries:[];renderIconLibraries();$('#iconLibrariesResult').textContent='已加载共享图标库'}catch(e){$('#iconLibrariesResult').textContent='加载失败：'+e.message}
+  finally{iconLibrariesBusy=false;syncIconLibraryButtons()}
+}
+
+async function mutateIconLibrary(path,method,body){
+  if(iconLibrariesBusy)return;iconLibrariesBusy=true;iconsRevision++;syncIconLibraryButtons();$('#iconLibrariesResult').textContent='正在保存共享图标库…';
+  try{
+    await api(path,{method,...(body===undefined?{}:{body:JSON.stringify(body)})});
+    const d=await api('/api/icon-libraries');iconLibraries=Array.isArray(d.libraries)?d.libraries:[];
+    iconItems=[];iconErrors=[];iconsLoaded=false;renderIconChoices();$('#iconLibrariesResult').textContent='共享图标库已保存；请重新加载图标。';
+  }catch(e){$('#iconLibrariesResult').textContent='保存或重新加载失败：'+e.message}
+  finally{iconLibrariesBusy=false;syncIconLibraryButtons()}
+}
+async function addIconLibrary(){const url=safeHttpUrl($('#iconLibraryUrl').value);if(!url)return toast('请输入安全的 HTTP / HTTPS 图标库 URL',1);await mutateIconLibrary('/api/icon-libraries','POST',{name:$('#iconLibraryName').value.trim(),url,enabled:true})}
+async function updateIconLibrary(id,patch){const body={enabled:patch.enabled===true};if(typeof patch.name==='string')body.name=patch.name;await mutateIconLibrary('/api/icon-libraries/'+encodeURIComponent(String(id)),'PUT',body)}
+async function deleteIconLibrary(id){const lib=iconLibraries.find(l=>String(l.id)===String(id));if(!lib||lib.builtin)return;if(!window.confirm('删除共享图标库「'+String(lib.name||id)+'」？已保存任务的图标 URL 不受影响。'))return;await mutateIconLibrary('/api/icon-libraries/'+encodeURIComponent(String(id)),'DELETE')}
+async function refreshIcons(id){
+  if(iconLibrariesBusy||iconsBusy)return;iconLibrariesBusy=true;iconsBusy=true;const revision=++iconsRevision;syncIconLibraryButtons();$('#iconsLoad').disabled=true;$('#iconLibrariesResult').textContent='正在刷新图标…';
+  try{const d=await api('/api/icons/refresh',{method:'POST',body:JSON.stringify(id==null?{}:{id})});if(revision===iconsRevision){acceptIcons(d);$('#iconLibrariesResult').textContent='图标刷新完成'+(iconErrors.length?'，部分图标库失败，请查看错误来源':'')}}catch(e){$('#iconLibrariesResult').textContent='刷新失败：'+e.message}
+  finally{iconLibrariesBusy=false;iconsBusy=false;$('#iconsLoad').disabled=false;syncIconLibraryButtons()}
+}
+// ---------- 统一签到时间 ----------
+let signinGlobal={enabled:false,start:'00:05',end:'00:41'},signinGlobalDirty=false,signinGlobalBusy=false,signinGlobalRevision=0;
+function validTime(value){return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value))}
+function toggleSigninGlobalFields(button){const box=$('#signinGlobalFields'),open=button.getAttribute('aria-expanded')!=='true';box.classList.toggle('hidden',!open);button.setAttribute('aria-expanded',String(open));button.textContent=open?'时间 ▾':'时间 ▸'}
+function renderSigninGlobal(){
+  if(!signinGlobalDirty){$('#signinGlobalEnabled').checked=signinGlobal.enabled;$('#signinGlobalStart').value=signinGlobal.start;$('#signinGlobalEnd').value=signinGlobal.end}
+  $('#signinGlobalSummary').textContent=(signinGlobal.enabled?'已启用 · 所有账号跟随统一 ':'未启用 · 单任务窗口生效 · 统一预设 ')+signinGlobal.start+'–'+signinGlobal.end+(signinGlobalDirty?'（有未保存修改）':'');
+  syncSigninWindow();
+}
+function syncSigninWindow(){
+  for(const id of ['sWinStart','sWinEnd'])$('#'+id).disabled=signinGlobal.enabled;
+  $('#sWindowHint').textContent=signinGlobal.enabled?'跟随统一 '+signinGlobal.start+'–'+signinGlobal.end+'；以下单任务原窗口保留但不生效。':'单任务窗口：在每天时间段内随机开始。';
+}
+function markSigninGlobalDirty(){signinGlobalDirty=true;invalidateBatchPreview();renderSigninGlobal()}
+function acceptSigninGlobalSettings(s){
+  const next={enabled:String(s.signin_global_enabled??'0')==='1',start:validTime(s.signin_global_start)?s.signin_global_start:'00:05',end:validTime(s.signin_global_end)?s.signin_global_end:'00:41'};
+  if(JSON.stringify(next)!==JSON.stringify(signinGlobal)){signinGlobal=next;invalidateBatchPreview();Object.keys(AUTO_TYPE).forEach(renderAutoList)}
+  renderSigninGlobal();
+}
+async function saveSigninGlobal(){
+  if(signinGlobalBusy)return;
+  const start=$('#signinGlobalStart').value,end=$('#signinGlobalEnd').value;
+  if(!validTime(start)||!validTime(end))return toast('请填写有效的 HH:MM 开始和结束时间',1);
+  const body={signin_global_enabled:$('#signinGlobalEnabled').checked?'1':'0',signin_global_start:start,signin_global_end:end},c=accountContext();
+  signinGlobalRevision++;signinGlobalBusy=true;$('#signinGlobalSave').disabled=true;$('#signinGlobalResult').textContent='正在保存统一时间…';invalidateBatchPreview();
+  try{
+    await api('/api/settings',{method:'POST',body:JSON.stringify(body),_account:c});
+    if(!isCurrentAccount(c))return;
+    signinGlobalRevision++;signinGlobalDirty=false;acceptSigninGlobalSettings(body);$('#signinGlobalResult').textContent='统一时间已保存；正在执行的任务不会中断。';await loadAutos();
+  }catch(e){if(isCurrentAccount(c))$('#signinGlobalResult').textContent='保存失败：'+e.message}
+  finally{if(isCurrentAccount(c)){signinGlobalBusy=false;$('#signinGlobalSave').disabled=false}}
+}
+function followsGlobalWindow(a){return a.type==='signin'&&(a.uses_global_window==null?signinGlobal.enabled:(a.uses_global_window===true||String(a.uses_global_window)==='1'))}
+function autoWindow(a){
+  if(a.type!=='signin')return '不适用签到时间窗口';
+  const shared=followsGlobalWindow(a),start=a.effective_win_start??(shared?signinGlobal.start:a.win_start),end=a.effective_win_end??(shared?signinGlobal.end:a.win_end);
+  return (shared?'跟随统一 ':'单任务窗口 ')+String(start??'--')+'–'+String(end??'--');
+}
+function autoLastResult(a){
+  const r=a.last_result;if(!r||typeof r!=='object')return '上次执行结果：暂无记录';
+  const ts=typeof r.ts==='number'?fmt(r.ts):String(r.ts??'未知时间'),ok=r.ok===true||String(r.ok)==='1';
+  let detail=r.detail==null?'':typeof r.detail==='string'?r.detail:JSON.stringify(r.detail);
+  return '上次执行：'+ts+' · '+(ok?'成功':'失败')+'\n实际回复：'+String(r.reply??'（空回复）')+(detail?'\n详情：'+detail:'');
+}
+let openedAutoIds=new Set();
+try{const saved=JSON.parse(sessionStorage.getItem('tgp_open_autos')||'null');if(saved?.account===selectedAccount&&Array.isArray(saved.ids))openedAutoIds=new Set(saved.ids.filter(Number.isSafeInteger))}catch(e){}
+function persistAutoExpanded(){try{sessionStorage.setItem('tgp_open_autos',JSON.stringify({account:selectedAccount,ids:[...openedAutoIds]}))}catch(e){}}
+function toggleAutoExpanded(id){if(!autos.some(a=>a.id===id))return;openedAutoIds.has(id)?openedAutoIds.delete(id):openedAutoIds.add(id);persistAutoExpanded();const a=autos.find(x=>x.id===id);renderAutoList(a.type)}
+let autos=[], editAuto=null, editAutoAccount=null;
+let selectedAutoIds=new Set(), batchPreview=null, batchSeq=0, batchBusy=false;
+function syncAutoSelection(){
+  const ids=autos.map(a=>Number(a.id));
+  for(const id of selectedAutoIds)if(!ids.includes(id))selectedAutoIds.delete(id);
+  $('#autoSelectedCount').textContent='已选 '+selectedAutoIds.size+' 项';
+  $('#autoSelectAll').checked=ids.length>0&&ids.every(id=>selectedAutoIds.has(id));
+  $('#autoSelectAll').indeterminate=selectedAutoIds.size>0&&!$('#autoSelectAll').checked;
+  $('#configExportSelected').disabled=selectedAutoIds.size===0;
+}
+function toggleAutoSelection(id,checked){checked?selectedAutoIds.add(Number(id)):selectedAutoIds.delete(Number(id));syncAutoSelection();invalidateBatchPreview()}
+function selectAllAutos(checked){selectedAutoIds=checked?new Set(autos.map(a=>Number(a.id))):new Set();syncAutoSelection();invalidateBatchPreview();Object.keys(AUTO_TYPE).forEach(renderAutoList)}
+function invalidateBatchPreview(){batchSeq++;batchPreview=null;$('#batchApplyBtn').disabled=true;$('#batchResult').textContent='';$('#batchPreviewBtn').disabled=batchBusy}
+function renderBatchFields(){const k=$('#batchKind').value;$('#batchWindow').classList.toggle('hidden',k!=='window');$('#batchInterval').classList.toggle('hidden',k!=='interval')}
+function buildBatchRequest(){
+  const ids=[...selectedAutoIds].filter(Number.isSafeInteger);if(!ids.length)throw new Error('请先勾选需要操作的任务');
+  const kind=$('#batchKind').value, patch={};let action=kind;
+  if(kind==='window'){
+    const start=$('#batchStart').value,end=$('#batchEnd').value;
+    if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(start)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(end))throw new Error('请填写有效的开始和结束时间');
+    Object.assign(patch,{win_start:start,win_end:end});action='update';
+  }else if(kind==='interval'){
+    const raw=$('#batchEvery').value.trim(),unit=Number($('#batchUnit').value),seconds=Number(raw)*unit;
+    if(!raw||![60,3600,86400].includes(unit)||!Number.isSafeInteger(seconds)||seconds<0||seconds>90*86400)throw new Error('间隔须为 0–90 天，换算后需为整数秒');
+    patch.poll_interval=seconds;action='update';
+  }else if(!['enable','disable','delete'].includes(kind))throw new Error('请选择有效的批量操作');
+  return {ids,action,patch};
+}
+function describeBatchPatch(patch){
+  const lines=[];
+  if(patch.win_start!==undefined||patch.win_end!==undefined)lines.push('签到窗口 '+String(patch.win_start??'原开始时间')+'–'+String(patch.win_end??'原结束时间')+(signinGlobal.enabled?'（原窗口保留；当前跟随统一时间，此修改暂不生效）':''));
+  if(patch.poll_interval!==undefined)lines.push('间隔 '+String(patch.poll_interval)+' 秒'+(Number(patch.poll_interval)===0?'（关闭轮询）':''));
+  if(patch.enabled!==undefined)lines.push(Number(patch.enabled)?'启用':'停用');
+  return lines.join('；')||'执行所选操作';
+}
+function batchSummary(d,patch={}){
+  const rows=Array.isArray(d.updated)?d.updated:(Array.isArray(d.candidates)?d.candidates:[]);
+  const lines=['候选 '+rows.length+' 项'];
+  for(const row of rows)lines.push('• '+String(row.name??row.id)+'：'+describeBatchPatch(row.patch||patch));
+  for(const row of (d.skipped||[]))lines.push('跳过 '+String(row.name??row.id)+'：'+String(row.reason||'该类型不支持此修改')+(row.fields?'（'+row.fields.join('、')+'）':''));
+  for(const warning of (d.warnings||[]))lines.push('提醒：'+String(warning));
+  return lines.join('\n');
+}
+async function previewBatch(){
+  if(batchBusy)return;let request;try{request=buildBatchRequest()}catch(e){return toast(e.message,1)}
+  const c=accountContext(),seq=++batchSeq;batchPreview=null;batchBusy=true;$('#batchPreviewBtn').disabled=true;$('#batchApplyBtn').disabled=true;$('#batchResult').textContent='正在预览…';
+  try{
+    const d=await api('/api/autos/batch',{method:'POST',body:JSON.stringify({...request,preview:true}),_account:c});
+    if(!isCurrentAccount(c)||seq!==batchSeq)return;
+    batchPreview={request,c,seq,tz:$('#sTz').value};$('#batchResult').textContent='仅预览，尚未修改。'+(request.patch.win_start?' 时区：'+String($('#sTz').value||'当前设置'):'')+'\n'+batchSummary(d,request.patch);$('#batchApplyBtn').disabled=!(d.updated||d.candidates||[]).length;
+  }catch(e){if(isCurrentAccount(c)&&seq===batchSeq)$('#batchResult').textContent='预览失败，可重试：'+e.message}
+  finally{if(isCurrentAccount(c)){batchBusy=false;$('#batchPreviewBtn').disabled=false}}
+}
+async function applyBatch(){
+  if(batchBusy||!batchPreview)return;const p=batchPreview;
+  if(!isCurrentAccount(p.c))return;
+  if(p.request.patch.win_start&&p.tz!==$('#sTz').value){invalidateBatchPreview();return toast('时区已改变，请重新预览签到窗口',1)}
+  try{if(JSON.stringify(buildBatchRequest())!==JSON.stringify(p.request)){invalidateBatchPreview();return toast('选项已改变，请重新预览',1)}}catch(e){invalidateBatchPreview();return toast(e.message,1)}
+  const message=p.request.action==='delete'?'永久删除预览中的选中任务？删除后不可恢复。':'将预览中的修改提交到当前账号？签到时间按当前设置的时区执行。';
+  if(!window.confirm(message))return;
+  batchBusy=true;$('#batchApplyBtn').disabled=true;$('#batchPreviewBtn').disabled=true;
+  try{
+    const d=await api('/api/autos/batch',{method:'POST',body:JSON.stringify({...p.request,preview:false}),_account:p.c});
+    if(!isCurrentAccount(p.c))return;
+    batchPreview=null;selectedAutoIds.clear();$('#batchResult').textContent='批量操作完成。\n'+batchSummary(d,p.request.patch);await loadAutos();
+  }catch(e){if(isCurrentAccount(p.c)){$('#batchResult').textContent='提交失败，可重新预览：'+e.message;batchPreview=null}}
+  finally{if(isCurrentAccount(p.c)){batchBusy=false;$('#batchPreviewBtn').disabled=false;$('#batchApplyBtn').disabled=true}}
+}
+
 const AUTO_TYPE={signin:'签到',grabcodes:'抢注',redpacket:'抢红包',custom:'自定义',keepalive:'群聊'};
 const ACTIONS={signin:'reply',grabcodes:'reply',redpacket:'reply'};
 const AUTO_MAP={signin:['Sign','签到'],grabcodes:['Grab','抢注'],redpacket:['Pack','抢红包'],custom:['Custom','自定义'],keepalive:['Keep','保号']};
 
 async function loadAutos(){
-  try{autos=(await api('/api/autos')).autos||[]}catch(e){autos=[]}
-  Object.keys(AUTO_TYPE).forEach(t=>renderAutoList(t));
+  const c=accountContext();
+  try{const d=await api('/api/autos',{_account:c});if(!isCurrentAccount(c))return;autos=(d.autos||[]).filter(a=>Number.isSafeInteger(a.id))}
+  catch(e){if(!isCurrentAccount(c)||e.staleAccount)return;toast(e.message,1);return}
+  for(const id of openedAutoIds)if(!autos.some(a=>a.id===id))openedAutoIds.delete(id);persistAutoExpanded();
+  syncAutoSelection();Object.keys(AUTO_TYPE).forEach(t=>renderAutoList(t));
 }
 function renderAutoList(type){
-  const [suffix]=AUTO_MAP[type];
-  const list=autos.filter(a=>a.type===type);
-  $('#aCnt'+suffix).textContent=list.length;
-  $('#aEmpty'+suffix).style.display=list.length?'none':'block';
-  $('#aList'+suffix).innerHTML=list.map(a=>`
-    <div class="card auto-card">
+  const [suffix]=AUTO_MAP[type],list=autos.filter(a=>a.type===type&&Number.isSafeInteger(a.id)),box=$('#aList'+suffix),c=accountContext();
+  $('#aCnt'+suffix).textContent=list.length;$('#aEmpty'+suffix).style.display=list.length?'none':'block';
+  const label=accounts.find(a=>a.id===c.id)?.label||c.id;
+  box.innerHTML=list.map(a=>{
+    const open=openedAutoIds.has(a.id),action=(name,text,extra='')=>`<button type="button" class="${name==='delete'?'danger':name==='expand'?'ghost auto-chevron':'ghost'}" data-auto-action="${name}" data-auto-id="${a.id}" ${extra}>${text}</button>`;
+    return `<div class="card auto-card" data-auto-card="${a.id}">
       <div class="auto-top">
-        <div class="grow">
-          <div class="t">${esc(a.name)} <span class="tag ${a.enabled?'ok':'off'}">${a.enabled?'已启用':'已停用'}</span></div>
-          <div class="s">${autoDesc(a)}</div>
-        </div>
-        <div class="switch ${a.enabled?'on':''}" onclick="toggleAuto(${a.id})"></div>
+        <input type="checkbox" style="width:auto;flex:none" aria-label="选择任务 ${esc(a.name)}" data-auto-action="select" data-auto-id="${a.id}" ${selectedAutoIds.has(a.id)?'checked':''}>
+        <span data-task-icon="${a.id}"></span>
+        <div class="grow"><div class="auto-title" title="${esc(a.name)}">${esc(a.name||'未命名任务')}</div>${a.type==='signin'?`<div class="s" style="font-size:10px">${esc(autoWindow(a))}</div>`:''}</div>
+        <span class="tag ${a.enabled?'ok':'off'}">${a.enabled?'已启用':'已停用'}</span>
+        ${['signin','custom','keepalive'].includes(a.type)?action('run','执行'):''}
+        ${action('expand','▸',`aria-label="${open?'收起':'展开'}任务详情" aria-expanded="${open}"`)}
       </div>
-      <div class="auto-actions">
-        ${(a.type==='signin'||a.type==='custom'||a.type==='keepalive')?`<button class="ghost" onclick="runAuto(${a.id})">执行</button>`:''}
-        <button class="ghost" onclick="editAutoItem(${a.id})">编辑</button>
-        <button class="ghost" onclick="dupAuto(${a.id})">复制</button>
-        <button class="danger" onclick="delAuto(${a.id})">删除</button>
-      </div>
-    </div>`).join('');
+      ${open?`<div class="auto-details"><div class="s">${autoDesc(a)}</div><div class="s">归属当前账号：${esc(label)}（${esc(c.id)}）</div><div class="s">有效窗口：${esc(autoWindow(a))}</div><pre class="auto-result">${esc(autoLastResult(a))}</pre></div>`:''}
+      <div class="auto-actions">${action('toggle',a.enabled?'停用':'启用')}${action('edit','编辑')}${action('duplicate','复制')}${action('delete','删除')}</div>
+    </div>`;
+  }).join('');
+  for(const holder of box.querySelectorAll('[data-task-icon]')){const a=list.find(x=>x.id===Number(holder.dataset.taskIcon));if(a)holder.appendChild(makeTaskIcon(a.name,a.icon_url))}
+  box.onclick=e=>{
+    const button=e.target.closest('[data-auto-action]');if(!button||!box.contains(button)||!isCurrentAccount(c))return;
+    const id=Number(button.dataset.autoId);if(!Number.isSafeInteger(id)||!autos.some(a=>a.id===id&&a.type===type))return;
+    const action=button.dataset.autoAction;
+    if(action==='select')toggleAutoSelection(id,button.checked);
+    else if(action==='expand')toggleAutoExpanded(id);
+    else ({run:runAuto,toggle:toggleAuto,edit:editAutoItem,duplicate:dupAuto,delete:delAuto}[action])?.(id);
+  };
 }
 function autoDesc(a){
-  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · 每天 ${esc(a.win_start)}~${esc(a.win_end)}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒${a.signin_captcha?' · 验证码':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
+  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒${a.signin_captcha?' · 验证码':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
   if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}${a.poll_interval>0?' · 轮询'+a.poll_interval+'s@'+esc(a.target):''}`;
   if(a.type==='redpacket')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
   if(a.type==='keepalive'){
@@ -1090,10 +1493,11 @@ function dupAuto(id){
 }
 function editAutoItem(id){
   const a=autos.find(x=>x.id===id);if(!a)return;
-  editAuto=a;
+  editAuto=a;editAutoAccount=accountContext();
   const t=a.type;
   if(t==='signin'){
     $('#sName').value=a.name;$('#sTarget').value=a.target;$('#sCmd').value=a.command;
+    $('#sIconUrl').value=a.icon_url||'';renderSigninIconPreview();syncSigninWindow();
     $('#sIsChat').checked=!!a.is_chat;
     $('#sWinStart').value=a.win_start;$('#sWinEnd').value=a.win_end;
     $('#sCommandDelay').value=a.command_delay??1.6;$('#sButtonDelay').value=a.button_delay??2;
@@ -1116,7 +1520,7 @@ function editAutoItem(id){
     $('#gBot').value=a.target||'';$('#gProbe').value=a.command||'/start';$('#gPoll').value=a.poll_interval||0;
     pickGrabAct(a.action);$('#gCancel').style.display='inline-block';
   }else if(t==='custom'){
-    $('#cName').value=a.name;$('#cTarget').value=a.target;$('#cSteps').value=a.custom_steps||'[]';
+    $('#cName').value=a.name;$('#cTarget').value=a.target;setVisualSteps(a.custom_steps||'[]');
     $('#cRetry').value=a.chain_retry||1;$('#cCancel').style.display='inline-block';
   }else if(t==='keepalive'){
     $('#kName').value=a.name;$('#kTarget').value=a.target;$('#kText').value=a.reply_text||'';
@@ -1134,10 +1538,10 @@ function editAutoItem(id){
   toast('编辑中,改完点保存');
 }
 function cancelAutoEdit(t){
-  editAuto=null;
-  ({signin:()=>{$('#sName').value='';$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
+  editAuto=null;editAutoAccount=null;
+  ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
-    custom:()=>{$('#cName').value='';$('#cTarget').value='';$('#cSteps').value='[]';$('#cRetry').value=1;$('#cCancel').style.display='none'},
+    custom:()=>{$('#cName').value='';$('#cTarget').value='';setVisualSteps('[]');$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'},
     keepalive:()=>{$('#kName').value='';$('#kTarget').value='';$('#kText').value='';$('#kEvery').value=7;$('#kUnit').value='86400';$('#kDel').value=10;$('#kCancel').style.display='none'}})[t]();
 }
@@ -1146,28 +1550,101 @@ function pickGrabAct(v){
   $('#gActReply').classList.toggle('ghost',v!=='reply');$('#gActReply').classList.toggle('btn',v==='reply');
   $('#gActSend').classList.toggle('ghost',v!=='send');$('#gActSend').classList.toggle('btn',v==='send');
 }
+// ---------- 可视化步骤编辑器 ----------
+let visualSteps=[], stepsError='';
 const STEP_HINTS={
-  send:'{"t":"send","v":"/start"}',
-  wait:'{"t":"wait","v":"2000"}',
-  click:'{"t":"click","v":"按钮文字","any":false,"ai":false}',
-  captcha:'{"t":"captcha","v":"4","send":""}',
-  until:'{"t":"until","success":"成功词","fail":"失败词","timeout":30000}'
+  send:{t:'send',v:'/start'},wait:{t:'wait',v:'2000'},
+  click:{t:'click',v:'按钮文字',any:false,ai:false},
+  until:{t:'until',success:'成功',fail:'失败',timeout:30000},
+  manual:{t:'until',success:'验证通过',fail:'验证失败',timeout:300000}
 };
+const STEP_TEMPLATES={basic:[STEP_HINTS.send,STEP_HINTS.wait,STEP_HINTS.click,STEP_HINTS.until],manual:[STEP_HINTS.send,STEP_HINTS.manual]};
+function parseSteps(text){
+  let list;try{list=JSON.parse(text.trim()||'[]')}catch(e){throw new Error('高级步骤内容无法读取，请检查格式，或使用示例模板重新开始')}
+  if(!Array.isArray(list))throw new Error('步骤应是一组按顺序排列的卡片');
+  if(list.length>50)throw new Error('最多支持 50 个步骤，请先删除多余步骤');
+  return list;
+}
+function stepIssue(list,requireOne=false){
+  if(list.length>50)return '最多支持 50 个步骤';
+  if(requireOne&&!list.length)return '请至少添加一个步骤';
+  for(let i=0;i<list.length;i++){
+    const s=list[i];if(!s||typeof s!=='object'||Array.isArray(s))continue; // 原有未知数据保留，由后端最终验证
+    if(s.t==='send'&&(typeof s.v!=='string'||!s.v.trim()))return '第 '+(i+1)+' 步：请填写要发送的消息';
+    const ms=s.t==='wait'?s.v:s.t==='until'?s.timeout:undefined;
+    if((s.t==='wait'||s.t==='until')&&(ms===undefined||ms===null||String(ms).trim()===''||!Number.isFinite(Number(ms))||Number(ms)<0||!Number.isSafeInteger(Number(ms))))return '第 '+(i+1)+' 步：等待时间须为不小于 0 的秒数，最多保留三位小数';
+    if(s.t==='until'&&!String(s.success??'').trim()&&!String(s.fail??'').trim())return '第 '+(i+1)+' 步：请至少填写一种机器人确认或失败关键词';
+  }
+  return '';
+}
+function syncStepJSON(){
+  $('#cSteps').value=JSON.stringify(visualSteps,null,2);stepsError=stepIssue(visualSteps);$('#stepError').textContent=stepsError;
+}
+function readStepJSON(){
+  try{visualSteps=parseSteps($('#cSteps').value);stepsError=stepIssue(visualSteps);$('#stepError').textContent=stepsError;renderStepCards()}
+  catch(e){stepsError=e.message;$('#stepError').textContent=stepsError;$('#stepCards').replaceChildren()}
+}
+function setVisualSteps(text){$('#cSteps').value=text||'[]';readStepJSON()}
+function stepField(card,index,key,labelText,type='text',milliseconds=false){
+  const s=visualSteps[index], label=document.createElement('label'),input=document.createElement(type==='textarea'?'textarea':'input');
+  label.textContent=labelText;if(type!=='textarea')input.type=type;
+  const value=s[key];
+  if(type==='checkbox'){input.checked=!!value;input.style.width='auto'}
+  else input.value=milliseconds?(value==null?'':Number(value)/1000):String(value??'');
+  if(type==='number'){input.min='0';input.step='0.001'}
+  input.addEventListener(type==='checkbox'?'change':'input',()=>{
+    let v=type==='checkbox'?input.checked:input.value;
+    if(milliseconds){const n=Number(v)*1000;v=String(v).trim()===''?'':(Math.abs(n-Math.round(n))<1e-7?Math.round(n):n);if(typeof s[key]==='string')v=String(v)}
+    s[key]=v;syncStepJSON();
+  });
+  label.appendChild(input);card.appendChild(label);
+}
+function renderStepCards(){
+  const box=$('#stepCards');box.replaceChildren();
+  if(!visualSteps.length){box.textContent='还没有步骤，点下方按钮添加，或使用示例模板';return}
+  visualSteps.forEach((s,i)=>{
+    const card=document.createElement('div');card.className='card';
+    const title=document.createElement('b'),rawType=s&&typeof s==='object'?s.t:'';
+    const allowed={send:['t','v'],wait:['t','v'],click:['t','v','any','ai'],until:['t','v','success','fail','timeout']}[rawType];
+    const type=allowed&&Object.keys(s).every(k=>allowed.includes(k))?rawType:'';
+    const names={send:'发送消息',wait:'等待',click:'点击按钮',until:'等待回复 / 人工验证等待'};
+    title.textContent=(i+1)+'. '+(names[type]||'旧版验证步骤（保留）');card.appendChild(title);
+    if(type==='send')stepField(card,i,'v','消息文本','textarea');
+    if(type==='wait')stepField(card,i,'v','等待（秒，0 表示立即继续）','number',true);
+    if(type==='click'){
+      stepField(card,i,'v','按钮文字（可留空沿用原匹配方式）');stepField(card,i,'any','匹配任意按钮（兼容原 any）','checkbox');
+      // 不新增 AI/验证能力；旧 ai 原样保留，只展示说明，不自动改写。
+      if(Object.prototype.hasOwnProperty.call(s,'ai')){const note=document.createElement('div');note.className='hint';note.textContent='原 ai 参数：'+String(s.ai)+'（保留；可在高级模式查看）';card.appendChild(note)}
+    }
+    if(type==='until'){stepField(card,i,'success','机器人确认 / 成功关键词');stepField(card,i,'fail','失败关键词（可选）');stepField(card,i,'timeout','最长等待（秒）','number',true)}
+    const known={send:['t','v'],wait:['t','v'],click:['t','v','any','ai'],until:['t','v','success','fail','timeout']}[type];
+    if(!known||Object.keys(s).some(k=>!known.includes(k))){const note=document.createElement('div');note.className='hint';note.textContent='未展示的旧版配置已原样保留；可在高级 JSON 查看和编辑。';card.appendChild(note)}
+    const actions=document.createElement('div');actions.className='flex';actions.style.gap='8px';
+    for(const [label,offset] of [['上移',-1],['下移',1],['删除',0]]){const b=document.createElement('button');b.type='button';b.className=offset?'ghost':'danger';b.textContent=label;b.disabled=offset!==0&&(i+offset<0||i+offset>=visualSteps.length);b.addEventListener('click',()=>offset?moveStep(i,offset):removeStep(i));actions.appendChild(b)}
+    card.appendChild(actions);box.appendChild(card);
+  });
+}
 function fillStep(k){
-  try{
-    const cur=JSON.parse($('#cSteps').value.trim()||'[]');
-    if(!Array.isArray(cur))throw 0;
-    cur.push(JSON.parse(STEP_HINTS[k]));
-    $('#cSteps').value=JSON.stringify(cur,null,1);
-  }catch(e){toast('当前步骤不是合法 JSON,请先修正',1)}
+  if(!Object.prototype.hasOwnProperty.call(STEP_HINTS,k))return;
+  try{visualSteps=parseSteps($('#cSteps').value)}catch(e){return toast(e.message,1)}
+  if(visualSteps.length>=50)return toast('最多 50 个步骤，请先删除一个步骤再添加',1);
+  visualSteps.push(JSON.parse(JSON.stringify(STEP_HINTS[k])));syncStepJSON();renderStepCards();
+}
+function moveStep(index,offset){const next=index+offset;if(index<0||next<0||index>=visualSteps.length||next>=visualSteps.length)return;[visualSteps[index],visualSteps[next]]=[visualSteps[next],visualSteps[index]];syncStepJSON();renderStepCards()}
+function removeStep(index){if(index<0||index>=visualSteps.length)return;visualSteps.splice(index,1);syncStepJSON();renderStepCards()}
+function applyStepTemplate(){
+  const key=$('#stepTemplate').value;if(!STEP_TEMPLATES[key])return;
+  if($('#cSteps').value.trim()&&$('#cSteps').value.trim()!=='[]'&&!window.confirm('使用模板会替换现有步骤。确定替换？'))return;
+  visualSteps=JSON.parse(JSON.stringify(STEP_TEMPLATES[key]));syncStepJSON();renderStepCards();
 }
 const autoGroupSel={grabcodes:new Set(),redpacket:new Set()};
+for(const [id,type] of [['gGroups','grabcodes'],['pGroups','redpacket']])$('#'+id).addEventListener('click',e=>{const b=e.target.closest('[data-auto-group]');if(b&&$('#'+id).contains(b))toggleAutoGroup(type,b.dataset.autoGroup)});
 function renderAutoGroups(type){
   const box=document.getElementById(type==='grabcodes'?'gGroups':'pGroups');
   if(!box)return;
   const sel=autoGroupSel[type];
   if(!watchedGroups.length){box.innerHTML='<div class="empty" style="padding:6px">还没有监听群,先去「群组」页添加</div>';return}
-  box.innerHTML=watchedGroups.map(g=>`<div class="gp ${sel.has(String(g.chat_id))?'on':''}" onclick="toggleAutoGroup('${type}','${g.chat_id}')">${esc(g.name||g.chat_id)}</div>`).join('');
+  box.innerHTML=watchedGroups.map(g=>`<button type="button" class="gp ${sel.has(String(g.chat_id))?'on':''}" data-auto-group="${esc(String(g.chat_id))}">${esc(g.name||g.chat_id)}</button>`).join('');
 }
 function toggleAutoGroup(type,id){
   id=String(id);const sel=autoGroupSel[type];
@@ -1189,19 +1666,25 @@ function openAutoForm(type){
   const el=document.getElementById('af-'+type);
   if(!el)return;
   el.classList.add('show');
+  if(!editAutoAccount)editAutoAccount=accountContext();
+  if(type==='signin'){renderSigninIconPreview();syncSigninWindow()}
+  if(type==='custom')readStepJSON();
   document.body.style.overflow='hidden';
 }
 function closeAutoForm(type){
   const el=document.getElementById('af-'+type);
+  closeIconPicker();
   if(el)el.classList.remove('show');
   document.body.style.overflow='';
   cancelAutoEdit(type);
   if(typeof tpClose==='function')tpClose(); // 顺手关掉可能还开着的时间滚轮
 }
 async function saveAuto(type){
+  const c=editAutoAccount||accountContext(),wasEditing=!!editAuto;
+  if(!isCurrentAccount(c))return toast('账号已切换，请重新打开任务再保存',1);
   let body,url='/api/autos';
   if(type==='signin'){
-    body={type,name:$('#sName').value.trim(),target:$('#sTarget').value.trim(),command:$('#sCmd').value.trim(),
+    body={type,name:$('#sName').value.trim(),target:$('#sTarget').value.trim(),command:$('#sCmd').value.trim(),icon_url:$('#sIconUrl').value.trim(),
       is_chat:$('#sIsChat').checked?1:0,
       win_start:$('#sWinStart').value.trim(),win_end:$('#sWinEnd').value.trim(),click_btn:$('#sClickBtn').checked?1:0,
       btn_text:$('#sBtnText').value.trim(),btn_emoji:$('#sBtnEmoji').value.trim(),
@@ -1212,6 +1695,7 @@ async function saveAuto(type){
       success_kw:$('#sKw').value.trim(),fail_kw:$('#sFw').value.trim(),
       points_pat:$('#sPts').value.trim(),retries:+$('#sRetries').value||2,
       signin_captcha:$('#sCap').checked?1:0};
+    if(body.icon_url&&!safeHttpUrl(body.icon_url))return toast('图标仅支持安全的 HTTP / HTTPS URL',1);
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
     for(const delay of [body.command_delay,body.button_delay]){
       if(!Number.isFinite(delay)||delay<0||delay>120||Math.abs(delay*10-Math.round(delay*10))>1e-7)
@@ -1225,8 +1709,8 @@ async function saveAuto(type){
     if(body.poll_interval&&!body.target)return toast('轮询模式需填写轮询机器人',1);
   }else if(type==='custom'){
     let steps;
-    try{steps=JSON.parse($('#cSteps').value.trim()||'[]')}catch(e){return toast('步骤不是合法 JSON',1)}
-    if(!Array.isArray(steps)||!steps.length)return toast('至少配置一个步骤',1);
+    try{steps=parseSteps($('#cSteps').value)}catch(e){return toast(e.message,1)}
+    const issue=stepIssue(steps,true);if(issue)return toast(issue,1);
     body={type,name:$('#cName').value.trim(),target:$('#cTarget').value.trim(),custom_steps:JSON.stringify(steps),
       chain_retry:+$('#cRetry').value||1};
     if(!body.name||!body.target)return toast('请填写名称和目标',1);
@@ -1244,9 +1728,10 @@ async function saveAuto(type){
   }
   if(editAuto){url='/api/autos/'+editAuto.id;body=Object.assign(body,{enabled:editAuto.enabled})}
   try{
-    await api(url,{method:editAuto?'PUT':'POST',body:JSON.stringify(body)});
-    closeAutoForm(type);toast(editAuto?'已更新':'已新增');editAuto=null;loadAutos();
-  }catch(e){toast(e.message,1)}
+    await api(url,{method:wasEditing?'PUT':'POST',body:JSON.stringify(body),_account:c});
+    if(!isCurrentAccount(c))return;
+    closeAutoForm(type);toast(wasEditing?'已更新':'已新增');editAuto=null;loadAutos();
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function toggleAuto(id){
   try{await api('/api/autos/'+id+'/toggle',{method:'POST'});loadAutos()}catch(e){toast(e.message,1)}
@@ -1259,6 +1744,100 @@ async function delAuto(id){
 }
 async function runAuto(id){
   try{await api('/api/autos/'+id+'/run',{method:'POST'});toast('已触发,稍后查看日志')}catch(e){toast(e.message,1)}
+}
+
+// ---------- 配置导入导出（仅配置，不读凭证或会话） ----------
+let configData=null, configReader=null, configSeq=0, configPreview=null, configBusy=false, exportBusy=false;
+function assertSafeConfig(data){
+  if(!data||typeof data!=='object'||Array.isArray(data)||data.format!=='tg-persona-config')throw new Error('请选择 TG-Persona 导出的标准配置文件');
+  for(const key of ['automations','rules','watched_groups'])if(!Array.isArray(data[key]))throw new Error('配置缺少任务、规则或监听群列表，请使用标准导出文件');
+  const forbidden=/^(?:api_?id|api_?hash|api_?key|ai_?key|key|token|password|phone|phone_number|session|session_string|history|hits|last_at|last_run|signed_today)$/i;
+  function visit(obj,depth=0){
+    if(depth>100)throw new Error('配置层级过深，请使用标准导出文件');
+    if(!obj||typeof obj!=='object')return;
+    for(const [key,value] of Object.entries(obj)){if(forbidden.test(key))throw new Error('配置包含凭证、手机号、会话或历史状态，已拒绝处理；请重新导出纯配置');visit(value,depth+1)}
+  }
+  visit(data);return data;
+}
+function invalidateImportPreview(){if(!configReader)configSeq++;configBusy=false;configPreview=null;$('#configApplyBtn').disabled=true;$('#configPreviewBtn').disabled=!configData||configBusy;$('#configResult').textContent=configData?'文件已读取，修改选项后请重新预览。':''}
+function cancelConfigImport(){
+  configSeq++;configData=null;configPreview=null;configBusy=false;
+  if(configReader){const reader=configReader;configReader=null;try{reader.abort()}catch(e){}}
+  $('#configFile').value='';$('#configMode').value='merge';$('#configActivate').checked=false;
+  $('#configPreviewBtn').disabled=true;$('#configApplyBtn').disabled=true;$('#configResult').textContent='';
+}
+function readConfigFile(){
+  const file=$('#configFile').files?.[0],c=accountContext();
+  configSeq++;const seq=configSeq;configData=null;configPreview=null;configBusy=false;
+  if(configReader){const old=configReader;configReader=null;try{old.abort()}catch(e){}}
+  $('#configPreviewBtn').disabled=true;$('#configApplyBtn').disabled=true;$('#configResult').textContent='';
+  if(!file)return;
+  if(!Number.isFinite(file.size)||file.size<=0||file.size>2*1024*1024){$('#configResult').textContent='请选择非空 JSON 文件，最大 2MB';return}
+  if(!/\.json$/i.test(file.name||'')){ $('#configResult').textContent='请选择 .json 配置文件';return}
+  $('#configResult').textContent='正在本地读取文件…';
+  const reader=new FileReader();configReader=reader;
+  reader.onload=()=>{
+    if(seq!==configSeq||!isCurrentAccount(c))return;
+    configReader=null;
+    try{
+      if(typeof reader.result!=='string')throw new Error('无法读取文件内容');
+      let parsed;try{parsed=JSON.parse(reader.result)}catch(e){throw new Error('文件内容无法读取，请选择 TG-Persona 导出的 JSON 配置')}
+      configData=assertSafeConfig(parsed);$('#configResult').textContent='文件已在本地读取，点击预览；尚未修改服务器配置。默认导入后禁用，请复核再启用。';$('#configPreviewBtn').disabled=false;
+    }catch(e){configData=null;$('#configResult').textContent=e.message}
+  };
+  reader.onerror=()=>{if(seq!==configSeq||!isCurrentAccount(c))return;configReader=null;$('#configResult').textContent='文件读取失败，请重新选择文件'};
+  try{reader.readAsText(file)}catch(e){if(seq===configSeq&&isCurrentAccount(c)){configReader=null;$('#configResult').textContent='文件读取失败，请重新选择文件'}}
+}
+function buildImportRequest(){
+  if(!configData)throw new Error('请先选择有效配置文件');
+  const mode=$('#configMode').value;if(!['merge','replace'].includes(mode))throw new Error('请选择追加或覆盖模式');
+  return {data:configData,mode,include_rules:true,include_groups:true,activate:!!$('#configActivate').checked};
+}
+function importSummary(d){
+  const counts=d.counts||{};
+  const countText=(value,label)=>label+'：'+(value&&typeof value==='object'?('新增 '+String(value.add??0)+'，跳过 '+String(value.skip??0)+'，移除 '+String(value.remove??0)):String(value??0));
+  const lines=[countText(counts.tasks,'任务'),countText(counts.rules,'规则'),countText(counts.groups??counts.watched_groups,'监听群'),countText(counts.duplicates,'重复项')];
+  for(const item of (d.tasks||[]))lines.push('• '+String(item.name||'未命名任务')+(item.type?' · '+String(item.type):'')+(item.status?' · '+String(item.status):''));
+  for(const warning of (d.warnings||[]))lines.push('提醒：'+String(warning));
+  return lines.join('\n');
+}
+async function previewImport(){
+  if(configBusy)return;let request;try{request=buildImportRequest()}catch(e){return toast(e.message,1)}
+  const c=accountContext(),seq=++configSeq;configPreview=null;configBusy=true;$('#configPreviewBtn').disabled=true;$('#configApplyBtn').disabled=true;$('#configResult').textContent='正在预览…';
+  try{
+    const d=await api('/api/tasks/import',{method:'POST',body:JSON.stringify({...request,preview:true}),_account:c});
+    if(seq!==configSeq||!isCurrentAccount(c))return;
+    configPreview={request,c,seq};$('#configResult').textContent='仅预览，尚未导入。\n'+importSummary(d);$('#configApplyBtn').disabled=false;
+  }catch(e){if(seq===configSeq&&isCurrentAccount(c))$('#configResult').textContent='预览失败，可重试：'+e.message}
+  finally{if(seq===configSeq&&isCurrentAccount(c)){configBusy=false;$('#configPreviewBtn').disabled=!configData}}
+}
+async function applyImport(){
+  if(configBusy||!configPreview)return;const p=configPreview;
+  if(!isCurrentAccount(p.c)||p.seq!==configSeq)return;
+  if(JSON.stringify(buildImportRequest())!==JSON.stringify(p.request)){invalidateImportPreview();return toast('文件或选项已变化，请重新预览',1)}
+  const action=p.request.mode==='replace'?'覆盖会删除当前账号已有任务、规则和监听群配置，无法恢复。':'将配置追加到当前账号，保留现有配置。';
+  if(!window.confirm(action+(p.request.activate?'将恢复启用状态，任务可能立即执行。':'新任务和规则默认禁用，请复核后再启用。')+'确认导入？'))return;
+  if(p.request.mode==='replace'&&!window.confirm('最终确认：不可恢复地覆盖当前账号全部任务、规则和监听群。确定覆盖？'))return;
+  configBusy=true;$('#configApplyBtn').disabled=true;$('#configPreviewBtn').disabled=true;
+  try{
+    const d=await api('/api/tasks/import',{method:'POST',body:JSON.stringify({...p.request,preview:false}),_account:p.c});
+    if(!isCurrentAccount(p.c)||p.seq!==configSeq)return;
+    configPreview=null;$('#configResult').textContent='配置已导入。\n'+importSummary(d);selectedAutoIds.clear();syncAutoSelection();loadAutos();loadRules();loadRuleGroups();loadDialogs();
+  }catch(e){if(isCurrentAccount(p.c)&&p.seq===configSeq){configPreview=null;$('#configResult').textContent='导入失败，可重新预览后重试：'+e.message}}
+  finally{if(isCurrentAccount(p.c)&&p.seq===configSeq){configBusy=false;$('#configPreviewBtn').disabled=!configData;$('#configApplyBtn').disabled=true}}
+}
+async function exportConfig(selected){
+  if(exportBusy)return;const c=accountContext(),ids=[...selectedAutoIds];
+  if(selected&&!ids.length)return toast('请先勾选要导出的任务',1);
+  exportBusy=true;$('#configExportAll').disabled=true;$('#configExportSelected').disabled=true;
+  try{
+    const d=await api('/api/tasks/export',selected?{method:'POST',body:JSON.stringify({ids}),_account:c}:{_account:c});
+    if(!isCurrentAccount(c))return;assertSafeConfig(d);
+    const url=URL.createObjectURL(new Blob([JSON.stringify(d,null,2)],{type:'application/json'}));
+    const a=document.createElement('a');a.href=url;a.download='tg-persona-config-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    toast('配置已下载到本机');
+  }catch(e){if(isCurrentAccount(c))toast('导出失败：'+e.message,1)}
+  finally{if(isCurrentAccount(c)){exportBusy=false;$('#configExportAll').disabled=false;syncAutoSelection()}}
 }
 
 // ---------- 面板登录 ----------
@@ -1301,7 +1880,7 @@ async function panelLogin(){
 // ---------- Telegram 账号登录(设置页内) ----------
 let tgPhase='idle';
 async function renderTgCard(){
-  const el=$('#tgCard'); if(!el)return;
+  const c=accountContext(),el=$('#tgCard'); if(!el)return;
   if(state.logged_in){
     const av=state.tg.me.avatar||'';
     el.innerHTML=`
@@ -1321,7 +1900,8 @@ async function renderTgCard(){
     setAvatar($('#tgAvatar'), av, state.tg.me.name);
     return;
   }
-  const p=await api('/api/settings').catch(()=>({api_id:'',api_hash:''}));
+  const p=await api('/api/settings',{_account:c}).catch(()=>({api_id:'',api_hash:''}));
+  if(!isCurrentAccount(c))return;
   el.innerHTML=`
     <div id="tgS0">
       <label>API_ID</label>
@@ -1351,34 +1931,43 @@ async function renderTgCard(){
 async function saveTgApi(){
   const id=$('#tgApiId').value.trim(), hash=$('#tgApiHash').value.trim();
   if(!/^\d{4,9}$/.test(id)||hash.length<10)return toast('API_ID 或 API_HASH 无效(在 my.telegram.org 获取)',1);
+  const c=accountContext();
   try{
-    await api('/api/settings',{method:'POST',body:JSON.stringify({api_id:id,api_hash:hash})});
-    await api('/api/tg/init',{method:'POST',body:JSON.stringify({api_id:+id,api_hash:hash})});
+    await api('/api/settings',{method:'POST',body:JSON.stringify({api_id:id,api_hash:hash}),_account:c});
+    if(!isCurrentAccount(c))return;
+    await api('/api/tg/init',{method:'POST',body:JSON.stringify({api_id:+id,api_hash:hash}),_account:c});
+    if(!isCurrentAccount(c))return;
     tgPhase='code_sent'; toast('凭证已保存,下一步:发送验证码'); renderTgCard();
-    setTimeout(()=>{const f=$('#tgPhone');if(f)f.focus()},80);
-  }catch(e){toast(e.message,1)}
+    setTimeout(()=>{if(!isCurrentAccount(c))return;const f=$('#tgPhone');if(f)f.focus()},80);
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function sendTgCode(){
   const phone=$('#tgPhone').value.trim();
   if(!phone)return toast('请填写手机号',1);
+  const c=accountContext();
   try{
-    await api('/api/tg/send_code',{method:'POST',body:JSON.stringify({phone})});
+    await api('/api/tg/send_code',{method:'POST',body:JSON.stringify({phone}),_account:c});
+    if(!isCurrentAccount(c))return;
     tgPhase='code_sent'; renderTgCard(); toast('验证码已发送,请在 Telegram 查收');
-    setTimeout(()=>{const f=$('#tgCode');if(f)f.focus()},80);
-  }catch(e){toast(e.message,1)}
+    setTimeout(()=>{if(!isCurrentAccount(c))return;const f=$('#tgCode');if(f)f.focus()},80);
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function verifyTgCode(){
+  const c=accountContext();
   try{
-    const d=await api('/api/tg/verify_code',{method:'POST',body:JSON.stringify({code:$('#tgCode').value.trim()})});
+    const d=await api('/api/tg/verify_code',{method:'POST',body:JSON.stringify({code:$('#tgCode').value.trim()}),_account:c});
+    if(!isCurrentAccount(c))return;
     if(d.need_password){tgPhase='need_password';renderTgCard();return}
     afterTgLogin();
-  }catch(e){toast(e.message,1)}
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function verifyTg2fa(){
+  const c=accountContext();
   try{
-    await api('/api/tg/verify_password',{method:'POST',body:JSON.stringify({password:$('#tg2fa').value})});
+    await api('/api/tg/verify_password',{method:'POST',body:JSON.stringify({password:$('#tg2fa').value}),_account:c});
+    if(!isCurrentAccount(c))return;
     afterTgLogin();
-  }catch(e){toast(e.message,1)}
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 function afterTgLogin(){
   tgPhase='ready'; toast('登录成功,人形分身已上线'); loadState();
@@ -1387,24 +1976,21 @@ function afterTgLogin(){
 // ---------- 头像 ----------
 function setAvatar(el, custom, name){
   if(!el)return;
-  // 同一个头像不重复设置,避免轮询刷新时图片反复重载
-  const key=(custom||'/avatar')+'|'+(state&&state.tg&&state.tg.me?state.tg.me.id:'');
+  const c=accountContext(),key=c.id+'|'+c.epoch+'|'+String(custom||'')+'|'+String(state.tg?.me?.id||'');
   if(el.dataset.avkey===key&&el.querySelector('img'))return;
-  el.dataset.avkey=key;
-  el.innerHTML='';
-  const letter=document.createElement('span');
-  letter.textContent=(name||'?').charAt(0).toUpperCase();
-  const img=document.createElement('img');
-  // 自定义 URL 失败 → 回退 /avatar(TG 头像缓存) → 首字母
-  const srcs=custom?[custom,'/avatar']:['/avatar'];
-  let step=0;
+  el.dataset.avkey=key;el.replaceChildren();
+  const letter=document.createElement('span');letter.textContent=String(name||'?').charAt(0).toUpperCase();el.appendChild(letter);
+  if(!state.logged_in)return;
+  // IMG 无法加账号 header；此路由由后端鉴权，查询参数仅含冻结的账号 ID，不含 token。
+  const fallback='/avatar?account_id='+encodeURIComponent(c.id||'default');
+  const sources=custom&&/^https?:\/\//i.test(custom)?[custom,fallback]:[fallback];
+  const img=document.createElement('img');let step=0;
   const next=()=>{
-    if(step>=srcs.length){el.innerHTML='';el.appendChild(letter);return}
-    img.src=srcs[step++];
+    if(!isCurrentAccount(c)||el.dataset.avkey!==key)return;
+    if(step>=sources.length){el.replaceChildren(letter);return}
+    img.src=sources[step++];
   };
-  img.onerror=next;
-  next();
-  el.appendChild(img);
+  img.onerror=next;el.replaceChildren(img);next();
 }
 
 // ---------- 主题 ----------
@@ -1423,8 +2009,9 @@ async function toggleTheme(){
 
 // ---------- 状态 ----------
 async function loadState(){
+  const c=accountContext();
   try{
-    state=await api('/api/state');
+    const next=await api('/api/state',{_account:c});if(!isCurrentAccount(c))return;state=next;
     const on=state.logged_in&&state.running;
     $('#dotHead').classList.toggle('on',on);
     if(state.logged_in){
@@ -1441,6 +2028,7 @@ async function loadState(){
     $('#ovHits').textContent=state.stats.hits;
     $('#swPause').classList.toggle('on',!state.paused);
     $('#hPause').textContent=state.paused?'已暂停':'运行中';
+    const current=accounts.find(a=>a.id===selectedAccount);if(current){current.logged_in=!!state.logged_in;current.paused=!!state.paused;current.phase=state.tg?.phase||current.phase;renderAccounts()}
     const sp=$('#ovStatus');
     if(!state.logged_in){sp.className='status-pill pause';sp.innerHTML='<span class="pdot"></span>未登录'}
     else if(state.paused){sp.className='status-pill pause';sp.innerHTML='<span class="pdot"></span>已暂停'}
@@ -1448,14 +2036,17 @@ async function loadState(){
   }catch(e){}
 }
 async function togglePause(){
+  const c=accountContext();
   try{
-    const d=await api('/api/toggle',{method:'POST',body:JSON.stringify({paused:!state.paused})});
-    state.paused=d.paused;loadState();
-  }catch(e){toast(e.message,1)}
+    const d=await api('/api/toggle',{method:'POST',body:JSON.stringify({paused:!state.paused}),_account:c});
+    if(!isCurrentAccount(c))return;state.paused=d.paused;loadState();
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function loadSettings(){
+  const c=accountContext(),globalRevision=signinGlobalRevision;
   try{
-    const s=await api('/api/settings');
+    const s=await api('/api/settings',{_account:c});if(!isCurrentAccount(c))return;
+    if(globalRevision===signinGlobalRevision)acceptSigninGlobalSettings(s);
     $('#sCooldown').value=s.cooldown||20;
     $('#sDelay').value=s.delay||'1.0 3.0';
     $('#sIgnore').checked=s.ignore_bots!=='0';
@@ -1517,20 +2108,27 @@ function currentAIConfig(){
 }
 function testElapsed(ms){return typeof ms==='number'&&Number.isFinite(ms)&&ms>=0?ms+' ms':'未知'}
 async function testAIConnection(){
-  const btn=$('#aiTestBtn'),result=$('#aiTestResult');
+  const c=accountContext(),btn=$('#aiTestBtn'),result=$('#aiTestResult');
   if(btn.disabled)return;
   btn.disabled=true;result.textContent='正在测试 AI 连接…';
   try{
-    const d=await api('/api/ai/test',{method:'POST',body:JSON.stringify(currentAIConfig())});
+    const d=await api('/api/ai/test',{method:'POST',body:JSON.stringify(currentAIConfig()),_account:c});
+    if(!isCurrentAccount(c))return;
     const reply=typeof d.reply==='string'?d.reply:'';
     const success=d.ok===true&&reply.trim()==='测试成功';
     result.textContent=(success?'连接测试成功':'连接测试失败')+
       '\n实际回复：'+(reply||'（空回复）')+'\n耗时：'+testElapsed(d.elapsed_ms)+
       (success?'':'\n原因：'+(d.error||'AI 未按约定只回复“测试成功”'));
-  }catch(e){result.textContent='连接测试失败：'+e.message;toast(e.message,1)}
-  finally{btn.disabled=false}
+  }catch(e){if(isCurrentAccount(c)){result.textContent='连接测试失败：'+e.message;toast(e.message,1)}}
+  finally{if(isCurrentAccount(c))btn.disabled=false}
 }
 let captchaTestImage='',captchaTestVersion=0,captchaTestReader=null,captchaTestBusy=false;
+function resetAccountTests(){
+  captchaTestVersion++;captchaTestImage='';captchaTestBusy=false;
+  if(captchaTestReader){const reader=captchaTestReader;captchaTestReader=null;try{reader.abort()}catch(e){}}
+  $('#captchaTestFile').value='';$('#captchaTestPreview').removeAttribute('src');$('#captchaTestPreview').style.display='none';
+  $('#aiTestResult').textContent='';$('#captchaTestResult').textContent='';$('#aiTestBtn').disabled=false;$('#captchaTestBtn').disabled=true;
+}
 function previewCaptchaFile(){
   const version=++captchaTestVersion,result=$('#captchaTestResult'),preview=$('#captchaTestPreview'),btn=$('#captchaTestBtn');
   captchaTestImage='';result.textContent='';preview.removeAttribute('src');preview.style.display='none';btn.disabled=true;
@@ -1566,7 +2164,7 @@ function previewCaptchaFile(){
   }catch(e){fail('图片读取失败：'+e.message)}
 }
 async function testCaptchaRecognition(){
-  const btn=$('#captchaTestBtn'),result=$('#captchaTestResult');
+  const c=accountContext(),btn=$('#captchaTestBtn'),result=$('#captchaTestResult');
   if(captchaTestBusy)return;
   if(!captchaTestImage){result.textContent='请先选择有效图片';return}
   const length=Number($('#captchaTestLength').value);
@@ -1576,8 +2174,8 @@ async function testCaptchaRecognition(){
   const version=captchaTestVersion;
   captchaTestBusy=true;btn.disabled=true;result.textContent='正在识别…';
   try{
-    const d=await api('/api/captcha/test',{method:'POST',body:JSON.stringify({image:captchaTestImage,length,...config})});
-    if(version!==captchaTestVersion)return;
+    const d=await api('/api/captcha/test',{method:'POST',body:JSON.stringify({image:captchaTestImage,length,...config}),_account:c});
+    if(!isCurrentAccount(c)||version!==captchaTestVersion)return;
     const text=typeof d.text==='string'?d.text:'';
     const channel={ai:'AI',ocr:'本地 OCR',none:'无'}[d.channel]||'未知';
     const errors=Array.isArray(d.errors)?d.errors:[];
@@ -1588,8 +2186,8 @@ async function testCaptchaRecognition(){
       '\n识别文本：'+(text||'（空文本）')+'\n使用通道：'+channel+'\n耗时：'+testElapsed(d.elapsed_ms)+
       (warnings.length?'\n'+(success?'通道提醒（已使用上述通道完成识别）':'失败原因')+'：\n'+warnings.join('\n'):
         (success?'':'\n失败原因：'+(d.error||'未获得有效识别文本')));
-  }catch(e){if(version===captchaTestVersion){result.textContent='识别失败：'+e.message;toast(e.message,1)}}
-  finally{captchaTestBusy=false;btn.disabled=!captchaTestImage}
+  }catch(e){if(isCurrentAccount(c)&&version===captchaTestVersion){result.textContent='识别失败：'+e.message;toast(e.message,1)}}
+  finally{if(isCurrentAccount(c)){captchaTestBusy=false;btn.disabled=!captchaTestImage}}
 }
 async function changePw(){
   const pw=$('#sNewPw').value.trim();
@@ -1609,13 +2207,15 @@ async function loadSessions(){
   catch(e){}
 }
 async function loadTz(){
+  const c=accountContext();
   try{
-    const d=await api('/api/time');
-    const sel=$('#sTz'); if(!sel)return;
-    sel.innerHTML=(d.tzlist||[]).map(z=>`<option value="${z}">${z}</option>`).join('');
-    if(!(d.tzlist||[]).includes(d.tz)){const o=document.createElement('option');o.value=d.tz;o.textContent=d.tz+' (当前)';sel.appendChild(o)}
+    const d=await api('/api/time',{_account:c});if(!isCurrentAccount(c))return;
+    const sel=$('#sTz'); if(!sel)return;sel.replaceChildren();
+    for(const z of (d.tzlist||[])){const o=document.createElement('option');o.value=z;o.textContent=String(z);sel.appendChild(o)}
+    if(!(d.tzlist||[]).includes(d.tz)){const o=document.createElement('option');o.value=d.tz;o.textContent=String(d.tz)+' (当前)';sel.appendChild(o)}
     sel.value=d.tz;
     $('#tzNow').textContent='服务器当前时间:'+d.now+' ('+d.tz+')';
+    $('#batchTz').textContent='签到窗口时区：'+String(d.tz||'当前设置')+'；不适用的任务将跳过。';
   }catch(e){}
 }
 async function saveTz(){
@@ -1624,9 +2224,10 @@ async function saveTz(){
   catch(e){toast(e.message,1)}
 }
 async function logoutTG(){
+  const c=accountContext();
   if(!confirm('确认退出 Telegram 账号?已保存的会话会被清除'))return;
-  try{await api('/api/tg/logout',{method:'POST'});tgPhase='idle';window._prevLoggedIn=null;toast('已退出 TG');loadState();renderTgCard()}
-  catch(e){toast(e.message,1)}
+  try{await api('/api/tg/logout',{method:'POST',_account:c});if(!isCurrentAccount(c))return;tgPhase='idle';window._prevLoggedIn=null;toast('已退出 TG');loadState();renderTgCard()}
+  catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function saveAvatar(){
   const v=$('#tgAvatarUrl').value.trim();
@@ -1645,8 +2246,9 @@ async function btnPanelOut(){
 // ---------- 群 ----------
 let allGroups=[];
 async function loadWatched(){
+  const c=accountContext();
   try{
-    const d=await api('/api/watched');
+    const d=await api('/api/watched',{_account:c});if(!isCurrentAccount(c))return;
     $('#gCnt').textContent=d.groups.length;
     $('#gWatched').innerHTML=d.groups.length?d.groups.map(g=>`
       <div class="item">
@@ -1657,13 +2259,14 @@ async function loadWatched(){
   }catch(e){toast(e.message,1)}
 }
 async function loadAllGroups(){
+  const c=accountContext();
   if(allGroups.length){renderGroups();return}
   $('#gLoading').classList.remove('hidden');
   try{
-    allGroups=(await api('/api/dialogs')).groups||[];
+    const d=await api('/api/dialogs',{_account:c});if(!isCurrentAccount(c))return;allGroups=d.groups||[];
     renderGroups();
-  }catch(e){toast(e.message,1)}
-  $('#gLoading').classList.add('hidden');
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
+  if(isCurrentAccount(c))$('#gLoading').classList.add('hidden');
 }
 function renderGroups(){
   const q=$('#gSearch').value.trim().toLowerCase();
@@ -1687,24 +2290,26 @@ $('#gWatched').addEventListener('click',e=>{
 });
 async function loadDialogs(){loadWatched();loadAllGroups()}
 async function addGroup(id,name){
+  const c=accountContext();
   try{
-    await api('/api/groups',{method:'POST',body:JSON.stringify({chat_id:id,name})});
-    toast('已加入监听');
+    await api('/api/groups',{method:'POST',body:JSON.stringify({chat_id:id,name}),_account:c});
+    if(!isCurrentAccount(c))return;toast('已加入监听');
     const g=allGroups.find(x=>String(x.chat_id)===String(id));if(g)g.watched=true;
     loadWatched();renderGroups();
-  }catch(e){toast(e.message,1)}
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function removeGroup(id){
+  const c=accountContext();
   try{
-    await api('/api/groups/'+id,{method:'DELETE'});
-    toast('已取消监听');
+    await api('/api/groups/'+encodeURIComponent(id),{method:'DELETE',_account:c});
+    if(!isCurrentAccount(c))return;toast('已取消监听');
     const g=allGroups.find(x=>String(x.chat_id)===String(id));if(g)g.watched=false;
     loadWatched();renderGroups();
-  }catch(e){toast(e.message,1)}
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 
 // ---------- 规则 ----------
-let editingRule=null, actType='reply';
+let editingRule=null, ruleEditAccount=null, actType='reply';
 function pickAction(a){
   actType=a;
   ['reply','react','both'].forEach(x=>$('#act'+x[0].toUpperCase()+x.slice(1)).style.borderColor=x===a?'var(--acc)':'');
@@ -1725,17 +2330,18 @@ function pickEmoji(el,e){
 }
 let allRules=[];
 async function loadRules(){
+  const c=accountContext();
   try{
-    const d=await api('/api/rules');
-    allRules=d.rules||[];
+    const d=await api('/api/rules',{_account:c});if(!isCurrentAccount(c))return;
+    d.rules=(d.rules||[]).filter(r=>Number.isSafeInteger(r.id));allRules=d.rules;
     $('#rList').innerHTML=d.rules.length?d.rules.map(r=>{
-      const val=r.action==='both'?(r.reaction?`${esc(r.value)} + ${r.reaction}`:esc(r.value)):(r.action==='react'?esc(r.reaction||r.value):esc(r.value));
+      const val=r.action==='both'?(r.reaction?`${esc(r.value)} + ${esc(r.reaction)}`:esc(r.value)):(r.action==='react'?esc(r.reaction||r.value):esc(r.value));
       return `<div class="item">
         <div class="switch ${r.enabled?'on':''}" onclick="toggleRule(${r.id})"></div>
         <div class="grow">
           <div class="t">${esc(r.keywords)}${r.regex?' <span class="tag">正则</span>':''}</div>
           <div class="s">#${r.id} · ${r.action==='react'?'点表情':r.action==='both'?'回复+表情':'回复文本'} · ${val}</div>
-          <div class="s">${groupScopeText(r)}</div>
+          <div class="s">${esc(groupScopeText(r))}</div>
         </div>
         <button class="ghost" onclick="editRule(${r.id})">编辑</button>
         <button class="danger" onclick="delRule(${r.id})">删除</button>
@@ -1744,10 +2350,12 @@ async function loadRules(){
   }catch(e){toast(e.message,1)}
 }
 let ruleGroupSel=new Set();
+$('#rGroups').addEventListener('click',e=>{const b=e.target.closest('[data-rule-group]');if(b&&$('#rGroups').contains(b))toggleRuleGroup(b.dataset.ruleGroup)});
 let watchedGroups=[];
 async function loadRuleGroups(){
+  const c=accountContext();
   try{
-    const d=await api('/api/watched');watchedGroups=d.groups||[];renderRuleGroups();
+    const d=await api('/api/watched',{_account:c});if(!isCurrentAccount(c))return;watchedGroups=d.groups||[];renderRuleGroups();
     renderAutoGroups('grabcodes');renderAutoGroups('redpacket');
     if(allRules.length)loadRules();   // 群名到位后刷新规则列表的「范围」文案
   }catch(e){}
@@ -1755,7 +2363,7 @@ async function loadRuleGroups(){
 function renderRuleGroups(){
   const box=$('#rGroups');if(!box)return;
   if(!watchedGroups.length){box.innerHTML='<div class="empty" style="padding:6px">还没有监听群,先去「群组」页添加</div>';return}
-  box.innerHTML=watchedGroups.map(g=>`<div class="gp ${ruleGroupSel.has(String(g.chat_id))?'on':''}" onclick="toggleRuleGroup('${g.chat_id}')">${esc(g.name||g.chat_id)}</div>`).join('');
+  box.innerHTML=watchedGroups.map(g=>`<button type="button" class="gp ${ruleGroupSel.has(String(g.chat_id))?'on':''}" data-rule-group="${esc(String(g.chat_id))}">${esc(g.name||g.chat_id)}</button>`).join('');
 }
 function toggleRuleGroup(id){id=String(id);ruleGroupSel.has(id)?ruleGroupSel.delete(id):ruleGroupSel.add(id);renderRuleGroups()}
 function groupScopeText(r){
@@ -1770,13 +2378,13 @@ async function toggleRule(id){try{const d=await api('/api/rules/'+id+'/toggle',{
 function openRuleForm(){
   const el=document.getElementById('af-rule');
   if(!el)return;
-  el.classList.add('show');document.body.style.overflow='hidden';
+  ruleEditAccount=accountContext();el.classList.add('show');document.body.style.overflow='hidden';
 }
 function closeRuleForm(){
   const el=document.getElementById('af-rule');
   if(el)el.classList.remove('show');
   document.body.style.overflow='';
-  editingRule=null;
+  editingRule=null;ruleEditAccount=null;
   $('#rKw').value='';$('#rRegex').checked=false;$('#rValue').value='';$('#rReact').value='';
   pickAction('reply');resetRuleForm();
 }
@@ -1796,6 +2404,7 @@ function editRule(id){
   toast('编辑规则 #'+id+' 中,改完点保存');
 }
 async function saveRule(){
+  const c=ruleEditAccount||accountContext();if(!isCurrentAccount(c))return toast('账号已切换，请重新打开规则再保存',1);
   const text=$('#rValue').value.trim();
   const emo=$('#rReact').value.trim();
   const body={keywords:$('#rKw').value.trim(),regex:$('#rRegex').checked?1:0,action:actType,
@@ -1803,10 +2412,11 @@ async function saveRule(){
     groups:[...ruleGroupSel].join(','),enabled:1};
   if(!body.keywords)return toast('关键词不能为空',1);
   try{
-    if(editingRule){await api('/api/rules/'+editingRule,{method:'PUT',body:JSON.stringify({...body,enabled:1})});editingRule=null}
-    else await api('/api/rules',{method:'POST',body:JSON.stringify(body)});
+    if(editingRule){await api('/api/rules/'+editingRule,{method:'PUT',body:JSON.stringify({...body,enabled:1}),_account:c});if(!isCurrentAccount(c))return;editingRule=null}
+    else await api('/api/rules',{method:'POST',body:JSON.stringify(body),_account:c});
+    if(!isCurrentAccount(c))return;
     toast('规则已保存');loadRules();closeRuleForm();
-  }catch(e){toast(e.message,1)}
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function delRule(id){if(!confirm('删除规则 #'+id+'?'))return;try{await api('/api/rules/'+id,{method:'DELETE'});toast('已删除');loadRules()}catch(e){toast(e.message,1)}}
 
@@ -1880,9 +2490,10 @@ async function clearLogs(days){
   }catch(e){toast(e.message,1)}
 }
 async function loadLogs(){
+  const c=accountContext(),kind=logKind,q=logQ;
   try{
-    const url='/api/logs?n=80&kind='+encodeURIComponent(logKind)+(logQ?('&q='+encodeURIComponent(logQ)):'');
-    const d=await api(url);
+    const url='/api/logs?n=80&kind='+encodeURIComponent(kind)+(q?('&q='+encodeURIComponent(q)):'');
+    const d=await api(url,{_account:c});if(!isCurrentAccount(c)||kind!==logKind||q!==logQ)return;
     const c=d.counts||{};
     if(!logQ)document.querySelectorAll('#logSeg button').forEach(b=>{
       const n=c[b.dataset.k]||0;
@@ -1893,19 +2504,19 @@ async function loadLogs(){
 }
 
 // ---------- 启动 ----------
+let bootstrapTimer=null;
 async function bootstrap(){
+  const c=accountContext();
   // 把添加任务的弹窗挪到 body 下,避免受折叠面板的 display:none 影响
   document.querySelectorAll('.autof').forEach(el=>{ if(el.parentElement!==document.body) document.body.appendChild(el); });
-  // 先探测是否需要面板密码
-  try{
-    const r=await fetch('/api/state');
-    if(r.status===401){showLoginGate();return}
-    await r.json();
-  }catch(e){}
+  // 统一走账号冻结的请求包装；不再使用未带账号头的直接 fetch。
+  try{await api('/api/state',{_account:c})}catch(e){if(e.message==='未登录面板')return}
+  if(!isCurrentAccount(c))return;
   renderEmojis();pickAction('reply');pickGrabAct('reply');
-  loadState();loadSettings();loadRules();loadAutos();loadRuleGroups();
-  applyTheme((localStorage.getItem('tgp_theme'))||'dark');  // 主题初始:本地优先,后端在 loadSettings 后对齐
-  setInterval(()=>{loadState();loadLogs()},5000);
+  renderAccounts();loadAccounts();loadState();loadSettings();loadRules();loadAutos();loadRuleGroups();
+  applyTheme((localStorage.getItem('tgp_theme'))||'dark');
+  if(bootstrapTimer)clearInterval(bootstrapTimer);
+  bootstrapTimer=setInterval(()=>{loadState();loadLogs()},5000);
 }
 bootstrap();
 </script>

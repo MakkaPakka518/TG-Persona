@@ -7,6 +7,7 @@ import asyncio
 import base64
 from collections import OrderedDict
 from datetime import datetime, timezone, timedelta
+from contextlib import asynccontextmanager
 import hashlib
 import hmac
 import ipaddress
@@ -63,7 +64,7 @@ def load_backend():
     tree = ast.parse(SOURCE.read_text(encoding='utf-8'), filename=str(SOURCE))
     safe_assignments = {'SESSION_TTL', 'CAPTCHA_TTL', 'AUTH_CACHE_MAX', 'CAPTCHA_CACHE_MAX',
                         'RL_WINDOW', 'RL_MAX', 'RL_BLOCK', 'CAPTCHA_AFTER', '_CAPTCHA_FONT', 'MAX_TEST_IMAGE',
-                        '_AUTO_COLS', 'RETRY_BASE'}
+                        '_AUTO_COLS', 'RETRY_BASE', 'GLOBAL_SETTING_KEYS', '_TZ_FALLBACK'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -82,6 +83,35 @@ def load_backend():
                  TRUSTED_PROXIES=(), _auto_running={}, signin_plans={}, poll_last={}, auto_last_ts={},
                  _session_alerted=False, tg_state={'phase': 'ready', 'me': {'id': 1}, 'err': None},
                  _running={'paused': True}, client=SimpleNamespace(), notify_event=Mock(), send_notify=Mock())
+    aliases = {'db': 'conn', 'auto_tasks': '_auto_running', 'running': '_running',
+               'session_alerted': '_session_alerted', 'cache': '_cache', 'dialog_cache': '_dialog_cache'}
+    dict_fields = {'cache','dialog_cache','running','tg_state','hits_count','last_hit_ts','flock_buf',
+                   'auto_last_ts','signin_plans','poll_last','auto_tasks'}
+    class RuntimeFixture:
+        id = 'default'
+        label = '测试默认账号'
+        directory = Path('/tmp/never-read-backend-fixture')
+        session_path = '/tmp/never-read-backend-fixture/tg'
+        avatar_file = Path('/tmp/never-read-backend-fixture/avatar.jpg')
+        def __getattr__(self, name):
+            key = aliases.get(name, name)
+            default = {} if name in dict_fields else set() if name=='tasks' else False if name in ('handler_registered','session_alerted','closing','closed','stopping') else '' if name=='tg_phone' else None
+            return names.setdefault(key, default)
+        def __setattr__(self, name, value):
+            names[aliases.get(name, name)] = value
+        def check_live(self):
+            return None
+        @asynccontextmanager
+        async def lifecycle(self, **kwargs):
+            yield self
+        def spawn(self, coroutine):
+            return asyncio.create_task(coroutine)
+    class FixtureAccountError(Exception):
+        def __init__(self, status, message):
+            self.status=status
+            super().__init__(message)
+    runtime = RuntimeFixture()
+    names.update(get_runtime=lambda:runtime, AccountError=FixtureAccountError)
     code = compile(ast.fix_missing_locations(ast.Module(body=selected, type_ignores=[])), str(SOURCE), 'exec')
     # 禁止执行器读文件或创建真实数据库，即使未来代码引入意外初始化也立刻失败。
     with patch('builtins.open', side_effect=AssertionError('测试拒绝文件I/O')), \

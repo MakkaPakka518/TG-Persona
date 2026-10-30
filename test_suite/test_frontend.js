@@ -7,6 +7,7 @@ const elements=new Map(),calls=[],intervals=new Map(),readers=[];let intervalId=
 class MockFileReader{
   constructor(){readers.push(this)}
   readAsDataURL(file){this.file=file}
+  readAsText(file){this.file=file}
   abort(){this.aborted=true;if(this.onabort)this.onabort()}
   complete(result){this.result=result;this.onload()}
   fail(){this.onerror()}
@@ -23,13 +24,14 @@ function selectImage(file={type:'image/png',size:128},image=sampleImage){
 }
 function element(id){
   if(!elements.has(id)){
-    const el={innerHTML:'',textContent:'',children:[],style:{},disabled:false,src:'',listeners:{},classList:{add(){},remove(){},toggle(){}},scrollIntoView(){},addEventListener(t,fn){this.listeners[t]=fn},contains(){return true},removeAttribute(k){delete this[k]},appendChild(node){this.children.push(node);return node},replaceChildren(...nodes){this.children=nodes;this.textContent=''}};
+    const classes=new Set();
+    const el={innerHTML:'',textContent:'',children:[],style:{},dataset:{},disabled:false,src:'',listeners:{},attributes:{},querySelector(){return null},querySelectorAll(){return []},getAttribute(k){return this.attributes[k]??null},setAttribute(k,v){this.attributes[k]=String(v)},click(){this.clicked=true},remove(){this.removed=true},classList:{add(...v){v.forEach(k=>classes.add(k))},remove(...v){v.forEach(k=>classes.delete(k))},contains(k){return classes.has(k)},toggle(k,force){const add=force===undefined?!classes.has(k):force;add?classes.add(k):classes.delete(k);return add}},scrollIntoView(){},addEventListener(t,fn){this.listeners[t]=fn},contains(){return true},removeAttribute(k){delete this[k]},appendChild(node){this.children.push(node);return node},replaceChildren(...nodes){this.children=nodes;this.textContent=''}};
     let value='';Object.defineProperty(el,'value',{get(){return value},set(v){value=String(v)}});
     elements.set(id,el);
   }
   return elements.get(id);
 }
-const context=vm.createContext({console,Buffer,Date,JSON,String,Error,Promise,FileReader:MockFileReader,
+const context=vm.createContext({console,Buffer,Date,JSON,String,Error,Promise,URL,FileReader:MockFileReader,
   fetch(){throw new Error('测试禁止真实网络请求')},
   window:{confirm(message){calls.push(['confirm',message]);return false}},
   document:{querySelector:element,getElementById:id=>element('#'+id),body:{style:{}},createElement(){
@@ -49,9 +51,12 @@ function run(s){return vm.runInContext(s,context)}
 function slice(start,end){const a=js.indexOf(start),b=js.indexOf(end,a+start.length);assert(a>=0&&b>a,start);return js.slice(a,b)}
 run(js.split('\n').find(line=>line.startsWith('const $=')));
 run(js.split('\n').find(line=>line.startsWith('const esc=')));
+run(slice('// ---------- 账号请求范围 ----------','async function api('));
+run(slice('// ---------- 安全图标与共享图标库 ----------','let autos=[], editAuto=null, editAutoAccount=null;'));
+run(slice('// ---------- 可视化步骤编辑器 ----------','const autoGroupSel='));
 run(slice('let allGroups=[];','async function loadDialogs'));
 run(slice('function autoDesc(a){','function dupAuto'));
-run('let autos=[],editAuto=null;');
+run('let autos=[],editAuto=null,editAutoAccount=null;');
 run(slice('function editAutoItem(id){','function pickGrabAct(v){'));
 run(slice('function openAutoForm(type){','async function toggleAuto(id){'));
 function prepareSignin(overrides={}){
@@ -345,7 +350,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('备份真实 api 包装通过 mock fetch 展示 409 活动冲突与 401 登录错误',async()=>{
     let gated=0;const requests=[];
     const apiContext=vm.createContext({fetch:async(p,o)=>{requests.push([p,o]);return {status:409,ok:false,json:async()=>({detail:'mock 活动任务中，禁止清理'})}},showLoginGate(){gated++}});
-    vm.runInContext(slice('async function api(','const esc='),apiContext);
+    vm.runInContext(slice('// ---------- 账号请求范围 ----------','const esc='),apiContext);
     await loadMockBackups();context.api=apiContext.api;context.window.confirm=()=>true;await run("cleanupBackups('keep_latest')");
     assert.strictEqual(requests.length,1);assert.strictEqual(requests[0][0],'/api/backups/cleanup');
     assert(element('#backupsResult').textContent.includes('mock 活动任务中'));assert(element('#backupsKeepBtn').disabled&&element('#backupsAllBtn').disabled);
@@ -530,7 +535,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('真实 api 函数的 HTTP 错误使用模拟 fetch 显示原因与登录提示',async()=>{
     let gated=0;
     const apiContext=vm.createContext({fetch:async()=>({status:400,ok:false,json:async()=>({error:'mock HTTP 参数错误'})}),showLoginGate(){gated++}});
-    vm.runInContext(slice('async function api(','const esc='),apiContext);
+    vm.runInContext(slice('// ---------- 账号请求范围 ----------','const esc='),apiContext);
     context.api=apiContext.api;await run('testAIConnection()');
     assert(element('#aiTestResult').textContent.includes('mock HTTP 参数错误'));assert(!element('#aiTestBtn').disabled);
     selectImage();await run('testCaptchaRecognition()');
@@ -546,6 +551,300 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(markup.includes('失败原因'));assert(markup.includes('图片来源'));assert(markup.includes('消息 #102'));
     assert(markup.includes('命令后等待'));assert(markup.includes('0 秒'));assert(markup.includes('复用同一按钮'));
     assert(markup.includes('&lt;img'));assert(!markup.includes('<img'));
+  });
+  // 整份真实前端脚本在独立离线 VM 中运行，避免仅测试复制实现。
+  const fullCalls=[],downloaded=[],timers=[],store=new Map(),sessionStore=new Map();
+  const q=id=>element('#full-'+id);
+  const fullDocument={querySelector:q,querySelectorAll:()=>[],getElementById:id=>q('#'+id),documentElement:{dataset:{}},body:{style:{},appendChild(n){downloaded.push(n);return n}},createElement(){const node=q('node-'+(++nodeId));Object.defineProperty(node,'innerHTML',{get(){return ''},set(){throw new Error('新功能禁止不可信 HTML sink')}});return node}};
+  const app=vm.createContext({console,FileReader:MockFileReader,Blob,URL:Object.assign(class extends URL {},{createObjectURL(blob){fullCalls.push(['blob',blob]);return 'blob:mock-config'},revokeObjectURL(url){fullCalls.push(['revoke',url])}}),document:fullDocument,window:{confirm(message){fullCalls.push(['confirm',message]);return false}},confirm:()=>false,sessionStorage:{getItem:k=>sessionStore.get(k)||null,setItem:(k,v)=>sessionStore.set(k,String(v))},localStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,String(v))},fetch(){throw new Error('离线测试禁止真实网络')},setTimeout(fn){timers.push(fn);return timers.length},clearTimeout(){},setInterval(){return 1},clearInterval(){},btoa:s=>Buffer.from(s,'binary').toString('base64'),unescape,encodeURIComponent});
+  const ex=s=>vm.runInContext(s,app),copy=x=>JSON.parse(JSON.stringify(x));
+  ex(js.replace(/\nbootstrap\(\);\s*$/,''));
+  const realApi=app.api;
+  const mockConfig=(name='纯配置')=>({format:'tg-persona-config',schema_version:1,account:{id:'default',label:'默认'},automations:[{type:'custom',name,target:'@dummy',custom_steps:'[{"t":"send","v":"/start"}]',enabled:1}],rules:[],watched_groups:[]});
+  function useConfig(data=mockConfig()){q('#configFile').files=[{name:'backup.json',type:'application/json',size:1024}];ex('readConfigFile()');readers.at(-1).complete(JSON.stringify(data))}
+  function resetBatch(kind='window'){ex('batchBusy=false;selectedAutoIds=new Set([1,2]);invalidateBatchPreview()');q('#batchKind').value=kind;q('#batchStart').value='08:00';q('#batchEnd').value='12:00';q('#batchEvery').value='1';q('#batchUnit').value='60'}
+  await test('完整脚本可离线初始化，JSON高级折叠且没有新增验证码入口',async()=>{
+    assert(html.includes('<details id="stepAdvanced"'));assert(!html.includes("fillStep('captcha')"));
+    assert(html.includes('人工验证等待'));assert(html.includes('最多 50 步'));
+  });
+  await test('旧步骤所有未知字段、captcha及字符串数值无损往返',async()=>{
+    const old=[{t:'send',v:'/start',extra:{nested:[0,false]}},{t:'wait',v:'0000',legacy:1},{t:'click',v:'',any:true,ai:'legacy-value',extra:'x'},{t:'captcha',v:'4',send:'',other:{x:7}},{t:'until',success:'成功',fail:'失败',timeout:'0',legacy:false},{t:'future',payload:[1,2]},null];
+    app.fixture=old;ex('setVisualSteps(JSON.stringify(fixture));syncStepJSON()');assert.deepStrictEqual(JSON.parse(q('#cSteps').value),old);
+    const titles=q('#stepCards').children.map(c=>c.children[0].textContent);assert(titles.includes('4. 旧版验证步骤（保留）'));
+    ex("fillStep('captcha')");assert.deepStrictEqual(JSON.parse(q('#cSteps').value),old);
+  });
+  await test('步骤排序、删除、零秒及毫秒转换实时写回JSON',async()=>{
+    ex("setVisualSteps('[{\"t\":\"wait\",\"v\":\"1000\"},{\"t\":\"send\",\"v\":\"/start\"}]')");
+    const input=q('#stepCards').children[0].children[1].children[0];input.value='0';input.listeners.input();assert.strictEqual(JSON.parse(q('#cSteps').value)[0].v,'0');
+    input.value='0.125';input.listeners.input();assert.strictEqual(JSON.parse(q('#cSteps').value)[0].v,'125');
+    ex('moveStep(0,1)');assert.strictEqual(JSON.parse(q('#cSteps').value)[1].t,'wait');ex('removeStep(0)');assert.strictEqual(JSON.parse(q('#cSteps').value).length,1);
+    ex('moveStep(0,-1)');assert.strictEqual(JSON.parse(q('#cSteps').value)[0].v,'125');
+  });
+  await test('模板替换有确认，人工验证仅until且等待零不回退默认',async()=>{
+    q('#stepTemplate').value='manual';const before=q('#cSteps').value;ex('applyStepTemplate()');assert.strictEqual(q('#cSteps').value,before);
+    app.window.confirm=()=>true;ex('applyStepTemplate()');const list=JSON.parse(q('#cSteps').value);assert.deepStrictEqual(list.map(s=>s.t),['send','until']);
+    assert(!list.some(s=>s.t==='captcha'));ex('visualSteps[1].timeout=0;syncStepJSON()');assert.strictEqual(JSON.parse(q('#cSteps').value)[1].timeout,0);
+    q('#stepTemplate').value='basic';ex('applyStepTemplate()');assert.deepStrictEqual(JSON.parse(q('#cSteps').value).map(s=>s.t),['send','wait','click','until']);
+  });
+  await test('步骤上限、非法时间与空发送用人话拒绝保存',async()=>{
+    ex("setVisualSteps(JSON.stringify(Array.from({length:50},()=>({t:'wait',v:'0'}))));fillStep('wait')");assert.strictEqual(JSON.parse(q('#cSteps').value).length,50);
+    assert(ex("stepIssue([{t:'wait',v:-1}],true)").includes('等待时间'));assert(ex("stepIssue([{t:'send',v:' '}],true)").includes('发送的消息'));
+    assert.throws(()=>ex("parseSteps(JSON.stringify(Array.from({length:51},()=>({t:'wait',v:0}))))"),/50/);
+    q('#cName').value='零等待';q('#cTarget').value='@dummy';q('#cRetry').value='1';ex("setVisualSteps('[{\"t\":\"wait\",\"v\":0}]');editAuto=null;editAutoAccount=accountContext()");let body;
+    app.api=async(p,o)=>{body=JSON.parse(o.body);return {}};app.loadAutos=async()=>{};await ex("saveAuto('custom')");assert.strictEqual(JSON.parse(body.custom_steps)[0].v,0);
+  });
+  await test('批量全选取消计数跨各任务类型且间隔单位转秒',async()=>{
+    ex("autos=[{id:1,type:'signin'},{id:2,type:'keepalive'},{id:3,type:'custom'}];selectAllAutos(true)");assert.strictEqual(q('#autoSelectedCount').textContent,'已选 3 项');assert(q('#autoSelectAll').checked);
+    ex('toggleAutoSelection(2,false)');assert.strictEqual(q('#autoSelectedCount').textContent,'已选 2 项');assert(q('#autoSelectAll').indeterminate);
+    ex('selectAllAutos(false)');assert.strictEqual(ex('selectedAutoIds.size'),0);
+    resetBatch('interval');for(const [unit,value,seconds] of [['60','2',120],['3600','1.5',5400],['86400','1',86400],['60','0',0]]){q('#batchUnit').value=unit;q('#batchEvery').value=value;assert.strictEqual(ex('buildBatchRequest().patch.poll_interval'),seconds)}
+    q('#batchEvery').value='-1';assert.throws(()=>ex('buildBatchRequest()'),/间隔/);resetBatch();q('#batchStart').value='25:00';assert.throws(()=>ex('buildBatchRequest()'),/时间/);
+  });
+  await test('批量JSON预览再确认提交并安全显示skip',async()=>{
+    resetBatch();let requests=[];app.api=async(p,o)=>{requests.push([p,JSON.parse(o.body)]);return {ok:true,updated:[{id:1,name:'签到'}],updated_count:1,skipped:[{id:2,name:'<img src=x>',reason:'该类型不支持'}]}};
+    await ex('previewBatch()');assert.strictEqual(requests[0][0],'/api/autos/batch');assert.deepStrictEqual(requests[0][1],{ids:[1,2],action:'update',patch:{win_start:'08:00',win_end:'12:00'},preview:true});
+    assert(q('#batchResult').textContent.includes('跳过 <img src=x>'));assert(!q('#batchApplyBtn').disabled);
+    app.window.confirm=()=>false;await ex('applyBatch()');assert.strictEqual(requests.length,1);
+    app.window.confirm=()=>true;await ex('applyBatch()');assert.strictEqual(requests[1][1].preview,false);assert.deepStrictEqual(requests[1][1].patch,requests[0][1].patch);
+  });
+  await test('删除启停需要预览确认，改选项使旧预览失效',async()=>{
+    for(const action of ['delete','enable','disable']){resetBatch(action);let req=[];app.api=async(p,o)=>{req.push(JSON.parse(o.body));return {updated:[{id:1,name:'A'}],skipped:[]}};await ex('previewBatch()');assert.deepStrictEqual(req[0],{ids:[1,2],action,patch:{},preview:true});app.window.confirm=message=>{assert(action!=='delete'||message.includes('不可恢复'));return false};await ex('applyBatch()');assert.strictEqual(req.length,1)}
+    resetBatch();app.api=async()=>({updated:[{id:1}]});await ex('previewBatch()');q('#batchEnd').value='14:00';app.window.confirm=()=>{throw new Error('选项变化不应确认')};await ex('applyBatch()');assert(q('#batchApplyBtn').disabled);
+  });
+  await test('批量失败释放按钮且账号切换忽略旧预览',async()=>{
+    resetBatch();app.api=async()=>{throw new Error('mock批量冲突')};await ex('previewBatch()');assert(q('#batchResult').textContent.includes('mock批量冲突'));assert(!q('#batchPreviewBtn').disabled);
+    let done;app.api=()=>new Promise(r=>done=r);const pending=ex('previewBatch()');ex("selectedAccount='second';accountEpoch++;batchBusy=false;invalidateBatchPreview()");done({updated:[{id:1,name:'旧任务'}]});await pending;assert.strictEqual(ex('batchPreview'),null);assert(!q('#batchResult').textContent.includes('旧任务'));ex("selectedAccount='default';accountEpoch++");
+  });
+  await test('导出全部与选中任务使用Blob下载且无秘密历史字段',async()=>{
+    const data=mockConfig();let req=[];app.api=async(p,o)=>{req.push([p,o]);return data};ex('selectedAutoIds=new Set([1,2])');await ex('exportConfig(false)');await ex('exportConfig(true)');assert.strictEqual(req[0][0],'/api/tasks/export');assert.strictEqual(req[0][1].method,undefined);assert.deepStrictEqual(JSON.parse(req[1][1].body),{ids:[1,2]});
+    const blob=fullCalls.filter(c=>c[0]==='blob').at(-1)[1];assert.deepStrictEqual(JSON.parse(await blob.text()),data);assert(downloaded.at(-1).clicked);assert(downloaded.at(-1).removed);
+    for(const field of ['api_key','api_hash','api_id','phone','session','history','last_at','ai_key']){app.unsafe={...data,[field]:'should-not-leave'};assert.throws(()=>ex('assertSafeConfig(unsafe)'),/拒绝处理/)}
+    const n=downloaded.length;app.api=async()=>({...data,session:'mock-session'});await ex('exportConfig(false)');assert.strictEqual(downloaded.length,n);assert(!q('#configExportAll').disabled);
+  });
+  await test('导入文件大小空文件后缀及格式限制，只读取不上传',async()=>{
+    let sent=0;app.api=async()=>{sent++;return {}};
+    for(const file of [{name:'x.json',size:0},{name:'x.json',size:2*1024*1024+1},{name:'x.txt',size:1}]){q('#configFile').files=[file];ex('readConfigFile()');assert(q('#configPreviewBtn').disabled)}
+    q('#configFile').files=[{name:'x.json',size:2*1024*1024}];ex('readConfigFile()');readers.at(-1).complete(JSON.stringify(mockConfig()));assert(!q('#configPreviewBtn').disabled);assert.strictEqual(sent,0);
+    useConfig({...mockConfig(),phone:'mock-phone'});assert(q('#configPreviewBtn').disabled);assert(!q('#configResult').textContent.includes('mock-phone'));
+    q('#configFile').files=[{name:'x.json',size:16}];ex('readConfigFile()');readers.at(-1).complete('{broken');assert(q('#configResult').textContent.includes('无法读取'));
+  });
+  await test('文件读取竞态与取消：旧文件成功错误不能覆盖新文件',async()=>{
+    q('#configFile').files=[{name:'a.json',size:10}];ex('readConfigFile()');const a=readers.at(-1);
+    useConfig(mockConfig('新文件'));a.complete(JSON.stringify(mockConfig('旧文件')));a.fail();assert.strictEqual(ex('configData.automations[0].name'),'新文件');assert(!q('#configPreviewBtn').disabled);
+    ex('cancelConfigImport()');a.complete(JSON.stringify(mockConfig('迟到')));assert.strictEqual(ex('configData'),null);assert(q('#configApplyBtn').disabled);assert.strictEqual(q('#configMode').value,'merge');
+  });
+  await test('导入默认追加activate false，预览counts警告名称后确认才应用',async()=>{
+    ex('cancelConfigImport()');useConfig();const req=[];app.api=async(p,o)=>{req.push(JSON.parse(o.body));return {ok:true,preview:true,counts:{tasks:1,rules:0,groups:0,duplicates:0},tasks:[{name:'<img src=x>',type:'custom'}],warnings:['mock提醒']}};
+    await ex('previewImport()');assert.strictEqual(req[0].mode,'merge');assert.strictEqual(req[0].activate,false);assert.strictEqual(req[0].include_rules,true);assert.strictEqual(req[0].include_groups,true);assert.strictEqual(req[0].preview,true);
+    assert(q('#configResult').textContent.includes('<img src=x>'));assert(q('#configResult').textContent.includes('mock提醒'));app.window.confirm=()=>false;await ex('applyImport()');assert.strictEqual(req.length,1);
+    app.window.confirm=()=>true;app.loadRules=app.loadRuleGroups=app.loadDialogs=()=>{};await ex('applyImport()');assert.strictEqual(req[1].preview,false);assert.deepStrictEqual({...req[1],preview:true},req[0]);
+  });
+  await test('覆盖导入两次强确认且取消无写入，activate true仅显式勾选',async()=>{
+    ex('cancelConfigImport()');useConfig();q('#configMode').value='replace';q('#configActivate').checked=true;ex('invalidateImportPreview()');const req=[];app.api=async(p,o)=>{req.push(JSON.parse(o.body));return {counts:{tasks:1},tasks:[],warnings:[]}};await ex('previewImport()');assert.strictEqual(req[0].activate,true);
+    let confirmations=0;app.window.confirm=message=>{confirmations++;assert(message.includes('恢复')||message.includes('执行'));return confirmations===1};await ex('applyImport()');assert.strictEqual(confirmations,2);assert.strictEqual(req.length,1);
+    app.window.confirm=()=>true;await ex('applyImport()');assert.strictEqual(req[1].mode,'replace');assert.strictEqual(req[1].preview,false);
+  });
+  await test('导入预览换文件换选项取消及换账号全部忽略旧结果',async()=>{
+    for(const change of ['file','mode','cancel','account']){
+      ex('cancelConfigImport()');useConfig();let resolve;app.api=()=>new Promise(r=>resolve=r);const pending=ex('previewImport()');
+      if(change==='file')useConfig(mockConfig('新版'));if(change==='mode'){q('#configMode').value='replace';ex('invalidateImportPreview()')};if(change==='cancel')ex('cancelConfigImport()');if(change==='account')ex("selectedAccount='new';accountEpoch++;cancelConfigImport()");
+      resolve({counts:{tasks:9},tasks:[{name:'迟到旧预览'}],warnings:[]});await pending;assert.strictEqual(ex('configPreview'),null);assert(!q('#configResult').textContent.includes('迟到旧预览'));assert(q('#configApplyBtn').disabled);assert.strictEqual(ex('configBusy'),false);if(change==='account')ex("selectedAccount='default';accountEpoch++");
+    }
+    useConfig();app.api=async()=>{throw new Error('mock导入错误')};await ex('previewImport()');assert(!q('#configPreviewBtn').disabled);assert(q('#configResult').textContent.includes('mock导入错误'));
+  });
+  await test('真实API对账号范围加头，面板账户管理更新备份不依赖选择',async()=>{
+    ex("selectedAccount='profile-a';accountEpoch++");const req=[];app.fetch=async(p,o)=>{req.push([p,o]);return {ok:true,status:200,json:async()=>({ok:true})}};
+    for(const route of ['/api/autos','/api/settings','/api/rules','/api/watched','/api/dialogs','/api/logs','/api/state','/api/tg/send_code','/api/tasks/import'])await realApi(route,{method:'POST',body:'{}',headers:{Custom:'test'}});
+    for(const [,o] of req){assert.strictEqual(o.headers['X-Account-ID'],'profile-a');assert.strictEqual(o.headers.Custom,'test');assert(!('_account' in o))}
+    req.length=0;for(const route of ['/api/panel/login','/api/panel/password','/api/accounts','/api/accounts/other','/api/version?check=1','/api/update','/api/backups/cleanup'])await realApi(route);for(const [,o] of req)assert.strictEqual(o.headers['X-Account-ID'],undefined);
+    ex("selectedAccount='default';accountEpoch++");
+  });
+  await test('请求冻结头部，账号A→B→A仍拒绝旧响应与旧错误且不弹toast',async()=>{
+    const before=fullCalls.filter(c=>c[0]==='confirm').length;ex("selectedAccount='a';accountEpoch++");let resolve,options;app.fetch=(p,o)=>{options=o;return new Promise(r=>resolve=r)};const pending=realApi('/api/autos/42',{method:'PUT',body:'{"name":"a"}'}).catch(e=>e);
+    ex("selectedAccount='b';accountEpoch++;selectedAccount='a';accountEpoch++");resolve({ok:true,status:200,json:async()=>({name:'旧账号'})});const error=await pending;assert(error.staleAccount);assert.strictEqual(error.message,'');assert.strictEqual(options.headers['X-Account-ID'],'a');assert.strictEqual(fullCalls.filter(c=>c[0]==='confirm').length,before);
+    let reject;app.fetch=()=>new Promise((r,j)=>reject=j);const failed=realApi('/api/state').catch(e=>e);ex("selectedAccount='default';accountEpoch++");reject(new Error('旧账号网络失败'));assert((await failed).staleAccount);
+  });
+  await test('缓存清理含任务群规则日志勾选表单和凭证，不在localStorage保存秘密',async()=>{
+    ex("autos=[{id:42,type:'custom'}];allGroups=[{chat_id:1}];allRules=[{id:42}];watchedGroups=[{chat_id:1}];selectedAutoIds=new Set([42]);editAuto={id:42};editingRule=42;tgPhase='ready';state={tg:{me:{name:'旧client'}},logged_in:true};logQ='old';ruleGroupSel.add('1');autoGroupSel.grabcodes.add('1')");
+    q('#logList').innerHTML='旧日志';q('#sAiKey').value='mock-secret';q('#tgCard').innerHTML='旧手机号';ex('resetAccountCaches()');
+    for(const name of ['autos','allGroups','allRules','watchedGroups'])assert.strictEqual(ex(name+'.length'),0);assert.strictEqual(ex('selectedAutoIds.size'),0);assert.strictEqual(ex('editAuto'),null);assert.strictEqual(ex('editingRule'),null);assert.strictEqual(ex('state.logged_in'),false);assert.strictEqual(q('#sAiKey').value,'');assert.strictEqual(q('#cSteps').value,'[]');assert.strictEqual(ex('logQ'),'');assert.strictEqual(q('#autoSelectedCount').textContent,'已选 0 项');
+    const loaders=['loadState','loadSettings','loadAutos','loadRules','loadRuleGroups','loadDialogs','loadLogs','renderTgCard'];for(const name of loaders)app[name]=()=>{};
+    ex("switchAccount('account-new')");assert.strictEqual(store.get('tgp_selected_id'),'account-new');assert(![...store.keys()].some(k=>/key|phone|session/.test(k)));
+  });
+  await test('状态、任务缓存和TG表单过期响应不覆盖当前账号',async()=>{
+    const clean=vm.createContext({...app,fetch(){throw new Error('禁止网络')},localStorage:{getItem:()=>null,setItem(){}},document:fullDocument,window:{confirm:()=>false},setTimeout(){},clearTimeout(){}});vm.runInContext(js.replace(/\nbootstrap\(\);\s*$/,''),clean);const cx=s=>vm.runInContext(s,clean);
+    for(const fn of ['loadState','loadAutos','renderTgCard']){let done;clean.api=()=>new Promise(r=>done=r);const pending=cx(fn+'()');cx("selectedAccount='other';accountEpoch++;state={tg:{},logged_in:false};autos=[]");done(fn==='loadState'?{tg:{me:{name:'迟到client'}},logged_in:true,stats:{}}:fn==='loadAutos'?{autos:[{id:42,name:'迟到任务'}]}:{api_id:123456,api_hash:'mock-old-hash'});await pending;assert.strictEqual(cx('state.logged_in'),false);assert.strictEqual(cx('autos.length'),0);assert(!q('#tgCard').innerHTML.includes('mock-old-hash'));cx("selectedAccount='default';accountEpoch++")}
+  });
+  await test('账号标签纯文本，默认不可删，其他账号两次确认，管理错误恢复按钮',async()=>{
+    ex("accounts=[{id:'default',label:'<img src=x>',logged_in:false},{id:'work',label:'工作',logged_in:true}];selectedAccount='default';renderAccounts()");assert.strictEqual(q('#accountTop').children[0].textContent,'<img src=x> · 未登录');assert(q('#accountDelete').disabled);
+    let sent=0;app.api=async()=>{sent++;return {}};await ex("manageAccount('delete')");assert.strictEqual(sent,0);
+    ex("selectedAccount='work'");let prompts=0;app.window.confirm=()=>++prompts===1;await ex("manageAccount('delete')");assert.strictEqual(prompts,2);assert.strictEqual(sent,0);
+    q('#accountLabel').value='重命名';app.api=async()=>{throw new Error('mock账号冲突')};await ex("manageAccount('rename')");assert(!q('#accountRename').disabled);assert(q('#accountResult').textContent.includes('mock账号冲突'));
+  });
+  await test('结构化detail及Pydantic数组提取人话，不输出input或对象',async()=>{
+    for(const [detail,want] of [[{message:'当前账号任务不存在',ids:[42],input:'mock-secret'},'当前账号任务不存在'],[[{msg:'Field required',input:'mock-secret',loc:['body','name']}],'请补齐必填项'],[[{msg:'Input should be a valid integer',input:'mock-secret'}],'请填写有效的整数']]){
+      app.fetch=async()=>({ok:false,status:422,json:async()=>({detail})});await assert.rejects(()=>realApi('/api/autos/batch'),e=>e.message.includes(want)&&!e.message.includes('mock-secret')&&!e.message.includes('[object Object]'));
+    }
+  });
+  await test('旧账号同ID任务保存不写新账号，已发PUT不关新表单',async()=>{
+    ex("selectedAccount='a';accountEpoch++;editAuto={id:42,type:'custom',enabled:1};editAutoAccount=accountContext()");q('#cName').value='任务A';q('#cTarget').value='@dummy';q('#cRetry').value='1';ex("setVisualSteps('[{\"t\":\"wait\",\"v\":0}]')");let done,request;
+    app.api=(p,o)=>{request=[p,o];return new Promise(r=>done=r)};const pending=ex("saveAuto('custom')");assert.strictEqual(request[0],'/api/autos/42');assert.strictEqual(request[1]._account.id,'a');
+    ex("selectedAccount='b';accountEpoch++;editAuto={id:42,type:'custom',enabled:0};editAutoAccount=accountContext()");q('#cName').value='任务B';done({ok:true});await pending;assert.strictEqual(q('#cName').value,'任务B');assert.strictEqual(ex('editAuto.enabled'),0);
+    ex("editAutoAccount={id:'a',epoch:0}");let sent=0;app.api=async()=>{sent++;return {}};await ex("saveAuto('custom')");assert.strictEqual(sent,0);
+  });
+  await test('文件读取期间修改导入模式保留最新文件，需重新预览',async()=>{
+    ex('cancelConfigImport()');q('#configFile').files=[{name:'latest.json',size:128}];ex('readConfigFile()');const reader=readers.at(-1);q('#configMode').value='replace';ex('invalidateImportPreview()');reader.complete(JSON.stringify(mockConfig('最新配置')));
+    assert.strictEqual(ex('configData.automations[0].name'),'最新配置');assert.strictEqual(ex('buildImportRequest().mode'),'replace');assert(!q('#configPreviewBtn').disabled);assert(q('#configApplyBtn').disabled);
+  });
+  await test('签到窗口时区改变后旧批量预览必须重新确认',async()=>{
+    resetBatch();q('#sTz').value='UTC';let sent=0;app.api=async()=>{sent++;return {updated:[{id:1,name:'窗口任务'}],skipped:[]}};await ex('previewBatch()');assert(q('#batchResult').textContent.includes('时区：UTC'));assert(q('#batchResult').textContent.includes('签到窗口 08:00–12:00'));
+    q('#sTz').value='Asia/Shanghai';app.window.confirm=()=>{throw new Error('改变时区不得提交旧预览')};await ex('applyBatch()');assert.strictEqual(sent,1);assert(q('#batchApplyBtn').disabled);
+  });
+  await test('头像冻结账号查询参数无token，缓存自定义兜底及旧图片隔离',async()=>{
+    const avatar=q('avatar-fixture');avatar.querySelector=()=>avatar.children.find(n=>!!n.src)||null;app.avatarFixture=avatar;
+    ex("selectedAccount='工作 /a';accountEpoch++;state={logged_in:true,tg:{me:{id:7}}};setAvatar(avatarFixture,'','Alpha')");const first=avatar.children[0];assert.strictEqual(first.src,'/avatar?account_id='+encodeURIComponent('工作 /a'));assert(!first.src.includes('token'));
+    ex("setAvatar(avatarFixture,'','Alpha')");assert.strictEqual(avatar.children[0],first);
+    ex("setAvatar(avatarFixture,'https://example.invalid/avatar','Beta')");const custom=avatar.children[0];custom.onerror();assert.strictEqual(custom.src,'/avatar?account_id='+encodeURIComponent('工作 /a'));custom.onerror();assert.strictEqual(avatar.children[0].textContent,'B');
+    ex("setAvatar(avatarFixture,'https://example.invalid/old','Old')");const old=avatar.children[0];ex("selectedAccount='second';accountEpoch++;setAvatar(avatarFixture,'','New')");const current=avatar.children[0];old.onerror();assert.strictEqual(avatar.children[0],current);assert.strictEqual(current.src,'/avatar?account_id=second');
+    assert(html.includes('任务消息或规则文本可能包含你自行填写的敏感内容'));assert(html.includes('请妥善保存备份文件，勿公开分享'));
+  });
+  // 新增 UI / 图标 / 统一签到时间回归：全部使用 mock，不联网获取 JSON 或图片。
+  await test('旧签到图标缺省空串，编辑回填，新建关闭取消全部清空',async()=>{
+    ex("selectedAccount='default';accountEpoch++;signinGlobalDirty=false;signinGlobal={enabled:false,start:'00:05',end:'00:41'}");
+    app.iconTask={id:42,type:'signin',name:'图标任务',target:'@dummy',command:'/sign',win_start:'08:00',win_end:'12:00',enabled:0};
+    ex('autos=[iconTask];editAutoItem(42)');assert.strictEqual(q('#sIconUrl').value,'');
+    app.iconTask.icon_url='https://dummy.invalid/icon.png';ex('editAutoItem(42)');assert.strictEqual(q('#sIconUrl').value,app.iconTask.icon_url);
+    ex("closeAutoForm('signin');openAutoForm('signin')");assert.strictEqual(q('#sIconUrl').value,'');assert.strictEqual(q('#sIconPreview').children[0].textContent,'?');
+  });
+  await test('新增与编辑签到JSON独立保存安全图标URL并保持禁用状态',async()=>{
+    let requests=[];app.api=async(p,o)=>{requests.push([p,o]);return {}};app.loadAutos=async()=>{};
+    q('#sName').value='图标签到';q('#sTarget').value='@dummy';q('#sCmd').value='/sign';await ex("saveAuto('signin')");assert.strictEqual(JSON.parse(requests[0][1].body).icon_url,'');
+    app.iconTask.icon_url='https://dummy.invalid/picture.png';ex('autos=[iconTask];editAutoItem(42)');q('#sIconUrl').value='https://dummy.invalid/new.png';await ex("saveAuto('signin')");
+    assert.strictEqual(requests[1][0],'/api/autos/42');assert.strictEqual(requests[1][1].method,'PUT');assert.strictEqual(requests[1][1]._account.id,'default');assert.strictEqual(JSON.parse(requests[1][1].body).icon_url,'https://dummy.invalid/new.png');assert.strictEqual(JSON.parse(requests[1][1].body).enabled,0);
+  });
+  await test('脚本数据相对URL凭据控制字符及HTML注入图标全部拒绝保存',async()=>{
+    let sent=0;app.api=async()=>{sent++;return {}};
+    for(const url of ['javascript:alert(1)','data:image/svg+xml,<svg/>','//dummy.invalid/a','/image.png','https://user:pass@dummy.invalid/a','https://dummy.invalid/\nscript','https://dummy.invalid/\" onerror=alert(1)','https://dummy.invalid/<svg>','https://dummy.invalid/\\evil']){
+      ex("cancelAutoEdit('signin');openAutoForm('signin')");q('#sName').value='测试';q('#sTarget').value='@dummy';q('#sCmd').value='/sign';q('#sIconUrl').value=url;await ex("saveAuto('signin')");assert.strictEqual(ex('safeHttpUrl('+JSON.stringify(url)+')'),'');
+    }
+    assert.strictEqual(sent,0);assert.strictEqual(ex("safeHttpUrl(' HTTP://dummy.invalid/a.png ')"),'HTTP://dummy.invalid/a.png');
+  });
+  await test('图标img只赋安全返回URL，lazy加载且失败用安全首字母兜底',async()=>{
+    const name='<img src=x onerror=bad()>';app.iconName=name;app.fixtureIcon=ex("makeTaskIcon(iconName,'https://dummy.invalid/a%22.png')");
+    const box=app.fixtureIcon,img=box.children[0];assert.strictEqual(img.src,'https://dummy.invalid/a%22.png');assert.strictEqual(img.loading,'lazy');assert.strictEqual(img.referrerPolicy,'no-referrer');assert.strictEqual(img.alt,name);assert(!img.onclick);
+    img.listeners.error();assert.strictEqual(box.children.length,0);assert.strictEqual(box.textContent,'<');
+    const bad=ex("makeTaskIcon('Alpha','javascript:alert(1)')");assert.strictEqual(bad.textContent,'A');assert.strictEqual(bad.children.length,0);
+  });
+  await test('图标选择必须显式加载，不自动请求JSON，名称URL只通过DOM赋值',async()=>{
+    let sent=0;app.api=async()=>{sent++;return {libraries:[{id:'lib1',name:'默认',enabled:true}],icons:[{name:"');bad();//<img>",url:'https://dummy.invalid/a.png',library_id:'lib1'}],errors:[]}};
+    ex("cancelAutoEdit('signin');openAutoForm('signin');iconsLoaded=false;iconItems=[];openIconPicker()");assert.strictEqual(sent,0);await ex('loadIcons()');assert.strictEqual(sent,1);
+    const choice=q('#iconGrid').children[0];assert.strictEqual(choice.children[1].textContent,"');bad();//<img>");assert(!choice.onclick);
+    choice.listeners.click();assert.strictEqual(q('#sIconUrl').value,'https://dummy.invalid/a.png');assert(!q('#iconPicker').classList.contains('show'));assert(q('#af-signin').classList.contains('show'));
+  });
+  await test('搜索与分页先最多80项，更多累加80，重新搜索重置上限',async()=>{
+    app.iconsFixture={libraries:[{id:'l',name:'搜索库',enabled:true}],icons:Array.from({length:191},(_,i)=>({name:'图标 '+i,url:'https://dummy.invalid/'+i+'.png',library_id:'l'})),errors:[]};
+    ex('acceptIcons(iconsFixture);openIconPicker()');assert.strictEqual(q('#iconGrid').children.length,80);assert.strictEqual(q('#iconsMore').style.display,'block');ex('moreIcons()');assert.strictEqual(q('#iconGrid').children.length,160);
+    q('#iconSearch').value='图标 190';ex('resetIconSearch()');assert.strictEqual(q('#iconGrid').children.length,1);assert.strictEqual(ex('iconsLimit'),80);q('#iconSearch').value='搜索库';ex('resetIconSearch()');assert.strictEqual(q('#iconGrid').children.length,80);
+  });
+  await test('恶意图标URL禁选并首字母回退，禁用库不出现在选择列表',async()=>{
+    app.iconsFixture={libraries:[{id:'off',enabled:false},{id:'on',enabled:true}],icons:[{name:'禁用',url:'https://dummy.invalid/a.png',library_id:'off'},{name:'危险',url:'javascript:alert(1)',library_id:'on'}],errors:[]};ex('acceptIcons(iconsFixture)');q('#iconSearch').value='';ex('resetIconSearch()');
+    assert.strictEqual(q('#iconGrid').children.length,1);const b=q('#iconGrid').children[0];assert(b.disabled);assert.strictEqual(b.children[0].textContent,'危');const before=q('#sIconUrl').value;b.listeners.click();assert.strictEqual(q('#sIconUrl').value,before);
+  });
+  await test('共享库名称URL及错误来源安全文本渲染，不拼进onclick',async()=>{
+    const malicious="<img src=x onerror=bad()>');bad();//";app.iconsFixture={libraries:[{id:'bad /id',name:malicious,url:malicious,enabled:true,builtin:false}],icons:[],errors:[{library_id:'bad /id',message:malicious}]};ex('acceptIcons(iconsFixture)');
+    const row=q('#iconLibrariesList').children[0];assert(row.children[0].textContent.includes(malicious));assert.strictEqual(row.children[1].textContent,malicious);assert(q('#iconLibraryErrors').textContent.includes(malicious+'：'+malicious));assert.strictEqual(q('#iconPickerErrors').textContent,q('#iconLibraryErrors').textContent);
+    for(const b of row.children[2].children)assert(!b.onclick);
+  });
+  await test('共享图标库新增参数持久化，仅名称URL启用字段且安全库URL校验',async()=>{
+    let requests=[];app.api=async(p,o)=>{requests.push([p,o]);return p==='/api/icon-libraries'&&!o?{libraries:[{id:'external',name:'共享',url:'https://dummy.invalid/icons.json',enabled:true,builtin:false}]}:{ok:true,library:{id:'external'}}};
+    q('#iconLibraryName').value=' ';q('#iconLibraryUrl').value='https://dummy.invalid/icons.json';await ex('addIconLibrary()');assert.strictEqual(requests[0][0],'/api/icon-libraries');assert.strictEqual(requests[0][1].method,'POST');assert.deepStrictEqual(JSON.parse(requests[0][1].body),{name:'',url:'https://dummy.invalid/icons.json',enabled:true});assert.strictEqual(requests[1][0],'/api/icon-libraries');assert.strictEqual(ex('iconsLoaded'),false);
+    q('#iconLibraryUrl').value='javascript:alert(1)';await ex('addIconLibrary()');assert.strictEqual(requests.length,2);
+  });
+  await test('共享图标库PUT启停和可选名称、DELETE编码ID，内置库不能删',async()=>{
+    let requests=[];app.api=async(p,o)=>{requests.push([p,o]);return !o?{libraries:[{id:'external /id',enabled:true,builtin:false},{id:'builtin',name:'TFEL',enabled:true,builtin:true}]}:{ok:true}};
+    await ex("updateIconLibrary('external /id',{enabled:false,name:'新名称',unsafe:'ignored'})");assert.strictEqual(requests[0][0],'/api/icon-libraries/external%20%2Fid');assert.strictEqual(requests[0][1].method,'PUT');assert.deepStrictEqual(JSON.parse(requests[0][1].body),{enabled:false,name:'新名称'});
+    const before=requests.length;await ex("deleteIconLibrary('builtin')");assert.strictEqual(requests.length,before);const builtin=q('#iconLibrariesList').children[1];assert.strictEqual(builtin.children[2].children.length,2);
+    app.window.confirm=()=>true;await ex("deleteIconLibrary('external /id')");assert.strictEqual(requests[before][1].method,'DELETE');assert.strictEqual(requests[before][0],'/api/icon-libraries/external%20%2Fid');assert(!('body' in requests[before][1]));
+  });
+  await test('图标刷新可按id或全部，返回错误保留来源，失败按钮恢复',async()=>{
+    let requests=[];app.api=async(p,o)=>{requests.push([p,o]);return {libraries:[{id:'l',name:'失败来源',enabled:true}],icons:[],errors:[{library_id:'l',message:'<script>timeout</script>'}]}};
+    await ex("refreshIcons('l')");assert.strictEqual(requests[0][0],'/api/icons/refresh');assert.strictEqual(requests[0][1].method,'POST');assert.deepStrictEqual(JSON.parse(requests[0][1].body),{id:'l'});assert(q('#iconLibraryErrors').textContent.includes('失败来源：<script>timeout</script>'));
+    await ex('refreshIcons()');assert.deepStrictEqual(JSON.parse(requests[1][1].body),{});
+    app.api=async()=>{throw new Error('<img>mock failure')};await ex('loadIconLibraries()');assert(q('#iconLibrariesResult').textContent.includes('<img>mock failure'));assert(!q('#iconLibrariesLoad').disabled);await ex('loadIcons()');assert(q('#iconPickerStatus').textContent.includes('<img>mock failure'));assert(!q('#iconsLoad').disabled);
+  });
+  await test('共享图标接口不带账号头，JSON仅显式按钮加载且无五秒图标轮询',async()=>{
+    let requests=[];app.fetch=async(p,o)=>{requests.push([p,o]);return {ok:true,status:200,json:async()=>({})}};
+    for(const path of ['/api/icons','/api/icon-libraries','/api/icon-libraries/a','/api/icons/refresh'])await realApi(path);assert(requests.every(r=>!r[1].headers['X-Account-ID']));
+    const intervals=js.match(/setInterval\([\s\S]*?\);/g)||[];assert(intervals.every(s=>!/(loadIcons|loadIconLibraries|refreshIcons)/.test(s)));assert(html.includes('https://emby-icon.vercel.app/TFEL-Emby.json'));
+  });
+  await test('统一签到默认禁用00:05–00:41且字段收起，旧设置缺失兼容',async()=>{
+    ex('signinGlobalDirty=false;acceptSigninGlobalSettings({})');assert.strictEqual(ex('signinGlobal.enabled'),false);assert.strictEqual(q('#signinGlobalStart').value,'00:05');assert.strictEqual(q('#signinGlobalEnd').value,'00:41');assert(!q('#signinGlobalEnabled').checked);
+    assert(/id="signinGlobalFields" class="hidden"/.test(html));const button=q('global-toggle');app.globalButton=button;ex('toggleSigninGlobalFields(globalButton)');assert.strictEqual(button.getAttribute('aria-expanded'),'true');ex('toggleSigninGlobalFields(globalButton)');assert.strictEqual(button.getAttribute('aria-expanded'),'false');
+  });
+  await test('统一设置独立POST只保存三个keys，不连带AI或其他设置',async()=>{
+    ex("selectedAccount='default';accountEpoch++;signinGlobalDirty=true;signinGlobalBusy=false");q('#signinGlobalEnabled').checked=true;q('#signinGlobalStart').value='00:05';q('#signinGlobalEnd').value='00:41';q('#sAiKey').value='mock-unsaved-key';q('#sAiBase').value='mock-unsaved-base';let requests=[];
+    app.api=async(p,o)=>{requests.push([p,o]);return {ok:true}};app.loadAutos=async()=>{};await ex('saveSigninGlobal()');assert.strictEqual(requests.length,1);assert.strictEqual(requests[0][0],'/api/settings');assert.strictEqual(requests[0][1].method,'POST');assert.deepStrictEqual(JSON.parse(requests[0][1].body),{signin_global_enabled:'1',signin_global_start:'00:05',signin_global_end:'00:41'});assert.strictEqual(q('#sAiKey').value,'mock-unsaved-key');assert.strictEqual(q('#sAiBase').value,'mock-unsaved-base');assert.strictEqual(ex('signinGlobal.enabled'),true);assert(!q('#signinGlobalSave').disabled);
+  });
+  await test('统一设置修改及远端变更均清旧批量预览且提示单任务暂不生效',async()=>{
+    ex('batchPreview={old:true};batchSeq=100;markSigninGlobalDirty()');assert.strictEqual(ex('batchPreview'),null);assert(q('#batchApplyBtn').disabled);assert.strictEqual(ex('batchSeq'),101);
+    ex("batchPreview={old:true};signinGlobalDirty=false;acceptSigninGlobalSettings({signin_global_enabled:'1',signin_global_start:'01:00',signin_global_end:'01:30'})");assert.strictEqual(ex('batchPreview'),null);assert(ex("describeBatchPatch({win_start:'08:00',win_end:'12:00'})").includes('此修改暂不生效'));
+  });
+  await test('统一时间启用禁用切换保留原任务窗口，摘要使用有效时间与兼容缺字段',async()=>{
+    app.iconTask.win_start='08:00';app.iconTask.win_end='12:00';ex('autos=[iconTask];editAutoItem(42)');assert(q('#sWinStart').disabled&&q('#sWinEnd').disabled);assert.strictEqual(q('#sWinStart').value,'08:00');assert.strictEqual(q('#sWinEnd').value,'12:00');assert(q('#sWindowHint').textContent.includes('原窗口保留但不生效'));
+    assert(ex('autoDesc(iconTask)').includes('跟随统一 01:00–01:30'));app.windowTask={...app.iconTask,uses_global_window:true,effective_win_start:'02:00',effective_win_end:'02:10'};assert.strictEqual(ex('autoWindow(windowTask)'),'跟随统一 02:00–02:10');
+    ex("signinGlobalDirty=false;acceptSigninGlobalSettings({signin_global_enabled:'0'});syncSigninWindow()");assert(!q('#sWinStart').disabled);assert.strictEqual(q('#sWinStart').value,'08:00');assert(ex('autoWindow(iconTask)').includes('单任务窗口 08:00–12:00'));
+  });
+  await test('统一时间非法HH:MM不请求，保存失败恢复按钮且不强制run或停任务',async()=>{
+    let sent=0;app.api=async()=>{sent++;throw new Error('<script>mock save failure')};q('#signinGlobalStart').value='24:00';await ex('saveSigninGlobal()');assert.strictEqual(sent,0);
+    q('#signinGlobalStart').value='00:05';q('#signinGlobalEnd').value='00:41';await ex('saveSigninGlobal()');assert.strictEqual(sent,1);assert(!q('#signinGlobalSave').disabled);assert(q('#signinGlobalResult').textContent.includes('<script>mock save failure'));
+    const save=slice('async function saveSigninGlobal(){','function followsGlobalWindow');assert(!/\/run|\/toggle|\/api\/tg|\/api\/ai/.test(save));
+  });
+  await test('任务卡片默认收起，紧凑头部含选择图标名称状态执行箭头，底部保留管理',async()=>{
+    ex("selectedAccount='default';accountEpoch++;openedAutoIds.clear();accounts=[{id:'default',label:'当前账号'}]");app.cardTask={id:7,type:'signin',name:'签到卡片',target:'@dummy',command:'/sign',win_start:'08:00',win_end:'12:00',enabled:1,last_result:{ts:1,ok:true,reply:'完成',detail:'测试详情'}};ex('autos=[cardTask];renderAutoList(\'signin\')');
+    const markup=q('#aListSign').innerHTML;for(const token of ['data-auto-action="select"','data-task-icon="7"','签到卡片','已启用','data-auto-action="run"','data-auto-action="expand"','aria-expanded="false"','data-auto-action="toggle"','data-auto-action="edit"','data-auto-action="duplicate"','data-auto-action="delete"'])assert(markup.includes(token));
+    assert(!markup.includes('auto-details'));assert(!markup.includes('测试详情'));assert(!markup.includes('命令后'));assert(!markup.includes('onclick='));assert.strictEqual(ex('openedAutoIds.size'),0);
+  });
+  await test('展开显示原配置当前账号有效窗口上次执行结果，错误回复详情全部转义',async()=>{
+    const attack='<img src=x onerror=bad()>';app.cardTask.last_result={ts:1710000000,ok:0,reply:attack,detail:{error:attack}};ex('toggleAutoExpanded(7)');const markup=q('#aListSign').innerHTML;
+    for(const token of ['aria-expanded="true"','命令后','归属当前账号：当前账号（default）','有效窗口：单任务窗口 08:00–12:00','上次执行：','失败','实际回复：','详情：','&lt;img'])assert(markup.includes(token));assert(!markup.includes('<img src=x'));ex('toggleAutoExpanded(7)');assert(!q('#aListSign').innerHTML.includes('auto-details'));
+  });
+  await test('缺上次结果有效窗口与全局标记的旧任务兼容，成功0/1与字符串安全',async()=>{
+    app.cardTask.last_result=null;ex('toggleAutoExpanded(7)');assert(q('#aListSign').innerHTML.includes('上次执行结果：暂无记录'));
+    for(const ok of [true,1,'1']){app.cardTask.last_result={ts:'<script>time</script>',ok,reply:'done',detail:null};ex("renderAutoList('signin')");assert(q('#aListSign').innerHTML.includes('成功'));assert(q('#aListSign').innerHTML.includes('&lt;script&gt;time'));assert(!q('#aListSign').innerHTML.includes('<script>time'))}
+    ex('autos=[{...cardTask,id:"<img>"}];renderAutoList(\'signin\')');assert(!q('#aListSign').innerHTML.includes('auto-card'));
+  });
+  await test('同账号列表刷新保留打开任务，删除后清理，不跨账号复用taskID',async()=>{
+    ex(slice('async function loadAutos(){','function renderAutoList(type){'));app.api=async()=>({autos:[app.cardTask,{id:8,type:'custom',name:'第二任务',target:'@dummy',custom_steps:'[]'}]});ex('openedAutoIds=new Set([7,8,999])');await ex('loadAutos()');assert.deepStrictEqual(copy(ex('[...openedAutoIds]')),[7,8]);assert(q('#aListSign').innerHTML.includes('aria-expanded="true"'));
+    app.api=async()=>({autos:[{...app.cardTask,id:9}]});await ex('loadAutos()');assert.strictEqual(ex('openedAutoIds.size'),0);assert(q('#aListSign').innerHTML.includes('aria-expanded="false"'));
+    ex('openedAutoIds.add(9)');app.loadAutos=async()=>{};ex("switchAccount('other-account')");assert.strictEqual(ex('openedAutoIds.size'),0);assert.strictEqual(ex('autos.length'),0);ex('autos=[{...cardTask,id:9}];renderAutoList(\'signin\')');assert(!q('#aListSign').innerHTML.includes('auto-details'));
+  });
+  await test('旧任务DOM事件冻结账号，A到B同taskID不能编辑执行或删除B',async()=>{
+    ex("selectedAccount='a';accountEpoch++;autos=[cardTask];renderAutoList('signin')");const oldHandler=q('#aListSign').onclick;app.loadAutos=async()=>{};ex("switchAccount('b');autos=[{...cardTask,name:'账号B任务'}];renderAutoList('signin')");
+    let sent=0;app.api=async()=>{sent++;return {}};for(const action of ['edit','run','toggle','delete','duplicate','select','expand'])oldHandler({target:{closest:()=>({dataset:{autoAction:action,autoId:'7'},checked:true})}});
+    assert.strictEqual(ex('editAuto'),null);assert.strictEqual(ex('openedAutoIds.size'),0);assert.strictEqual(ex('selectedAutoIds.size'),0);assert.strictEqual(sent,0);
+    q('#aListSign').onclick({target:{closest:()=>({dataset:{autoAction:'edit',autoId:'7'}})}});assert.strictEqual(q('#sName').value,'账号B任务');assert.strictEqual(ex('editAutoAccount.id'),'b');
+  });
+  await test('图标选择换账号清弹窗，旧选择闭包不能改同ID新任务表单',async()=>{
+    app.iconsFixture={libraries:[{id:'l',enabled:true}],icons:[{name:'icon',url:'https://dummy.invalid/old.png',library_id:'l'}],errors:[]};ex('acceptIcons(iconsFixture);openIconPicker()');q('#iconSearch').value='';ex('resetIconSearch()');const old=q('#iconGrid').children[0];
+    ex("switchAccount('c');autos=[cardTask];editAutoItem(7)");q('#sIconUrl').value='https://dummy.invalid/current.png';old.listeners.click();assert.strictEqual(q('#sIconUrl').value,'https://dummy.invalid/current.png');assert(!q('#iconPicker').classList.contains('show'));assert.strictEqual(ex('iconPickerAccount'),null);
+  });
+  await test('共享库修改后旧图标选择失效，重新加载再选择',async()=>{
+    ex('openIconPicker();acceptIcons(iconsFixture)');const old=q('#iconGrid').children[0];const before=q('#sIconUrl').value;app.api=async()=>({libraries:[{id:'l',enabled:false}],ok:true});await ex("updateIconLibrary('l',{enabled:false})");old.listeners.click();assert.strictEqual(q('#sIconUrl').value,before);assert.strictEqual(ex('iconsLoaded'),false);assert.strictEqual(q('#iconGrid').children.length,0);
+  });
+  await test('统一设置保存响应晚于切换账号，不覆写新表单状态',async()=>{
+    ex("signinGlobalBusy=false;signinGlobalDirty=true;signinGlobal={enabled:false,start:'00:05',end:'00:41'}");q('#signinGlobalEnabled').checked=true;q('#signinGlobalStart').value='02:00';q('#signinGlobalEnd').value='02:30';let resolve;app.api=()=>new Promise(r=>resolve=r);const pending=ex('saveSigninGlobal()');
+    ex("switchAccount('d')");q('#signinGlobalStart').value='04:00';const result=q('#signinGlobalResult').textContent;resolve({ok:true});await pending;assert.strictEqual(q('#signinGlobalStart').value,'04:00');assert.strictEqual(q('#signinGlobalResult').textContent,result);assert.strictEqual(ex('signinGlobal.enabled'),false);assert(!q('#signinGlobalSave').disabled);
+  });
+  await test('页面刷新按账号恢复展开状态，缓存中的恶意或非整数ID过滤，换账号清空',async()=>{
+    ex('autos=[cardTask];openedAutoIds.clear();toggleAutoExpanded(7)');const saved=JSON.parse(sessionStore.get('tgp_open_autos'));assert.strictEqual(saved.account,ex('selectedAccount'));assert.deepStrictEqual(saved.ids,[7]);
+    const stateCode=slice('let openedAutoIds=new Set();','let autos=[], editAuto=null, editAutoAccount=null;');
+    for(const [account,expected] of [[saved.account,[7]],['different',[]]]){const fresh=vm.createContext({selectedAccount:account,sessionStorage:{getItem:()=>JSON.stringify({...saved,ids:[7,'<img>',null,1.5]})}});vm.runInContext(stateCode,fresh);assert.deepStrictEqual(copy(vm.runInContext('[...openedAutoIds]',fresh)),expected)}
+    ex("switchAccount('refresh-other')");assert.deepStrictEqual(JSON.parse(sessionStore.get('tgp_open_autos')).ids,[]);
+  });
+  await test('同账号旧settings读取晚于统一时间保存，不能回写旧全局窗口',async()=>{
+    ex(slice('async function loadSettings(){','async function saveSettings(){'));app.loadTz=()=>{};app.loadSessions=()=>{};app.loadAutos=async()=>{};ex("signinGlobalDirty=false;signinGlobalBusy=false;signinGlobal={enabled:false,start:'00:05',end:'00:41'}");
+    let oldGet;app.api=(p,o)=>o?.method==='POST'?Promise.resolve({ok:true}):new Promise(r=>oldGet=r);const pending=ex('loadSettings()');q('#signinGlobalEnabled').checked=true;q('#signinGlobalStart').value='05:00';q('#signinGlobalEnd').value='05:30';await ex('saveSigninGlobal()');
+    oldGet({signin_global_enabled:'0',signin_global_start:'00:05',signin_global_end:'00:41'});await pending;assert.strictEqual(ex('signinGlobal.enabled'),true);assert.strictEqual(q('#signinGlobalStart').value,'05:00');assert.strictEqual(q('#signinGlobalEnd').value,'05:30');
   });
   console.log(`前端回归 ${count} 项全部通过`);
 })().catch(e=>{console.error(e);process.exitCode=1});

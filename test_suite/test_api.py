@@ -25,7 +25,7 @@ def probe():
     from fastapi.testclient import TestClient
     with tempfile.TemporaryDirectory(prefix='tg-api-test-') as tmp:
         base = Path(tmp)
-        for name in ('main.py', 'updater.py', 'VERSION'):
+        for name in ('main.py', 'updater.py', 'VERSION', 'account_runtime.py', 'task_management.py', 'icon_library.py'):
             (base / name).write_bytes((ROOT / name).read_bytes())
         (base / 'web').mkdir()
         (base / 'web/index.html').write_bytes((ROOT / 'web/index.html').read_bytes())

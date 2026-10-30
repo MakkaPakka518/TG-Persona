@@ -56,6 +56,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 import updater
+from account_runtime import (AccountError, AccountRegistry, account_locked,
+                             get_runtime, open_database, secure_files, use_runtime)
 
 BASE = Path(__file__).resolve().parent
 DATA = BASE / "data"
@@ -73,17 +75,35 @@ logging.getLogger("telethon").setLevel(logging.WARNING)
 log = logging.getLogger("persona")
 
 # ---------------- 配置存储 (SQLite) ----------------
-conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
-conn.row_factory = sqlite3.Row
-try:  # 并发读写更稳,减少 database is locked
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=8000")
-except sqlite3.Error:
-    pass
+# Root connection is never switched: panel auth/global settings always use it.
+conn = open_database(DB_PATH)
 
 
-def db_init():
+def get_account_db() -> sqlite3.Connection:
+    """当前请求/任务的账号库;供 task_management 路由直接使用。"""
+    return get_runtime().db
+
+
+def get_current_account_id() -> str:
+    return get_runtime().id
+
+
+def get_current_account_label() -> str:
+    return get_runtime().label
+
+
+def get_running_task_ids():
+    """Immutable current-account execution reservations for batch/import guards."""
+    return frozenset(get_runtime().auto_tasks)
+
+
+def get_root_db() -> sqlite3.Connection:
+    return conn
+
+
+def db_init(database=None):
+    # Schema migration only; panel password migration is root-only at import.
+    conn = database if database is not None else get_root_db()
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
@@ -153,6 +173,7 @@ def db_init():
         ("command_delay", "REAL DEFAULT 1.6"),
         ("button_delay", "REAL DEFAULT 2.0"),
         ("refresh_buttons", "INTEGER DEFAULT 1"),
+        ("icon_url", "TEXT DEFAULT ''"),
         ("last_attempt", "INTEGER DEFAULT 0"),
         ("retry_count", "INTEGER DEFAULT 0"),
         ("retry_day", "TEXT DEFAULT ''"),
@@ -191,13 +212,13 @@ def add_hit(action, ok, *, chat_id="", rule_id=0, msg_id=0, content="", reply=""
         detail_json = json.dumps(detail or {}, ensure_ascii=False)[:2000]
     except Exception:
         detail_json = "{}"
-    conn.execute(
+    get_account_db().execute(
         "INSERT INTO hits(ts,chat_id,rule_id,msg_id,action,content,reply,grp_name,ok,sender,detail) "
         "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         (int(time.time()), str(chat_id), rule_id, msg_id, action, str(content)[:500],
          str(reply)[:500], str(grp_name)[:100], 1 if ok else 0, str(sender)[:80], detail_json),
     )
-    conn.commit()
+    get_account_db().commit()
 
 
 def purge_hits(days=None):
@@ -209,33 +230,46 @@ def purge_hits(days=None):
     if d <= 0:
         return 0
     cutoff = int(time.time()) - d * 86400
-    cur = conn.execute("DELETE FROM hits WHERE ts < ?", (cutoff,))
-    conn.commit()
+    cur = get_account_db().execute("DELETE FROM hits WHERE ts < ?", (cutoff,))
+    get_account_db().commit()
     n = cur.rowcount or 0
     if n:
         try:
-            conn.execute("VACUUM")
-            conn.commit()
+            get_account_db().execute("VACUUM")
+            get_account_db().commit()
         except sqlite3.Error:
             pass
         log.info("已清理 %s 条过期日志(早于 %s 天)", n, d)
     return n
 
 
+GLOBAL_SETTING_KEYS = {"tz", "theme", "log_keep_days", "uptime_since", "ocr_enabled", "icon_libraries",
+                       "signin_global_enabled", "signin_global_start", "signin_global_end"}
+
+
+def setting_db(key):
+    # Do not duplicate AI/OCR/notification config or panel secrets into profiles.
+    if key in GLOBAL_SETTING_KEYS or key.startswith(("panel_", "notify_", "ai_")):
+        return conn
+    return get_account_db()
+
+
 def get_setting(key, default=None):
-    r = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    r = setting_db(key).execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     return r["value"] if r else default
 
 
 def set_setting(key, value):
-    conn.execute(
+    db = setting_db(key)
+    db.execute(
         "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=?",
         (key, value, value),
     )
-    conn.commit()
+    db.commit()
 
 
 db_init()
+account_registry = AccountRegistry(DATA, conn, db_init)
 
 # ---------------- 时区 ----------------
 def tz_name() -> str:
@@ -288,34 +322,25 @@ def now_local():
 
 
 # ---------------- 监听群/规则内存缓存 ----------------
-_cache = {"at": 0.0, "watched": set(), "rules": []}
+# cache is per AccountRuntime
 
 
 def invalidate_cache():
-    _cache["at"] = 0.0
+    get_runtime().cache["at"] = 0.0
 
 
 def cache_snapshot():
     """5 秒内复用缓存,避免每条群消息都查一次 SQLite 阻塞事件循环"""
-    if time.monotonic() - _cache["at"] > 5:
-        _cache["watched"] = {r["chat_id"] for r in conn.execute("SELECT chat_id FROM watched_groups").fetchall()}
-        _cache["rules"] = conn.execute("SELECT * FROM rules WHERE enabled=1 ORDER BY id").fetchall()
-        _cache["at"] = time.monotonic()
-    return _cache["watched"], _cache["rules"]
+    if time.monotonic() - get_runtime().cache["at"] > 5:
+        get_runtime().cache["watched"] = {r["chat_id"] for r in get_account_db().execute("SELECT chat_id FROM watched_groups").fetchall()}
+        get_runtime().cache["rules"] = get_account_db().execute("SELECT * FROM rules WHERE enabled=1 ORDER BY id").fetchall()
+        get_runtime().cache["at"] = time.monotonic()
+    return get_runtime().cache["watched"], get_runtime().cache["rules"]
 
 
-# ---------------- 全局状态 ----------------
-client = None              # Telethon TelegramClient (登录后持活)
-tg_state = {"phase": "idle", "phone": "", "api_ok": False, "me": None, "err": None}
-tg_phone = ""
-hits_count = {"total": 0}
-watcher_task = None
-handler_registered = False
-last_hit_ts = {}           # (chat_id, rule_id) -> 上次命中时间
-_running = {"paused": False}
-
-# 通知 / 验证码 / 水群 / AI 状态
-flock_buf = {}             # (chat_id, text) -> [ts1, ts2, ...] 相同消息时间戳(水群从众)
+# ---------------- 账号状态 ----------------
+# Mutable Telegram state lives exclusively in AccountRuntime (including default).
+# OCR and AI config are deliberately shared once per process.
 _ocr = None                # ddddocr 实例(惰性加载)
 _ai_cfg = {}               # AI 验证码配置缓存
 
@@ -361,7 +386,7 @@ def send_notify(title, text=""):
             log.warning("通知发送失败: %s", e)
 
     try:
-        asyncio.get_event_loop().create_task(_do())
+        get_runtime().spawn(_do())
     except Exception:
         pass
 
@@ -839,7 +864,7 @@ async def sender_name_of(event):
 
 
 async def on_group_message(event):
-    if _running["paused"] or not event.is_group or event.out:
+    if get_runtime().running["paused"] or not event.is_group or event.out:
         return
     watched, rules = cache_snapshot()
     if not watched or str(event.chat_id) not in watched:
@@ -854,12 +879,12 @@ async def on_group_message(event):
             count = max(2, min(int(get_setting("flock_count", "5")), 30))
             minutes = max(1, min(int(get_setting("flock_minutes", "5")), 60))
             key = (str(event.chat_id), text[:80])
-            ts_list = flock_buf.setdefault(key, [])
+            ts_list = get_runtime().flock_buf.setdefault(key, [])
             now = time.monotonic()
             ts_list[:] = [t for t in ts_list if now - t < minutes * 60]
             ts_list.append(now)
             if len(ts_list) >= count:
-                flock_buf.pop(key, None)
+                get_runtime().flock_buf.pop(key, None)
                 pool = [p.strip() for p in re.split(r"[,，]", str(get_setting("flock_pool", "") or "")) if p.strip()]
                 if pool:
                     await asyncio.sleep(random.uniform(1.0, 3.0))
@@ -879,7 +904,7 @@ async def on_group_message(event):
         rgroups = {x.strip() for x in re.split(r"[,，]", (r["groups"] or "")) if x.strip()}
         if rgroups and str(event.chat_id) not in rgroups:
             continue
-        if now - last_hit_ts.get((event.chat_id, r["id"]), -1e9) < cooldown:
+        if now - get_runtime().last_hit_ts.get((event.chat_id, r["id"]), -1e9) < cooldown:
             continue
         hit_rules.append(r)
     if not hit_rules:
@@ -897,7 +922,7 @@ async def on_group_message(event):
 
     grp_name = ""
     try:
-        g = conn.execute("SELECT name FROM watched_groups WHERE chat_id=?", (str(event.chat_id),)).fetchone()
+        g = get_account_db().execute("SELECT name FROM watched_groups WHERE chat_id=?", (str(event.chat_id),)).fetchone()
         if g:
             grp_name = g["name"]
     except Exception:
@@ -912,7 +937,7 @@ async def on_group_message(event):
         # 多条规则之间额外错开一点,避免一口气刷屏
         if idx:
             await asyncio.sleep(random.uniform(0.6, 1.8))
-        last_hit_ts[(event.chat_id, rule["id"])] = time.monotonic()
+        get_runtime().last_hit_ts[(event.chat_id, rule["id"])] = time.monotonic()
         if not idx:
             await asyncio.sleep(random.uniform(min(dmin, dmax), max(dmin, dmax)))
         action = rule["action"]
@@ -926,14 +951,14 @@ async def on_group_message(event):
                 emo = (rule["reaction"] or rule["value"]).replace("\ufe0f", "")
                 if emo:
                     reply_desc = (reply_desc + " + " + emo) if reply_desc else emo
-                    await client(
+                    await get_runtime().client(
                         SendReactionRequest(
                             peer=await event.get_input_chat(),
                             msg_id=event.id,
                             reaction=[ReactionEmoji(emoticon=emo)],
                         )
                     )
-            hits_count["total"] += 1
+            get_runtime().hits_count["total"] += 1
             add_hit(action, True, chat_id=event.chat_id, rule_id=rule["id"], msg_id=event.id,
                     content=text, reply=reply_desc, grp_name=grp_name, sender=sender_name,
                     detail={"kind": "rule", "group": grp_name or str(event.chat_id), "sender": sender_name,
@@ -950,42 +975,43 @@ async def on_group_message(event):
 
 
 async def watcher_loop():
-    """后台监听:登录成功后启动;断线自动重建连接(而不是空转)"""
-    global client, handler_registered
+    """Per-account reconnect with original 5–60 second backoff."""
+    runtime = get_runtime()
     backoff = 0
     while True:
+        checked_client = runtime.client
         try:
-            if client is None:
+            if checked_client is None:
                 await ensure_client()
-            if client is not None:
-                await client.run_until_disconnected()
+                checked_client = runtime.client
+            if checked_client is not None:
+                await checked_client.run_until_disconnected()
         except Exception as e:
-            log.warning("监听连接断开: %s", e)
-        # 走到这里说明连接已经没了:清理 → 退避 → 重新建连并注册事件
+            log.warning("账号 %s 监听连接断开: %s", runtime.id, e)
         try:
-            if client is not None:
-                try:
-                    await client.disconnect()
-                except Exception:
-                    pass
-            client = None
-            handler_registered = False   # finish_login 会重新注册事件处理器
+            async with runtime.lifecycle():
+                # Do not discard a client installed by a concurrent explicit init.
+                if runtime.client is checked_client:
+                    if checked_client is not None:
+                        try:
+                            await checked_client.disconnect()
+                        except Exception:
+                            pass
+                    runtime.client = None
+                    runtime.handler_registered = False
             backoff = min(backoff + 1, 12)
             await asyncio.sleep(min(60, 5 * backoff))
             await ensure_client()
-            if client is not None and await client.is_user_authorized():
+            if runtime.client is not None and await runtime.client.is_user_authorized():
                 backoff = 0
-                log.info("监听连接已恢复")
-                continue
+                log.info("账号 %s 监听连接已恢复", runtime.id)
         except Exception as e:
-            log.warning("重连失败: %s", e)
+            log.warning("账号 %s 重连失败: %s", runtime.id, e)
             await asyncio.sleep(5)
 
 
 # ---------------- 自动化:签到 / 抢注 / 抢红包 ----------------
-auto_last_ts = {}        # (chat_id, auto_id) -> 上次执行时刻
-signin_plans = {}        # (auto_id, YYYY-MM-DD) -> 今日计划执行分钟数(窗口内随机)
-signin_task = None
+# Schedules and cooldowns are per AccountRuntime.
 
 
 def match_keywords(kws, text):
@@ -1008,16 +1034,16 @@ async def resolve_entity(peer):
         return None
     try:
         value = str(peer).strip()
-        return await client.get_entity(int(value) if re.fullmatch(r"[+-]?[0-9]+", value) else value)
+        return await get_runtime().client.get_entity(int(value) if re.fullmatch(r"[+-]?[0-9]+", value) else value)
     except Exception:
         return None
 
 
 async def on_auto_event(event):
     """抢注 / 抢红包:监控群出现触发关键词时自动行动"""
-    if _running["paused"] or not event.is_group or event.out:
+    if get_runtime().running["paused"] or not event.is_group or event.out:
         return
-    autos = conn.execute(
+    autos = get_account_db().execute(
         "SELECT * FROM automations WHERE enabled=1 AND type IN ('grabcodes','redpacket')"
     ).fetchall()
     if not autos:
@@ -1026,7 +1052,7 @@ async def on_auto_event(event):
     text = (event.raw_text or "").strip()
     sender_name = await sender_name_of(event)
 
-    watched = {r["chat_id"] for r in conn.execute("SELECT chat_id FROM watched_groups").fetchall()}
+    watched = {r["chat_id"] for r in get_account_db().execute("SELECT chat_id FROM watched_groups").fetchall()}
     now = time.monotonic()
     for a in autos:
         groups = [g.strip() for g in str(a["groups"] or "").split(",") if g.strip()]
@@ -1050,14 +1076,14 @@ async def on_auto_event(event):
 
         key = (chat, a["id"])
         cd = int(a["cooldown"] or 30)
-        if now - auto_last_ts.get(key, -1e9) < cd:
+        if now - get_runtime().auto_last_ts.get(key, -1e9) < cd:
             continue
-        auto_last_ts[key] = now
+        get_runtime().auto_last_ts[key] = now
 
         try:
             grp_name = ""
             try:
-                g = conn.execute("SELECT name FROM watched_groups WHERE chat_id=?", (str(chat),)).fetchone()
+                g = get_account_db().execute("SELECT name FROM watched_groups WHERE chat_id=?", (str(chat),)).fetchone()
                 if g:
                     grp_name = g["name"]
             except Exception:
@@ -1164,12 +1190,12 @@ def _pick_cmd(command):
     return render_placeholders(random.choice(parts) if parts else str(command or "").strip())
 
 
-async def _fetch_reply(ent, min_id=0):
-    """只读取本轮发出消息之后的非自己消息,禁止历史回复误报成功。"""
+async def _fetch_reply(ent, min_id=0, baseline=None):
+    """本轮新消息;仅显式 baseline 时允许点击后的同消息编辑确认。"""
     try:
-        recent = await client.get_messages(ent, limit=10)
+        recent = await get_runtime().client.get_messages(ent, limit=10)
         for m in recent:
-            if m.out or m.id <= min_id:
+            if not _fresh_reply(m, min_id, baseline):
                 continue
             return (m.raw_text or ""), m
     except Exception:
@@ -1210,7 +1236,7 @@ async def _await_signin_result(ent, min_id, success_kw="", fail_kw="", baseline=
     while time.monotonic() < deadline and polls < max(1, math.ceil(timeout) + 1):
         polls += 1
         try:
-            fresh = [m for m in await client.get_messages(ent, limit=12) if _fresh_reply(m, min_id, baseline)]
+            fresh = [m for m in await get_runtime().client.get_messages(ent, limit=12) if _fresh_reply(m, min_id, baseline)]
             text = "\n".join(str(getattr(m, "raw_text", "") or "") for m in reversed(fresh)).strip()
             if text:
                 last_text = text
@@ -1242,7 +1268,7 @@ async def run_signin(a):
         return _task_failure(a, "签到目标解析失败", cmd)
     captcha_baseline = await _message_snapshot(ent) if a["signin_captcha"] else None
     try:
-        sent_msg = await client.send_message(ent, cmd)
+        sent_msg = await get_runtime().client.send_message(ent, cmd)
         min_id = sent_msg.id
         captcha_min_id = min_id
     except errors.FloodWaitError as e:
@@ -1305,7 +1331,7 @@ async def run_signin(a):
             return _task_failure(a, "验证码识别为空(检查 AI/本地 OCR 开关)", cmd)
         try:
             outcome_baseline = await _message_snapshot(ent)
-            cap_sent = await client.send_message(ent, cap_ans)
+            cap_sent = await get_runtime().client.send_message(ent, cap_ans)
             min_id = cap_sent.id
             log.info("签到验证码已回复")
         except errors.FloodWaitError as e:
@@ -1410,7 +1436,7 @@ async def _select_btn_ai(btns, hint):
 async def _find_latest_buttons(ent, limit=6, min_id=0):
     """只取本轮目标回复上带按钮的消息,不点击旧键盘。"""
     try:
-        msgs = await client.get_messages(ent, limit=limit)
+        msgs = await get_runtime().client.get_messages(ent, limit=limit)
         for m in msgs:
             if m.out or m.id <= min_id:
                 continue
@@ -1435,7 +1461,7 @@ def _message_signature(message):
 
 async def _message_snapshot(ent):
     try:
-        return {m.id: _message_signature(m) for m in await client.get_messages(ent, limit=12) if not m.out}
+        return {m.id: _message_signature(m) for m in await get_runtime().client.get_messages(ent, limit=12) if not m.out}
     except Exception:
         return {}
 
@@ -1464,7 +1490,7 @@ async def _await_signin_captcha(ent, timeout=25, min_id=0, baseline=None):
     while time.monotonic() < deadline and polls < max(1, math.ceil(timeout) + 1):
         polls += 1
         try:
-            messages = list(await client.get_messages(ent, limit=12))
+            messages = list(await get_runtime().client.get_messages(ent, limit=12))
             for m in messages:
                 signature = (m.id, _message_signature(m))
                 if not _fresh_reply(m, min_id, baseline) or signature in checked:
@@ -1485,7 +1511,7 @@ async def _await_signin_captcha(ent, timeout=25, min_id=0, baseline=None):
                 if not prompt:
                     continue  # 后续编辑/新提示到来仍可重新检查，不能永久按 id 忽略。
                 checked.add(signature)
-                img = await client.download_media(m, file=bytes)
+                img = await get_runtime().client.download_media(m, file=bytes)
                 if img:
                     return m, img
         except errors.FloodWaitError as error:
@@ -1512,23 +1538,25 @@ async def run_custom(a):
     if ent is None:
         return _task_failure(a, "自定义任务目标解析失败")
     # 无初始 send 的链也必须从启动时的水位开始,不能用历史成功/键盘/图片。
-    recent = await client.get_messages(ent, limit=1)
+    recent = await get_runtime().client.get_messages(ent, limit=1)
     min_id = max((m.id for m in recent), default=0)
     chain = max(1, min(int(a["chain_retry"] or 1), 5))
     final_desc, final_ok = "", False
     for attempt in range(chain):
         log_desc = []
+        baseline = None  # only a current click action can authorize edit replies
         ok = True
         try:
             for s in steps:
                 t = s.get("t")
                 if t == "send":
                     text = render_placeholders(str(s.get("v") or ""))
-                    sent_msg = await client.send_message(ent, text)
+                    sent_msg = await get_runtime().client.send_message(ent, text)
                     min_id = sent_msg.id
+                    baseline = None
                     log_desc.append(f"发送「{text}」")
                 elif t == "wait":
-                    ms = max(0, int(s.get("v") or 1000))
+                    ms = max(0, int(1000 if s.get("v") is None else s["v"]))
                     await asyncio.sleep(ms / 1000)
                     log_desc.append(f"等待{ms}ms")
                 elif t == "click":
@@ -1544,18 +1572,20 @@ async def run_custom(a):
                         b = _find_btn(btns, str(s.get("v") or ""))
                     if not b:
                         raise Exception("未找到匹配按钮")
+                    baseline = await _message_snapshot(ent)
+                    min_id = max([min_id, m.id] + list(baseline))
                     await b.click()
                     log_desc.append(f"点击按钮「{b.text}」")
                 elif t == "captcha":
                     length = max(1, min(int(s.get("v") or 4), 16))
                     img = None
                     try:
-                        msgs = await client.get_messages(ent, limit=5)
+                        msgs = await get_runtime().client.get_messages(ent, limit=5)
                         for m in msgs:
                             if m.out or m.id <= min_id:
                                 continue
                             if getattr(m, "photo", None) or getattr(m, "media", None):
-                                img = await client.download_media(m, file=bytes)
+                                img = await get_runtime().client.download_media(m, file=bytes)
                                 if img:
                                     break
                     except Exception:
@@ -1568,11 +1598,12 @@ async def run_custom(a):
                     log_desc.append(f"识别验证码「{ans}」")
                     send_txt = str(s.get("send") or "")
                     if send_txt:
-                        sent_msg = await client.send_message(ent, render_placeholders(send_txt).replace("{code}", ans))
+                        sent_msg = await get_runtime().client.send_message(ent, render_placeholders(send_txt).replace("{code}", ans))
                         log_desc.append(f"发送「{send_txt}」")
                     else:
-                        sent_msg = await client.send_message(ent, ans)
+                        sent_msg = await get_runtime().client.send_message(ent, ans)
                     min_id = sent_msg.id
+                    baseline = None
                 elif t == "until":
                     timeout = max(1, int(s.get("timeout") or 30000))
                     succ = str(s.get("success") or "")
@@ -1580,16 +1611,21 @@ async def run_custom(a):
                     deadline = time.monotonic() + timeout / 1000
                     matched, failed = False, False
                     while time.monotonic() < deadline:
-                        rt, _ = await _fetch_reply(ent, min_id=min_id)
+                        rt, reply = await _fetch_reply(ent, min_id=min_id, baseline=baseline)
                         rl = rt.lower()
                         if fail and any(k.strip().lower() in rl for k in re.split(r"[,，]", fail) if k.strip()):
                             failed = True
                             break
                         if succ and any(k.strip().lower() in rl for k in re.split(r"[,，]", succ) if k.strip()):
                             matched = True
-                            break
-                        if not succ and not fail:
+                        elif not succ and not fail and reply is not None:
                             matched = True
+                        if matched:
+                            # Consume this reply so a consecutive until does not
+                            # immediately reuse it (later same-message edits count).
+                            min_id = max(min_id, reply.id)
+                            baseline = dict(baseline or {})
+                            baseline[reply.id] = _message_signature(reply)
                             break
                         await asyncio.sleep(2)
                     if failed:
@@ -1618,17 +1654,12 @@ async def run_custom(a):
 
 
 # 抢注轮询(开注探测):每间隔给机器人发探测命令,回复含开注关键词即注册
-poll_last = {}
-poll_task = None
-housekeeping_task = None
-health_task = None
-_session_alerted = False
-keepalive_task = None
+# Polling and health task handles are per AccountRuntime.
 
 
 async def run_keepalive(a, reason="定时"):
     """在指定群发一条内容,可选 N 秒后删除(Emby 保号用)"""
-    if client is None or tg_state["phase"] != "ready":
+    if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         return _task_failure(a, "TG 尚未就绪")
     target = str(a["target"] or "").strip()
     parts = [x.strip() for x in str(a["reply_text"] or "").split("||") if x.strip()]
@@ -1640,7 +1671,7 @@ async def run_keepalive(a, reason="定时"):
         ent = await resolve_entity(target)
         if ent is None:
             return _task_failure(a, "保号目标解析失败", txt)
-        msg = await client.send_message(ent, txt)
+        msg = await get_runtime().client.send_message(ent, txt)
     except errors.FloodWaitError as e:
         raise _RetryLater(e.seconds) from e
     except Exception as e:
@@ -1659,15 +1690,15 @@ async def run_keepalive(a, reason="定时"):
         async def _del(group_ent=ent, mid=msg.id, name=a["name"]):
             await asyncio.sleep(delay)
             try:
-                await client.delete_messages(group_ent, [mid])
+                await get_runtime().client.delete_messages(group_ent, [mid])
                 log.info("保号消息已删除 群=%s 任务=%s", target, name)
             except Exception as e:
                 log.warning("删除保号消息失败: %s", e)
-        asyncio.get_running_loop().create_task(_del())
+        get_runtime().spawn(_del())
     return True
 
 
-_auto_running = {}  # id -> Task;启动任务前同步占位,手动/定时共享同一锁
+# AccountRuntime.auto_tasks: synchronous reservation shared by manual/scheduled runs.
 RETRY_BASE = 60
 
 
@@ -1676,18 +1707,20 @@ def _retry_limit(a):
 
 
 def _forget_auto_schedule(aid):
-    for key in list(signin_plans):
+    for key in list(get_runtime().signin_plans):
         if key[0] == aid:
-            signin_plans.pop(key, None)
-    poll_last.pop(aid, None)
-    for key in list(auto_last_ts):
+            get_runtime().signin_plans.pop(key, None)
+    get_runtime().poll_last.pop(aid, None)
+    for key in list(get_runtime().auto_last_ts):
         if key[1] == aid:
-            auto_last_ts.pop(key, None)
+            get_runtime().auto_last_ts.pop(key, None)
 
 
 def _reset_auto_schedule(aid, clear_success=False):
     _forget_auto_schedule(aid)
-    a = conn.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    if a is None:
+        return  # batch/import deletion still forgets only this account's schedule
     now = int(time.time())
     last = "" if clear_success else (a["last_at"] or "")
     next_at = 0
@@ -1698,24 +1731,36 @@ def _reset_auto_schedule(aid, clear_success=False):
             base = now
             last = ""
         next_at = max(now, base + max(60, int(a["poll_interval"] or 60)))
-    conn.execute("UPDATE automations SET last_at=?,last_attempt=0,retry_count=0,retry_day='',"
+    get_account_db().execute("UPDATE automations SET last_at=?,last_attempt=0,retry_count=0,retry_day='',"
                  "next_run_at=?,last_status='' WHERE id=?", (last, next_at, aid))
-    conn.commit()
+    get_account_db().commit()
+
+
+def _global_signin_window():
+    return {"enabled": get_setting("signin_global_enabled", "0") == "1",
+            "start": get_setting("signin_global_start", "00:05"),
+            "end": get_setting("signin_global_end", "00:41")}
+
+
+def _effective_signin_window(a):
+    window = _global_signin_window()
+    return (window["start"], window["end"]) if window["enabled"] and a["type"] == "signin" else (a["win_start"], a["win_end"])
 
 
 def _signin_deadline(a, current):
-    end = _win_minutes(a["win_end"])
+    _, end_text = _effective_signin_window(a)
+    end = _win_minutes(end_text)
     return current.replace(hour=end // 60, minute=end % 60, second=0, microsecond=0).timestamp()
 
 
 def _queue_auto(aid, manual=False):
-    if aid in _auto_running:
+    if aid in get_runtime().auto_tasks:
         return False
-    _auto_running[aid] = None  # 不等待协程开始就占锁
+    get_runtime().auto_tasks[aid] = None  # 不等待协程开始就占锁
     try:
-        _auto_running[aid] = asyncio.create_task(_execute_auto(aid, manual))
+        get_runtime().auto_tasks[aid] = get_runtime().spawn(_execute_auto(aid, manual))
     except BaseException:
-        _auto_running.pop(aid, None)
+        get_runtime().auto_tasks.pop(aid, None)
         raise
     return True
 
@@ -1724,10 +1769,10 @@ async def _execute_auto(aid, manual=False):
     """持久尝试/指数退避/成功状态;手动也走同一执行器,失败不污染 last_at。"""
     a = None
     try:
-        a = conn.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+        a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
         if a is None or (not manual and not a["enabled"]):
             return
-        if client is None or tg_state["phase"] != "ready":
+        if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
             return
         now = int(time.time())
         today = now_local().strftime("%Y-%m-%d")
@@ -1738,11 +1783,11 @@ async def _execute_auto(aid, manual=False):
             count = 0  # 上轮耗尽后只在完整间隔届满开启下一轮
         count += 1
         backoff = min(3600, RETRY_BASE * 2 ** (count - 1))
-        conn.execute("UPDATE automations SET last_attempt=?,retry_count=?,retry_day=?,"
+        get_account_db().execute("UPDATE automations SET last_attempt=?,retry_count=?,retry_day=?,"
                      "last_status='running',next_run_at=? WHERE id=?",
                      (now, count, today, now + backoff, aid))
-        conn.commit()
-        a = conn.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+        get_account_db().commit()
+        a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
         ok, status = False, "failed"
         try:
             if a["type"] == "signin":
@@ -1774,24 +1819,24 @@ async def _execute_auto(aid, manual=False):
             if ok:
                 stamp = now_local().strftime("%Y-%m-%d") if a["type"] == "signin" else str(finished)
                 next_at = finished + max(60, int(a["poll_interval"] or 60)) if a["type"] == "keepalive" else 0
-                conn.execute("UPDATE automations SET last_at=?,retry_count=0,next_run_at=?,"
+                get_account_db().execute("UPDATE automations SET last_at=?,retry_count=0,next_run_at=?,"
                              "last_status='success' WHERE id=?", (stamp, next_at, aid))
             else:
                 if a["type"] == "keepalive" and count >= _retry_limit(a):
                     next_at = finished + max(backoff, max(60, int(a["poll_interval"] or 60)))
-                conn.execute("UPDATE automations SET next_run_at=?,last_status=? WHERE id=?",
+                get_account_db().execute("UPDATE automations SET next_run_at=?,last_status=? WHERE id=?",
                              (next_at, status, aid))
-            conn.commit()
+            get_account_db().commit()
     finally:
-        _auto_running.pop(aid, None)
+        get_runtime().auto_tasks.pop(aid, None)
 
 
 def _keepalive_tick():
-    if client is None or tg_state["phase"] != "ready":
+    if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         return
     now = int(time.time())
-    for a in conn.execute("SELECT * FROM automations WHERE enabled=1 AND type='keepalive' AND target!=''").fetchall():
-        if a["id"] in _auto_running:
+    for a in get_account_db().execute("SELECT * FROM automations WHERE enabled=1 AND type='keepalive' AND target!=''").fetchall():
+        if a["id"] in get_runtime().auto_tasks:
             continue
         if not a["next_run_at"]:
             # 兼容旧任务;未成功的新任务不能用 last_at 伪造一次成功。
@@ -1802,19 +1847,20 @@ def _keepalive_tick():
 
 
 def _signin_tick():
-    if client is None or tg_state["phase"] != "ready":
+    if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         return
     current = now_local()
     today = current.strftime("%Y-%m-%d")
     nowm = current.hour * 60 + current.minute
     now = int(time.time())
-    for key in list(signin_plans):
+    for key in list(get_runtime().signin_plans):
         if key[1] != today:
-            signin_plans.pop(key, None)
-    for a in conn.execute("SELECT * FROM automations WHERE enabled=1 AND type='signin'").fetchall():
-        if a["id"] in _auto_running or a["last_at"] == today:
+            get_runtime().signin_plans.pop(key, None)
+    for a in get_account_db().execute("SELECT * FROM automations WHERE enabled=1 AND type='signin'").fetchall():
+        if a["id"] in get_runtime().auto_tasks or a["last_at"] == today:
             continue
-        w0, w1 = _win_minutes(a["win_start"]), _win_minutes(a["win_end"])
+        start_text, end_text = _effective_signin_window(a)
+        w0, w1 = _win_minutes(start_text), _win_minutes(end_text)
         # 同日半开区间 [start,end),严格不允许在 win_end 之后开始/重试。
         if w0 is None or w1 is None or w0 >= w1 or not w0 <= nowm < w1:
             continue
@@ -1822,12 +1868,12 @@ def _signin_tick():
             if a["retry_count"] >= _retry_limit(a) or now < a["next_run_at"]:
                 continue
         elif a["retry_count"]:
-            conn.execute("UPDATE automations SET retry_count=0,next_run_at=0 WHERE id=?", (a["id"],))
-            conn.commit()
+            get_account_db().execute("UPDATE automations SET retry_count=0,next_run_at=0 WHERE id=?", (a["id"],))
+            get_account_db().commit()
         key = (a["id"], today)
-        if key not in signin_plans:
-            signin_plans[key] = nowm if a["retry_day"] == today and a["retry_count"] else random.randint(w0, w1 - 1)
-        if nowm >= signin_plans[key]:
+        if key not in get_runtime().signin_plans:
+            get_runtime().signin_plans[key] = nowm if a["retry_day"] == today and a["retry_count"] else random.randint(w0, w1 - 1)
+        if nowm >= get_runtime().signin_plans[key]:
             _queue_auto(a["id"])
 
 
@@ -1836,8 +1882,9 @@ async def housekeeping_loop():
     while True:
         try:
             purge_hits()
-            purge_sessions()
-            _auth_cache_gc(time.time())
+            if get_current_account_id() == "default":
+                purge_sessions()
+                _auth_cache_gc(time.time())
         except Exception as e:
             log.warning("日志清理异常: %s", e)
         await asyncio.sleep(3600)
@@ -1853,11 +1900,11 @@ async def keepalive_loop():
         await asyncio.sleep(60)
 
 
+@account_locked
 async def _health_check_once():
     """临时网络/RPC 故障不等同于撤销授权,error 状态仍持续复查。"""
-    global _session_alerted
-    checked_client = client
-    if checked_client is None or tg_state["phase"] not in ("ready", "error"):
+    checked_client = get_runtime().client
+    if checked_client is None or get_runtime().tg_state["phase"] not in ("ready", "error"):
         return
     try:
         ok = await asyncio.wait_for(checked_client.is_user_authorized(), timeout=20)
@@ -1869,28 +1916,28 @@ async def _health_check_once():
         if unauthorized and isinstance(e, unauthorized):
             ok = False
         else:
-            if client is checked_client and tg_state["phase"] in ("ready", "error"):
-                tg_state["health_error"] = f"临时连接异常: {type(e).__name__}"
+            if get_runtime().client is checked_client and get_runtime().tg_state["phase"] in ("ready", "error"):
+                get_runtime().tg_state["health_error"] = f"临时连接异常: {type(e).__name__}"
             log.debug("心跳临时故障: %s", type(e).__name__)
             return
     # 心跳期间用户可能退出/重新登录;不能覆盖新客户端的状态。
-    if client is not checked_client or tg_state["phase"] not in ("ready", "error"):
+    if get_runtime().client is not checked_client or get_runtime().tg_state["phase"] not in ("ready", "error"):
         return
     if not ok:
-        tg_state["phase"] = "error"
-        tg_state["err"] = "会话已失效,请重新登录"
-        tg_state["health_error"] = None
-        if not _session_alerted:
-            _session_alerted = True
+        get_runtime().tg_state["phase"] = "error"
+        get_runtime().tg_state["err"] = "会话已失效,请重新登录"
+        get_runtime().tg_state["health_error"] = None
+        if not get_runtime().session_alerted:
+            get_runtime().session_alerted = True
             send_notify("⚠️ TG 会话失效", "明确检测到登录已失效,请打开面板重新登录")
             log.warning("会话失效,已推送提醒")
     else:
-        if tg_state["phase"] == "error" and not tg_state.get("me"):
+        if get_runtime().tg_state["phase"] == "error" and not get_runtime().tg_state.get("me"):
             await finish_login()
-        tg_state.update({"phase": "ready", "err": None, "health_error": None})
-        if _session_alerted:
+        get_runtime().tg_state.update({"phase": "ready", "err": None, "health_error": None})
+        if get_runtime().session_alerted:
             log.info("会话已恢复正常")
-        _session_alerted = False
+        get_runtime().session_alerted = False
 
 
 async def health_loop():
@@ -1904,24 +1951,23 @@ async def health_loop():
 
 async def poll_loop():
     """轮询 grabcodes 任务:探测开注 → 自动注册"""
-    global poll_task
     while True:
         try:
-            if client is not None and tg_state["phase"] == "ready":
-                autos = conn.execute(
+            if get_runtime().client is not None and get_runtime().tg_state["phase"] == "ready":
+                autos = get_account_db().execute(
                     "SELECT * FROM automations WHERE enabled=1 AND type='grabcodes' AND poll_interval>0 AND target!=''"
                 ).fetchall()
                 now = time.time()
                 for a in autos:
                     interval = max(10, int(a["poll_interval"] or 60))
-                    if now - poll_last.get(a["id"], 0) < interval:
+                    if now - get_runtime().poll_last.get(a["id"], 0) < interval:
                         continue
                     ent = await resolve_entity(a["target"])
                     if ent is None:
                         continue
                     probe = _pick_cmd(a["command"] or "/start")
                     try:
-                        probe_msg = await client.send_message(ent, probe)
+                        probe_msg = await get_runtime().client.send_message(ent, probe)
                         min_id = probe_msg.id
                         await asyncio.sleep(2)
                         rt, _ = await _fetch_reply(ent, min_id=min_id)
@@ -1930,7 +1976,7 @@ async def poll_loop():
                                 str(a["reply_text"] or "").replace("{code}", extract_code(rt) or "REG")
                             )
                             if reg:
-                                await client.send_message(ent, reg)
+                                await get_runtime().client.send_message(ent, reg)
                                 grp_name = a["target"]
                                 add_hit("grabcodes", True, chat_id=a["target"], rule_id=-a["id"], grp_name=a["name"],
                                         content=f"轮询 {probe} 命中开注", reply=rt,
@@ -1938,14 +1984,14 @@ async def poll_loop():
                                                 "probe": probe, "reply": rt, "registered": reg})
                                 log.info("抢注轮询命中! %s -> %s", a["target"], reg)
                                 notify_event("success", a["name"], f"检测到开注并注册: {reg}")
-                                poll_last[a["id"]] = now + max(interval, 3600)  # 成功后冷却 1h
+                                get_runtime().poll_last[a["id"]] = now + max(interval, 3600)  # 成功后冷却 1h
                                 continue
                     except errors.FloodWaitError as e:
                         log.warning("轮询限流,等待 %ss", e.seconds)
                         await asyncio.sleep(e.seconds + 1)
                     except Exception:
                         log.exception("轮询探测异常")
-                    poll_last[a["id"]] = now
+                    get_runtime().poll_last[a["id"]] = now
         except Exception as e:
             log.warning("轮询循环异常: %s", e)
         await asyncio.sleep(10)
@@ -1964,60 +2010,122 @@ async def signin_loop():
 # ---------------- 生命周期 ----------------
 @asynccontextmanager
 async def lifespan(app):
-    global client, health_task
     set_setting("uptime_since", get_setting("uptime_since", str(int(time.time()))))
+
+    async def restore(runtime):
+        # Uninitialized profiles never connect at startup; only existing sessions.
+        if runtime.storage_error:
+            return
+        with use_runtime(runtime):
+            try:
+                purge_hits()
+                if (runtime.directory / "tg.session").exists() and get_setting("api_id") and get_setting("api_hash"):
+                    async with runtime.lifecycle():
+                        await ensure_client()
+                        if runtime.tg_state["phase"] != "ready":
+                            runtime.tg_state.update(phase="error", err="会话未授权,请重新登录")
+            except Exception as error:
+                if runtime.client is not None:
+                    runtime.tg_state.update(phase="error", err="自动连接暂时失败,后台继续复查")
+                log.warning("账号 %s 自动登录失败: %s", runtime.id, type(error).__name__)
+            if runtime.client is not None and (runtime.health_task is None or runtime.health_task.done()):
+                runtime.health_task = runtime.spawn(health_loop())
+
     try:
-        purge_hits()
-    except Exception:
-        pass
-    # 若已有会话,启动时自动登录并监听
-    try:
-        api_id = int(get_setting("api_id", "0"))
-        api_hash = get_setting("api_hash", "")
-        if api_id and api_hash and (DATA / "tg.session").exists():
-            client = TelegramClient(SESSION_PATH, api_id, api_hash)
-            await client.connect()
-            if await client.is_user_authorized():
-                await finish_login()
-            else:
-                tg_state.update({"phase": "error", "err": "会话未授权,请重新登录"})
-    except Exception as e:
-        if client is not None:
-            tg_state.update({"phase": "error", "err": "自动连接暂时失败,后台继续复查"})
-        log.warning("自动登录失败(面板可重试): %s", e)
-    if health_task is None or health_task.done():
-        health_task = asyncio.create_task(health_loop())
-    yield
-    pending = [task for task in (watcher_task, signin_task, poll_task, keepalive_task,
-                                housekeeping_task, health_task, *_auto_running.values())
-               if task is not None and not task.done()]
-    for task in pending:
-        task.cancel()
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-    if client is not None:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
-    conn.close()
+        await asyncio.gather(*(restore(runtime) for runtime in account_registry.accounts.values()))
+        yield
+    finally:
+        await account_registry.shutdown()
 
 
 # ---------------- FastAPI ----------------
 app = FastAPI(title="TG Persona", docs_url=None, redoc_url=None, lifespan=lifespan)
 
 
-@app.middleware("http")
+@app.exception_handler(AccountError)
+async def account_error_handler(request: Request, error: AccountError):
+    return JSONResponse({"detail": str(error), "error": str(error)}, status_code=error.status)
+
+
 async def panel_auth(request: Request, call_next):
-    """除登录接口与首页外,面板和头像都要已登录的会话令牌"""
+    """Authenticate against root first; only then select an account context."""
     path = request.url.path
     if path in ("/", "/api/panel/login") or path.startswith("/static/") or path.startswith("/api/panel/captcha"):
-        return await call_next(request)
-    if path.startswith("/api/") or path == "/avatar":
-        if session_ok(request.cookies.get("panel_token", "")):
+        with use_runtime(account_registry.accounts["default"]):
             return await call_next(request)
-        return JSONResponse({"error": "未登录面板"}, status_code=401)
+    if path.startswith("/api/") or path == "/avatar":
+        if not session_ok(request.cookies.get("panel_token", "")):
+            return JSONResponse({"error": "未登录面板"}, status_code=401)
+        # These namespaces never select a Telegram profile, regardless of header.
+        global_route = (path.startswith(("/api/panel/", "/api/backups", "/api/accounts", "/api/icons", "/api/icon-libraries"))
+                        or path in ("/api/version", "/api/update", "/api/ai/test", "/api/captcha/test"))
+        if global_route:
+            with use_runtime(account_registry.accounts["default"]):
+                return await call_next(request)
+        try:
+            selected_id = request.headers.get("x-account-id")
+            if path == "/avatar" and "account_id" in request.query_params:
+                # HTML <img> cannot set headers; only this authenticated resource
+                # accepts an account query selector, never a URL/session token.
+                selected_id = request.query_params.get("account_id")
+            runtime = account_registry.select(selected_id)
+            async with runtime.request_lease():
+                return await call_next(request)
+        except AccountError as error:
+            return JSONResponse({"detail": str(error), "error": str(error)}, status_code=error.status)
     return await call_next(request)
+
+
+class PanelAuthMiddleware:
+    """Pure ASGI: retain account lease until response/avatar streaming completes."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        request = Request(scope)
+        async def next_app(request):
+            await self.app(scope, receive, send)
+        response = await panel_auth(request, next_app)
+        if response is not None:
+            await response(scope, receive, send)
+
+
+app.add_middleware(PanelAuthMiddleware)
+
+
+class AccountInput(BaseModel):
+    label: str = Field(..., min_length=1, max_length=80)
+
+
+@app.get("/api/accounts")
+async def list_accounts():
+    return {"accounts": [{"id": runtime.id, "label": runtime.label,
+                          "phase": runtime.tg_state["phase"],
+                          "logged_in": runtime.tg_state["phase"] == "ready",
+                          "me": runtime.tg_state.get("me"), "paused": runtime.running["paused"],
+                          "error": runtime.storage_error or runtime.tg_state.get("err"),
+                          "created_at": runtime.created_at}
+                         for runtime in account_registry.accounts.values() if not runtime.closing],
+            "default_id": "default"}
+
+
+@app.post("/api/accounts")
+async def create_account(body: AccountInput):
+    runtime = await account_registry.create(body.label)
+    return {"ok": True, "id": runtime.id}
+
+
+@app.put("/api/accounts/{account_id}")
+async def rename_account(account_id: str, body: AccountInput):
+    await account_registry.rename(account_id, body.label)
+    return {"ok": True}
+
+
+@app.delete("/api/accounts/{account_id}")
+async def delete_account(account_id: str):
+    return await account_registry.delete(account_id)
 
 
 # ---------- 面板登录 ----------
@@ -2102,54 +2210,60 @@ class VerifyPassword(BaseModel):
 
 
 @app.post("/api/tg/init")
+@account_locked
 async def tg_init(body: TGInit):
-    """保存 API 凭证并建立连接"""
-    global client
+    """Only explicit user init changes credentials/connects an unlogged profile."""
     if body.api_id <= 0 or len(body.api_hash) < 10:
         raise HTTPException(400, "API_ID 或 API_HASH 无效(在 my.telegram.org 获取)")
+    runtime = get_runtime()
+    changed = (get_setting("api_id") != str(body.api_id) or get_setting("api_hash") != body.api_hash)
+    if changed and runtime.client is not None:
+        await runtime.stop()
     set_setting("api_id", str(body.api_id))
     set_setting("api_hash", body.api_hash)
     await ensure_client()
     return {"ok": True}
 
 
+@account_locked
 async def ensure_client():
-    global client, tg_state
-    if client is not None and tg_state["phase"] != "error":
+    runtime = get_runtime()
+    if runtime.client is not None and runtime.tg_state["phase"] != "error":
         return
     try:
-        if client is not None:
-            await client.connect()
-            if await client.is_user_authorized():
+        if runtime.client is not None:
+            await runtime.client.connect()
+            if await runtime.client.is_user_authorized():
                 await finish_login()
             return
         api_id = int(get_setting("api_id", "0"))
         api_hash = get_setting("api_hash", "")
         if not api_id or not api_hash:
             raise HTTPException(400, "请先填写 API_ID / API_HASH")
-        client = TelegramClient(SESSION_PATH, api_id, api_hash)
-        await client.connect()
-        if await client.is_user_authorized():
+        runtime.check_live()
+        runtime.client = TelegramClient(runtime.session_path, api_id, api_hash)
+        await runtime.client.connect()
+        secure_files(runtime.directory)
+        if await runtime.client.is_user_authorized():
             await finish_login()
     except HTTPException:
         raise
     except Exception as e:
-        tg_state["phase"] = "error"
-        tg_state["err"] = str(e)
+        runtime.tg_state.update(phase="error", err=str(e))
         raise HTTPException(500, f"连接失败: {e}")
 
 
 @app.post("/api/tg/send_code")
+@account_locked
 async def tg_send_code(body: SendCode):
-    global tg_phone
     phone = body.phone.replace(" ", "").replace("-", "").replace("+", "")
     if not re.fullmatch(r"\d{8,15}", phone):
         raise HTTPException(400, "手机号格式不对,请带国家码,如 8613800138000")
     await ensure_client()
     try:
-        await client.send_code_request(phone)
-        tg_phone = phone
-        tg_state.update({"phase": "code_sent", "phone": phone, "err": None})
+        await get_runtime().client.send_code_request(phone)
+        get_runtime().tg_phone = phone
+        get_runtime().tg_state.update({"phase": "code_sent", "phone": phone, "err": None})
         return {"ok": True}
     except errors.PhoneNumberInvalidError:
         raise HTTPException(400, "手机号无效,请带国家码")
@@ -2162,13 +2276,16 @@ async def tg_send_code(body: SendCode):
 
 
 @app.post("/api/tg/verify_code")
+@account_locked
 async def tg_verify_code(body: VerifyCode):
+    if get_runtime().client is None or get_runtime().tg_state["phase"] != "code_sent" or not get_runtime().tg_phone:
+        raise HTTPException(409, "请先获取此账号的登录码")
     try:
-        result = await client.sign_in(tg_phone, body.code.strip())
+        result = await get_runtime().client.sign_in(get_runtime().tg_phone, body.code.strip())
         await finish_login(result)
         return {"ok": True}
     except errors.SessionPasswordNeededError:
-        tg_state["phase"] = "need_password"
+        get_runtime().tg_state["phase"] = "need_password"
         return {"ok": True, "need_password": True}
     except errors.PhoneCodeInvalidError:
         raise HTTPException(400, "验证码错误")
@@ -2179,9 +2296,12 @@ async def tg_verify_code(body: VerifyCode):
 
 
 @app.post("/api/tg/verify_password")
+@account_locked
 async def tg_verify_password(body: VerifyPassword):
+    if get_runtime().client is None or get_runtime().tg_state["phase"] != "need_password":
+        raise HTTPException(409, "此账号尚未进入两步验证阶段")
     try:
-        result = await client.sign_in(password=body.password)
+        result = await get_runtime().client.sign_in(password=body.password)
         await finish_login(result)
         return {"ok": True}
     except errors.PasswordHashInvalidError:
@@ -2190,69 +2310,48 @@ async def tg_verify_password(body: VerifyPassword):
         raise HTTPException(500, f"登录失败: {e}")
 
 
+@account_locked
 async def finish_login(me=None):
-    global watcher_task, handler_registered, signin_task, poll_task, keepalive_task, housekeeping_task, health_task, _session_alerted
-    me = me or await client.get_me()
-    tg_state["phase"] = "ready"
-    tg_state["err"] = None
-    tg_state["health_error"] = None
-    _session_alerted = False
-    tg_state["me"] = {
+    runtime = get_runtime()
+    me = me or await runtime.client.get_me()
+    runtime.tg_state.update(phase="ready", err=None, health_error=None)
+    runtime.session_alerted = False
+    runtime.tg_state["me"] = {
         "id": me.id,
         "name": getattr(me, "first_name", "") + (" " + me.last_name if getattr(me, "last_name", None) else ""),
         "username": getattr(me, "username", "") or "",
         "phone": getattr(me, "phone", "") or "",
-        "avatar": get_setting("avatar", ""),   # 自定义头像 URL,空则用 /avatar(TG 头像缓存)
+        "avatar": get_setting("avatar", ""),
     }
+    secure_files(runtime.directory)
+    # Preserve 1.0.6 entity prewarming and avatar best-effort semantics.
     try:
-        os.chmod(SESSION_PATH + ".session", 0o600)
+        await runtime.client.get_dialogs(limit=200)
     except Exception:
         pass
-    # 预热实体缓存,保证私有群 ID 可解析
     try:
-        await client.get_dialogs(limit=200)
+        await runtime.client.download_profile_photo(entity="me", file=str(runtime.avatar_file))
+        secure_files(runtime.directory)
     except Exception:
         pass
-    # 拉取 TG 头像缓存,面板展示用(失败则保留占位)
-    try:
-        await client.download_profile_photo(entity="me", file=str(AVATAR_FILE))
-    except Exception:
-        pass
-    if not handler_registered:
-        client.add_event_handler(on_group_message, events.NewMessage(incoming=True))
-        client.add_event_handler(on_auto_event, events.NewMessage(incoming=True))
-        handler_registered = True
-    if watcher_task is None or watcher_task.done():
-        watcher_task = asyncio.create_task(watcher_loop())
-    if signin_task is None or signin_task.done():
-        signin_task = asyncio.create_task(signin_loop())
-    if poll_task is None or poll_task.done():
-        poll_task = asyncio.create_task(poll_loop())
-    global keepalive_task
-    if keepalive_task is None or keepalive_task.done():
-        keepalive_task = asyncio.create_task(keepalive_loop())
-    if housekeeping_task is None or housekeeping_task.done():
-        housekeeping_task = asyncio.create_task(housekeeping_loop())
-    if health_task is None or health_task.done():
-        health_task = asyncio.create_task(health_loop())
-    log.info("已登录: %s (id=%s)", tg_state["me"]["name"], me.id)
+    if not runtime.handler_registered:
+        runtime.client.add_event_handler(runtime.bind_event(on_group_message, runtime.client), events.NewMessage(incoming=True))
+        runtime.client.add_event_handler(runtime.bind_event(on_auto_event, runtime.client), events.NewMessage(incoming=True))
+        runtime.handler_registered = True
+    for name, loop in (("watcher_task", watcher_loop), ("signin_task", signin_loop),
+                       ("poll_task", poll_loop), ("keepalive_task", keepalive_loop),
+                       ("housekeeping_task", housekeeping_loop), ("health_task", health_loop)):
+        task = getattr(runtime, name)
+        if task is None or task.done():
+            setattr(runtime, name, runtime.spawn(loop()))
+    log.info("账号 %s 已登录: %s (id=%s)", runtime.id, runtime.tg_state["me"]["name"], me.id)
 
 
 @app.post("/api/tg/logout")
+@account_locked
 async def tg_logout():
-    global client, watcher_task, handler_registered
-    handler_registered = False
-    if client is not None:
-        try:
-            await client.log_out()
-        except Exception:
-            pass
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
-        client = None
-    tg_state.update({"phase": "idle", "me": None, "err": None})
+    # Cancel watcher/retries/delayed deletes before logging out this client only.
+    await get_runtime().stop(logout=True)
     return {"ok": True}
 
 
@@ -2260,17 +2359,17 @@ async def tg_logout():
 @app.get("/api/watched")
 async def list_watched():
     """已监听群(直接读 DB,毫秒级,不依赖全量拉取)"""
-    rows = conn.execute("SELECT chat_id,name,added_at FROM watched_groups").fetchall()
+    rows = get_account_db().execute("SELECT chat_id,name,added_at FROM watched_groups").fetchall()
     return {"groups": [{"chat_id": r["chat_id"], "name": r["name"], "added_at": r["added_at"]} for r in rows]}
 
 
-_dialog_cache = {"ts": 0.0, "groups": []}
+# Dialog cache is per AccountRuntime.
 DIALOG_TTL = 60.0
 
 
 async def _fetch_all_dialogs():
     out = []
-    async for d in client.iter_dialogs(limit=500):
+    async for d in get_runtime().client.iter_dialogs(limit=500):
         if not d.is_group:
             continue
         out.append({
@@ -2283,19 +2382,19 @@ async def _fetch_all_dialogs():
 
 @app.get("/api/dialogs")
 async def list_dialogs(q: str = ""):
-    if client is None or tg_state["phase"] != "ready":
+    if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         raise HTTPException(409, "TG 尚未登录")
     now = time.time()
-    if not _dialog_cache["groups"] or now - _dialog_cache["ts"] > DIALOG_TTL:
+    if not get_runtime().dialog_cache["groups"] or now - get_runtime().dialog_cache["ts"] > DIALOG_TTL:
         try:
-            _dialog_cache["groups"] = await _fetch_all_dialogs()
-            _dialog_cache["ts"] = time.time()
+            get_runtime().dialog_cache["groups"] = await _fetch_all_dialogs()
+            get_runtime().dialog_cache["ts"] = time.time()
         except Exception as e:
-            if not _dialog_cache["groups"]:
+            if not get_runtime().dialog_cache["groups"]:
                 raise HTTPException(500, f"拉取群列表失败: {e}")
-    watched = {r["chat_id"] for r in conn.execute("SELECT chat_id FROM watched_groups").fetchall()}
+    watched = {r["chat_id"] for r in get_account_db().execute("SELECT chat_id FROM watched_groups").fetchall()}
     out = []
-    for g in _dialog_cache["groups"]:
+    for g in get_runtime().dialog_cache["groups"]:
         g = dict(g)
         g["watched"] = g["chat_id"] in watched
         if q and q.lower() not in g["name"].lower():
@@ -2311,19 +2410,19 @@ async def add_group(body: dict):
     name = str(body.get("name", "") or f"群 {chat_id}")
     if not chat_id:
         raise HTTPException(400, "缺少 chat_id")
-    conn.execute(
+    get_account_db().execute(
         "INSERT INTO watched_groups(chat_id,name,added_at) VALUES(?,?,?) ON CONFLICT(chat_id) DO UPDATE SET name=?",
         (chat_id, name, int(time.time()), name),
     )
-    conn.commit()
+    get_account_db().commit()
     invalidate_cache()
     return {"ok": True}
 
 
 @app.delete("/api/groups/{chat_id}")
 async def remove_group(chat_id: str):
-    conn.execute("DELETE FROM watched_groups WHERE chat_id=?", (chat_id,))
-    conn.commit()
+    get_account_db().execute("DELETE FROM watched_groups WHERE chat_id=?", (chat_id,))
+    get_account_db().commit()
     invalidate_cache()
     return {"ok": True}
 
@@ -2341,7 +2440,7 @@ class RuleIn(BaseModel):
 
 @app.get("/api/rules")
 async def list_rules():
-    rows = conn.execute("SELECT * FROM rules ORDER BY id DESC").fetchall()
+    rows = get_account_db().execute("SELECT * FROM rules ORDER BY id DESC").fetchall()
     return {"rules": [dict(r) for r in rows]}
 
 
@@ -2362,24 +2461,24 @@ async def create_rule(body: RuleIn):
         raise HTTPException(400, "表情只能填一个 emoji")
     if body.action == "both" and not body.value.strip():
         raise HTTPException(400, "回复内容不能为空")
-    cur = conn.execute(
+    cur = get_account_db().execute(
         "INSERT INTO rules(keywords,regex,action,value,reaction,groups,enabled,created_at) VALUES(?,?,?,?,?,?,?,?)",
         (body.keywords.strip(), body.regex, body.action, body.value.strip(), body.reaction.strip(),
          (body.groups or "").strip(), body.enabled, int(time.time())),
     )
-    conn.commit()
+    get_account_db().commit()
     invalidate_cache()
     return {"ok": True, "id": cur.lastrowid}
 
 
 @app.put("/api/rules/{rid}")
 async def update_rule(rid: int, body: RuleIn):
-    conn.execute(
+    get_account_db().execute(
         "UPDATE rules SET keywords=?,regex=?,action=?,value=?,reaction=?,groups=?,enabled=? WHERE id=?",
         (body.keywords.strip(), body.regex, body.action, body.value.strip(), body.reaction.strip(),
          (body.groups or "").strip(), body.enabled, rid),
     )
-    conn.commit()
+    get_account_db().commit()
     invalidate_cache()
     return {"ok": True}
 
@@ -2387,12 +2486,12 @@ async def update_rule(rid: int, body: RuleIn):
 @app.post("/api/rules/{rid}/toggle")
 async def toggle_rule(rid: int):
     """面板开关:翻转启用状态(不必回传整条规则)"""
-    r = conn.execute("SELECT enabled FROM rules WHERE id=?", (rid,)).fetchone()
+    r = get_account_db().execute("SELECT enabled FROM rules WHERE id=?", (rid,)).fetchone()
     if not r:
         raise HTTPException(404, "规则不存在")
     en = 0 if r["enabled"] else 1
-    conn.execute("UPDATE rules SET enabled=? WHERE id=?", (en, rid))
-    conn.commit()
+    get_account_db().execute("UPDATE rules SET enabled=? WHERE id=?", (en, rid))
+    get_account_db().commit()
     invalidate_cache()
     return {"ok": True, "enabled": en}
 
@@ -2401,6 +2500,7 @@ async def toggle_rule(rid: int):
 class AutoIn(BaseModel):
     type: str = "signin"          # signin | grabcodes | redpacket | custom
     name: str = ""
+    icon_url: str = Field("", max_length=2048)  # 任务图标，仅 HTTP(S)
     target: str = ""              # signin/custom: @机器人 或 群ID;grabcodes: 轮询机器人(可选)
     command: str = ""             # signin: 命令(| 分隔多条随机);grabcodes: 轮询探测命令(默认 /start)
     win_start: str = "08:00"      # signin: 窗口开始
@@ -2435,6 +2535,15 @@ def _valid_auto(body: AutoIn):
         raise HTTPException(400, "类型必须是 signin / grabcodes / redpacket / custom")
     if not body.name.strip():
         raise HTTPException(400, "请填写任务名称")
+    if body.icon_url:
+        from urllib.parse import urlsplit
+        try:
+            parsed = urlsplit(body.icon_url)
+            port = parsed.port
+        except ValueError:
+            raise HTTPException(400, "图标地址无效") from None
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.fragment or port == 0 or any(c.isspace() for c in body.icon_url):
+            raise HTTPException(400, "图标仅支持不含凭据的 HTTP(S) 图片地址")
     if body.type == "signin":
         if not body.target.strip() or not body.command.strip():
             raise HTTPException(400, "签到需要填写目标(@机器人)和命令")
@@ -2482,7 +2591,7 @@ def _valid_auto(body: AutoIn):
 
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
-              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons")
+              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url")
 
 
 def _auto_vals(body: AutoIn, extra=None):
@@ -2494,25 +2603,46 @@ def _auto_vals(body: AutoIn, extra=None):
         body.points_pat.strip(), body.is_chat, body.retries, body.signin_captcha,
         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
         body.poll_interval, body.custom_steps.strip(), body.chain_retry,
-        body.cooldown, body.enabled, body.command_delay, body.button_delay, body.refresh_buttons,
+        body.cooldown, body.enabled, body.command_delay, body.button_delay, body.refresh_buttons, body.icon_url.strip(),
     ] + (extra or [])
 
 
 @app.get("/api/autos")
 async def list_autos():
-    rows = conn.execute("SELECT * FROM automations ORDER BY id DESC").fetchall()
-    return {"autos": [dict(r, signed_today=(r["type"] == "signin" and r["last_at"] == now_local().strftime("%Y-%m-%d")),
-                            running=(r["id"] in _auto_running)) for r in rows]}
+    db = get_account_db()
+    rows = db.execute("SELECT * FROM automations ORDER BY id DESC").fetchall()
+    latest = db.execute("SELECT ts,rule_id,ok,content,reply,detail FROM hits WHERE id IN "
+                        "(SELECT MAX(id) FROM hits WHERE rule_id<0 GROUP BY rule_id)").fetchall()
+    results = {}
+    for hit in latest:
+        try:
+            detail = json.loads(hit["detail"] or "{}")
+        except (ValueError, TypeError):
+            detail = {}
+        if not isinstance(detail, dict):
+            detail = {}
+        results[-hit["rule_id"]] = {"ts": hit["ts"], "ok": hit["ok"],
+            "reply": hit["reply"] or detail.get("error") or hit["content"], "detail": detail}
+    window = _global_signin_window()
+    today = now_local().strftime("%Y-%m-%d")
+    output = []
+    for row in rows:
+        start, end = _effective_signin_window(row)
+        output.append(dict(row, signed_today=(row["type"] == "signin" and row["last_at"] == today),
+            running=(row["id"] in get_runtime().auto_tasks), last_result=results.get(row["id"]),
+            uses_global_window=(row["type"] == "signin" and window["enabled"]),
+            effective_win_start=start, effective_win_end=end))
+    return {"autos": output}
 
 
 @app.post("/api/autos")
 async def create_auto(body: AutoIn):
     _valid_auto(body)
-    cur = conn.execute(
+    cur = get_account_db().execute(
         f"INSERT INTO automations({_AUTO_COLS},created_at) VALUES({','.join('?' * (len(_AUTO_COLS.split(',')) + 1))})",
         _auto_vals(body, [int(time.time())]),
     )
-    conn.commit()
+    get_account_db().commit()
     _reset_auto_schedule(cur.lastrowid)
     return {"ok": True, "id": cur.lastrowid}
 
@@ -2520,17 +2650,17 @@ async def create_auto(body: AutoIn):
 @app.put("/api/autos/{aid}")
 async def update_auto(aid: int, body: AutoIn):
     _valid_auto(body)
-    if aid in _auto_running:
+    if aid in get_runtime().auto_tasks:
         raise HTTPException(409, "任务正在执行,请完成后再修改")
-    previous = conn.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    previous = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
     if previous is None:
         raise HTTPException(404, "任务不存在")
     cols = _AUTO_COLS.split(",")
-    conn.execute(
+    get_account_db().execute(
         f"UPDATE automations SET {','.join(c + '=?' for c in cols)} WHERE id=?",
         _auto_vals(body, [aid]),
     )
-    conn.commit()
+    get_account_db().commit()
     changed = any(previous[key] != value for key, value in (
         ("type", body.type), ("target", body.target.strip()), ("command", body.command.strip()),
         ("reply_text", body.reply_text.strip()), ("custom_steps", body.custom_steps.strip())))
@@ -2540,14 +2670,14 @@ async def update_auto(aid: int, body: AutoIn):
 
 @app.post("/api/autos/{aid}/toggle")
 async def toggle_auto(aid: int):
-    if aid in _auto_running:
+    if aid in get_runtime().auto_tasks:
         raise HTTPException(409, "任务正在执行,请完成后再切换")
-    r = conn.execute("SELECT enabled FROM automations WHERE id=?", (aid,)).fetchone()
+    r = get_account_db().execute("SELECT enabled FROM automations WHERE id=?", (aid,)).fetchone()
     if not r:
         raise HTTPException(404, "任务不存在")
     v = 0 if r["enabled"] else 1
-    conn.execute("UPDATE automations SET enabled=? WHERE id=?", (v, aid))
-    conn.commit()
+    get_account_db().execute("UPDATE automations SET enabled=? WHERE id=?", (v, aid))
+    get_account_db().commit()
     _reset_auto_schedule(aid)
     return {"ok": True, "enabled": v}
 
@@ -2555,36 +2685,36 @@ async def toggle_auto(aid: int):
 @app.post("/api/autos/{aid}/duplicate")
 async def duplicate_auto(aid: int):
     """一键复制任务"""
-    r = conn.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    r = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
     if not r:
         raise HTTPException(404, "任务不存在")
     d = dict(r)
-    cur = conn.execute(
+    cur = get_account_db().execute(
         f"INSERT INTO automations({_AUTO_COLS},created_at) VALUES({','.join('?' * (len(_AUTO_COLS.split(',')) + 1))})",
         [d[c] if c in d else "" for c in _AUTO_COLS.split(",")] + [int(time.time())],
     )
-    conn.commit()
+    get_account_db().commit()
     _reset_auto_schedule(cur.lastrowid)
     return {"ok": True, "id": cur.lastrowid}
 
 
 @app.delete("/api/autos/{aid}")
 async def delete_auto(aid: int):
-    if aid in _auto_running:
+    if aid in get_runtime().auto_tasks:
         raise HTTPException(409, "任务正在执行,请完成后再删除")
     _forget_auto_schedule(aid)
-    conn.execute("DELETE FROM automations WHERE id=?", (aid,))
-    conn.commit()
+    get_account_db().execute("DELETE FROM automations WHERE id=?", (aid,))
+    get_account_db().commit()
     return {"ok": True}
 
 
 @app.post("/api/autos/{aid}/run")
 async def run_auto_now(aid: int):
     """手动立即执行:signin/custom"""
-    a = conn.execute("SELECT * FROM automations WHERE id=? AND type IN ('signin','custom','keepalive')", (aid,)).fetchone()
+    a = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('signin','custom','keepalive')", (aid,)).fetchone()
     if not a:
         raise HTTPException(404, "该类型任务不可手动执行或不存在")
-    if client is None or tg_state["phase"] != "ready":
+    if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         raise HTTPException(409, "TG 尚未登录")
     if not _queue_auto(aid, manual=True):
         raise HTTPException(409, "任务正在执行,请勿重复提交")
@@ -2593,8 +2723,8 @@ async def run_auto_now(aid: int):
 
 @app.delete("/api/rules/{rid}")
 async def delete_rule(rid: int):
-    conn.execute("DELETE FROM rules WHERE id=?", (rid,))
-    conn.commit()
+    get_account_db().execute("DELETE FROM rules WHERE id=?", (rid,))
+    get_account_db().commit()
     invalidate_cache()
     return {"ok": True}
 
@@ -2603,9 +2733,11 @@ async def delete_rule(rid: int):
 SETTING_KEYS = ["tz", "log_keep_days", "cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar",
                 "notify_bark", "notify_bt", "notify_bc", "notify_on_success", "notify_on_fail",
                 "ai_base", "ai_key", "ai_model", "ai_enabled", "ocr_enabled",
-                "flock_enabled", "flock_count", "flock_minutes", "flock_pool"]
+                "flock_enabled", "flock_count", "flock_minutes", "flock_pool",
+                "signin_global_enabled", "signin_global_start", "signin_global_end"]
 DEFAULTS = {"cooldown": "20", "delay": "1.0 3.0", "ignore_bots": "1", "theme": "dark",
-            "flock_count": "5", "flock_minutes": "5", "ocr_enabled": "1", "log_keep_days": "30"}
+            "flock_count": "5", "flock_minutes": "5", "ocr_enabled": "1", "log_keep_days": "30",
+            "signin_global_enabled": "0", "signin_global_start": "00:05", "signin_global_end": "00:41"}
 
 
 @app.get("/api/settings")
@@ -2619,9 +2751,46 @@ async def update_settings(body: dict):
         name = str(body.get("tz") or "").strip()
         if name and not tz_valid(name):
             raise HTTPException(400, f"时区无效:{name}(例: Asia/Shanghai)")
+    global_keys = ("signin_global_enabled", "signin_global_start", "signin_global_end")
+    if any(key in body for key in global_keys):
+        previous = {key: get_setting(key, DEFAULTS[key]) for key in global_keys}
+        values = dict(previous)
+        for key in global_keys:
+            if key in body:
+                value = body[key]
+                if key == "signin_global_enabled":
+                    if value is True or value == 1 or value == "1":
+                        value = "1"
+                    elif value is False or value == 0 or value == "0":
+                        value = "0"
+                    else:
+                        raise HTTPException(400, "统一签到开关只能为 0 或 1")
+                elif not isinstance(value, str):
+                    raise HTTPException(400, "统一时间格式应为 HH:MM")
+                values[key] = str(value).strip()
+        start, end = _win_minutes(values["signin_global_start"]), _win_minutes(values["signin_global_end"])
+        if start is None or end is None or start >= end:
+            raise HTTPException(400, "统一签到窗口须同日开始早于结束")
+        root = get_root_db()
+        if root.in_transaction:
+            raise HTTPException(409, "数据库正在写入，请稍后保存统一时间")
+        try:
+            root.execute("BEGIN IMMEDIATE")
+            for key, value in values.items():
+                root.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=?", (key,value,value))
+            root.commit()
+        except sqlite3.Error:
+            root.rollback()
+            raise HTTPException(409, "统一时间保存失败，未修改窗口") from None
+        if values != previous:
+            for runtime in account_registry.accounts.values():
+                runtime.signin_plans.clear()
     for k, v in body.items():
-        if k in SETTING_KEYS:
+        if k in SETTING_KEYS and k not in global_keys:
             set_setting(k, str(v))
+    if "tz" in body:
+        for runtime in account_registry.accounts.values():
+            runtime.signin_plans.clear()
     if any(k in body for k in ("ai_base", "ai_key", "ai_model")):
         load_ai_cfg()
     return {"ok": True}
@@ -2703,8 +2872,8 @@ async def change_panel_password(body: dict, request: Request):
 
 @app.post("/api/toggle")
 async def toggle_paused(body: dict):
-    _running["paused"] = bool(body.get("paused", False))
-    return {"ok": True, "paused": _running["paused"]}
+    get_runtime().running["paused"] = bool(body.get("paused", False))
+    return {"ok": True, "paused": get_runtime().running["paused"]}
 
 
 # ---------- 状态 & 日志 ----------
@@ -2721,17 +2890,17 @@ async def get_time():
 
 @app.get("/api/state")
 async def get_state():
-    rules = conn.execute("SELECT COUNT(*) c FROM rules WHERE enabled=1").fetchone()["c"]
-    groups = conn.execute("SELECT COUNT(*) c FROM watched_groups").fetchone()["c"]
+    rules = get_account_db().execute("SELECT COUNT(*) c FROM rules WHERE enabled=1").fetchone()["c"]
+    groups = get_account_db().execute("SELECT COUNT(*) c FROM watched_groups").fetchone()["c"]
     return {
-        "tg": tg_state,
-        "logged_in": tg_state["phase"] == "ready",
-        "running": not _running["paused"],
-        "paused": _running["paused"],
+        "tg": get_runtime().tg_state,
+        "logged_in": get_runtime().tg_state["phase"] == "ready",
+        "running": not get_runtime().running["paused"],
+        "paused": get_runtime().running["paused"],
         "stats": {
             "watched_groups": groups,
             "rules": rules,
-            "hits": hits_count["total"],
+            "hits": get_runtime().hits_count["total"],
             "uptime_since": get_setting("uptime_since", str(int(time.time()))),
         },
         "panel_need_change": False,
@@ -2746,12 +2915,12 @@ async def clear_logs(body: dict = None):
     """手动清理日志:days 给了按天数删,没有则全清"""
     days = (body or {}).get("days")
     if days is None:
-        cur = conn.execute("DELETE FROM hits")
-        conn.commit()
+        cur = get_account_db().execute("DELETE FROM hits")
+        get_account_db().commit()
         n = cur.rowcount or 0
         try:
-            conn.execute("VACUUM")
-            conn.commit()
+            get_account_db().execute("VACUUM")
+            get_account_db().commit()
         except sqlite3.Error:
             pass
         return {"ok": True, "deleted": n, "mode": "all"}
@@ -2774,7 +2943,7 @@ async def get_logs(n: int = 60, kind: str = "", q: str = ""):
         like = "%" + q.strip()[:60] + "%"
         where += " AND (grp_name LIKE ? OR sender LIKE ? OR content LIKE ? OR reply LIKE ? OR detail LIKE ?)"
         params = list(params) + [like] * 5
-    rows = conn.execute(
+    rows = get_account_db().execute(
         "SELECT ts,chat_id,rule_id,msg_id,action,content,reply,grp_name,ok,sender,detail FROM hits "
         "WHERE " + where + " ORDER BY id DESC LIMIT ?",
         (*params, min(n, 200)),
@@ -2790,7 +2959,7 @@ async def get_logs(n: int = 60, kind: str = "", q: str = ""):
     if q.strip():
         return {"hits": out, "counts": {}}
     counts = {"reply": 0, "signin": 0, "grabcodes": 0, "redpacket": 0, "custom": 0, "keepalive": 0}
-    for r in conn.execute("SELECT action, COUNT(*) c FROM hits GROUP BY action").fetchall():
+    for r in get_account_db().execute("SELECT action, COUNT(*) c FROM hits GROUP BY action").fetchall():
         k = "reply" if r["action"] in ("reply", "react", "both") else r["action"]
         if k in counts:
             counts[k] += r["c"]
@@ -2849,11 +3018,37 @@ async def run_update(body: dict = None):
 
 @app.get("/avatar")
 async def avatar():
-    """返回缓存的 TG 头像;不存在或失败时前端自动回退首字母占位"""
-    if not AVATAR_FILE.exists():
+    """Authenticated account-specific Telegram avatar cache."""
+    file = get_runtime().avatar_file
+    get_runtime().check_live()
+    if not file.exists():
         raise HTTPException(404, "no avatar")
-    return FileResponse(AVATAR_FILE, media_type="image/jpeg")
+    return FileResponse(file, media_type="image/jpeg")
 
+
+# 独立路由模块统一使用当前账号任务库，图标设置则固定 root。
+from task_management import build_task_router
+from icon_library import build_icon_router
+
+app.include_router(build_task_router(
+    get_account_db, AutoIn, _valid_auto, _auto_vals, _AUTO_COLS,
+    invalidate_cache, _reset_auto_schedule, get_running_task_ids,
+    account_info=lambda: {"id": get_current_account_id(), "label": get_current_account_label()},
+))
+
+
+def root_get_setting(key, default=None):
+    row = get_root_db().execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def root_set_setting(key, value):
+    db = get_root_db()
+    db.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=?", (key,value,value))
+    db.commit()
+
+
+app.include_router(build_icon_router(root_get_setting, root_set_setting))
 
 # ---------------- 启动 ----------------
 if __name__ == "__main__":
