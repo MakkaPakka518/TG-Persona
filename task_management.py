@@ -31,17 +31,17 @@ MAX_BYTES = 2 * 1024 * 1024
 SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
-    "poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url"
+    "poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout"
 ).split(","))
 INTEGER_LIMITS = {
     "click_btn": (0, 1), "is_chat": (0, 1), "signin_captcha": (0, 1),
     "enabled": (0, 1), "refresh_buttons": (0, 1), "click_times": (1, 20),
     "click_interval": (50, 3000), "retries": (0, 5), "chain_retry": (1, 5),
-    "cooldown": (0, 86400), "poll_interval": (0, 90 * 86400),
+    "cooldown": (0, 86400), "poll_interval": (0, 90 * 86400), "result_timeout": (1, 300),
 }
 # Only effective fields are applied; custom windows/delays are NOT scheduled.
 APPLICABILITY = {
-    **{k: {"signin"} for k in ("win_start", "win_end", "command_delay", "button_delay",
+    **{k: {"signin"} for k in ("win_start", "win_end", "command_delay", "button_delay", "result_delay", "result_timeout",
                               "refresh_buttons", "click_btn", "btn_text", "btn_emoji",
                               "click_times", "click_interval")},
     "poll_interval": {"keepalive", "grabcodes"},
@@ -169,9 +169,10 @@ def _check_fields(data, allowed):
             lo, hi = INTEGER_LIMITS[key]
             if type(value) is not int or not lo <= value <= hi:
                 _bad(f"{key} 必须为 {lo}-{hi} 的整数")
-        elif key in ("command_delay", "button_delay"):
+        elif key in ("command_delay", "button_delay", "result_delay"):
             if type(value) not in (int, float) or not 0 <= value <= 120 or not math.isfinite(value):
                 _bad(f"{key} 必须为 0-120 的有限秒数")
+            result[key] = float(value)
         else:
             maximum = 262144 if key == "custom_steps" else 16384
             if not isinstance(value, str) or len(value) > maximum:

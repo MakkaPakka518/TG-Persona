@@ -8,6 +8,7 @@ import base64
 from collections import OrderedDict
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 import hashlib
 import hmac
 import ipaddress
@@ -64,7 +65,7 @@ def load_backend():
     tree = ast.parse(SOURCE.read_text(encoding='utf-8'), filename=str(SOURCE))
     safe_assignments = {'SESSION_TTL', 'CAPTCHA_TTL', 'AUTH_CACHE_MAX', 'CAPTCHA_CACHE_MAX',
                         'RL_WINDOW', 'RL_MAX', 'RL_BLOCK', 'CAPTCHA_AFTER', '_CAPTCHA_FONT', 'MAX_TEST_IMAGE',
-                        '_AUTO_COLS', 'RETRY_BASE', 'GLOBAL_SETTING_KEYS', '_TZ_FALLBACK'}
+                        '_AUTO_COLS', 'RETRY_BASE', 'GLOBAL_SETTING_KEYS', '_TZ_FALLBACK', '_failure_context'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -74,7 +75,7 @@ def load_backend():
             selected.append(node)
     names = {name: globals()[name] for name in ('ast', 'asyncio', 'base64', 'OrderedDict', 'datetime',
              'timezone', 'timedelta', 'hashlib', 'hmac', 'ipaddress', 'json', 'math', 'random', 're',
-             'secrets', 'sqlite3', 'struct', 'time', 'zlib')}
+             'secrets', 'sqlite3', 'struct', 'time', 'zlib', 'ContextVar')}
     names.update(BaseModel=Model, Optional=Optional, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
                  HTTPException=HTTPException, JSONResponse=Response, os=SimpleNamespace(environ={}),
                  log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=Exception,

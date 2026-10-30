@@ -196,6 +196,64 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     context.autoInput.command_delay='<img src=x>';assert(!run('autoDesc(autoInput)').includes('<img'));
     assert(run('autoDesc(autoInput)').includes('&lt;img'));
   });
+  await test('结果等待表单包含默认值范围步进及持续轮询语义',async()=>{
+    const form=html.slice(html.indexOf('id="af-signin"'),html.indexOf('id="af-grabcodes"'));
+    for(const [id,label,value,min,max,step] of [['sResultDelay','结果判断前延迟（秒）','0','0','120','0.1'],['sResultTimeout','等待最终回复上限（秒）','30','1','300','1']]){
+      assert(form.includes('<label for="'+id+'">'+label+'</label>'));
+      const input=form.match(new RegExp('<input\\b[^>]*id="'+id+'"[^>]*>'))[0];
+      for(const attr of ['type="number"','value="'+value+'"','min="'+min+'"','max="'+max+'"','step="'+step+'"','required'])assert(input.includes(attr));
+    }
+    for(const text of ['按钮/命令完成或验证提交后','先等待结果判断前延迟','持续轮询最终回复','不是等一次就判断','本日不自动重发'])assert(form.includes(text));
+  });
+  await test('结果等待新建及关闭取消恢复零秒和三十秒默认值',async()=>{
+    for(const reset of ["cancelAutoEdit('signin')","closeAutoForm('signin');openAutoForm('signin')"]){
+      editSignin({result_delay:9.2,result_timeout:123});run(reset);
+      assert.strictEqual(element('#sResultDelay').value,'0');assert.strictEqual(element('#sResultTimeout').value,'30');assert.strictEqual(run('editAuto'),null);
+    }
+  });
+  await test('旧任务结果等待缺失或 null 独立回填不影响已有配置',async()=>{
+    for(const data of [{},{result_delay:null,result_timeout:null},{result_delay:0},{result_delay:null,result_timeout:1},{result_delay:120,result_timeout:null}]){
+      editSignin(data);assert.strictEqual(element('#sResultDelay').value,String(data.result_delay??0));assert.strictEqual(element('#sResultTimeout').value,String(data.result_timeout??30));
+    }
+  });
+  await test('结果等待编辑保留数值零字符串零及合法上下边界',async()=>{
+    for(const [result_delay,result_timeout] of [[0,1],['0','300'],[0.1,30],[120,300],[0,0],['0','0']]){
+      editSignin({result_delay,result_timeout});assert.strictEqual(element('#sResultDelay').value,String(result_delay));assert.strictEqual(element('#sResultTimeout').value,String(result_timeout));
+    }
+  });
+  await test('结果等待新增保存数值默认值且空白输入独立回退',async()=>{
+    for(const fields of [{},{'#sResultDelay':' ','#sResultTimeout':''}]){
+      prepareSignin(fields);let request;context.api=async(p,o)=>{request=[p,o];return {}};await run("saveAuto('signin')");
+      assert.strictEqual(request[0],'/api/autos');assert.strictEqual(request[1].method,'POST');const body=JSON.parse(request[1].body);
+      assert.strictEqual(body.result_delay,0);assert.strictEqual(body.result_timeout,30);
+    }
+  });
+  await test('结果等待 POST PUT 保留完整签到参数零次重试及边界',async()=>{
+    for(const editing of [false,true])for(const [delay,timeout] of [[0,1],[120,300],[0.1,30]]){
+      editing?editSignin({enabled:0}):prepareSignin();
+      const values={'#sName':'完整任务','#sTarget':'@dummy_bot','#sCmd':'/checkin','#sIconUrl':'https://dummy.invalid/icon.png','#sWinStart':'09:00','#sWinEnd':'10:00','#sCommandDelay':'0','#sButtonDelay':'2.7','#sResultDelay':delay,'#sResultTimeout':timeout,'#sBtnText':'签到','#sBtnEmoji':'✅','#sClicks':'3','#sClickGap':'500','#sRefreshButtons':'0','#sKw':'成功','#sFw':'明确失败','#sPts':'积分:(\\d+)','#sRetries':'0'};
+      for(const [id,value] of Object.entries(values))element(id).value=value;
+      for(const id of ['#sIsChat','#sClickBtn','#sCap'])element(id).checked=true;
+      let request;context.api=async(p,o)=>{request=[p,o];return {}};await run("saveAuto('signin')");
+      assert.strictEqual(request[0],editing?'/api/autos/42':'/api/autos');assert.strictEqual(request[1].method,editing?'PUT':'POST');
+      const expected={type:'signin',name:'完整任务',target:'@dummy_bot',command:'/checkin',icon_url:'https://dummy.invalid/icon.png',is_chat:1,win_start:'09:00',win_end:'10:00',click_btn:1,btn_text:'签到',btn_emoji:'✅',click_times:3,click_interval:500,refresh_buttons:0,command_delay:0,button_delay:2.7,result_delay:delay,result_timeout:timeout,success_kw:'成功',fail_kw:'明确失败',points_pat:'积分:(\\d+)',retries:0,signin_captcha:1};
+      if(editing)expected.enabled=0;assert.deepStrictEqual(JSON.parse(request[1].body),expected);
+    }
+  });
+  await test('结果等待拒绝越界非有限数及错误步进且不发送请求',async()=>{
+    let sent=0;context.api=async()=>{sent++;return {}};
+    for(const [id,invalid,hint] of [['#sResultDelay',['-0.1','120.1','NaN','Infinity','1.05'],'0–120 秒'],['#sResultTimeout',['0','-1','301','NaN','Infinity','1.1'],'1–300 秒']]){
+      for(const value of invalid){prepareSignin({[id]:value});await run("saveAuto('signin')");assert(calls.at(-1)[1].includes(hint));}
+    }
+    assert.strictEqual(sent,0);
+  });
+  await test('结果等待任务摘要显示缺省零边界且安全转义',async()=>{
+    for(const values of [{},{result_delay:null,result_timeout:null},{result_delay:0,result_timeout:1},{result_delay:120,result_timeout:300}]){
+      context.autoInput={type:'signin',...values};const desc=run('autoDesc(autoInput)');
+      assert(desc.includes('结果判断前延迟 '+(values.result_delay??0)+'秒'));assert(desc.includes('等待最终回复上限 '+(values.result_timeout??30)+'秒'));
+    }
+    context.autoInput={type:'signin',result_delay:'<img src=x>',result_timeout:'<script>bad()</script>'};const desc=run('autoDesc(autoInput)');assert(desc.includes('&lt;img')&&desc.includes('&lt;script'));assert(!desc.includes('<img')&&!desc.includes('<script'));
+  });
   await test('连点下拉框提供刷新默认及复用两种明确模式',async()=>{
     const select=html.match(/<select id="sRefreshButtons">([\s\S]*?)<\/select>/)[1];
     assert(select.includes('<option value="1" selected>刷新按钮状态'));
@@ -552,6 +610,22 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(markup.includes('命令后等待'));assert(markup.includes('0 秒'));assert(markup.includes('复用同一按钮'));
     assert(markup.includes('&lt;img'));assert(!markup.includes('<img'));
   });
+  await test('签到日志展示结果等待零边界且兼容缺少新字段',async()=>{
+    for(const values of [{result_delay:0,result_timeout:1},{result_delay:120,result_timeout:300}]){
+      context.logFixture={action:'signin',ok:1,ts:1,detail:{...values}};const markup=run('logRow(logFixture)');
+      for(const [label,value] of [['结果判断前延迟',values.result_delay],['等待最终回复上限',values.result_timeout]])assert(markup.includes('<span class="k">'+label+'</span>'+value+' 秒'));
+    }
+    context.logFixture={action:'signin',ok:1,ts:1,detail:{}};const old=run('logRow(logFixture)');assert(!old.includes('结果判断前延迟')&&!old.includes('等待最终回复上限'));assert(old.includes('成功'));
+    context.logFixture.detail={result_delay:'<img src=x>',result_timeout:'<script>bad()</script>'};const safe=run('logRow(logFixture)');assert(safe.includes('&lt;img')&&safe.includes('&lt;script'));assert(!safe.includes('<img')&&!safe.includes('<script'));
+  });
+  await test('待确认日志优先识别状态展示原因且不误报失败',async()=>{
+    for(const ok of [false,0,null,undefined,true])for(const reason of [{reason:'<img src=x onerror=bad()>'},{error:'等待超时'},{}]){
+      context.logFixture={action:'signin',ok,ts:1,detail:{status:'unconfirmed',...reason}};const markup=run('logRow(logFixture)');
+      assert(markup.includes('class="st pending">待确认'));assert(markup.includes('待确认原因'));assert(markup.includes('本日不自动重发'));
+      assert(!markup.includes('>失败<')&&!markup.includes('失败原因')&&!markup.includes('<img'));assert(markup.includes(reason.reason?'&lt;img':reason.error||'等待最终回复超时，结果仍未知'));
+    }
+    for(const [ok,label] of [[true,'成功'],[false,'失败'],[null,'记录']]){context.logFixture={action:'signin',ok,ts:1,detail:{}};assert(run('logRow(logFixture)').includes('>'+label+'</span>'));}
+  });
   // 整份真实前端脚本在独立离线 VM 中运行，避免仅测试复制实现。
   const fullCalls=[],downloaded=[],timers=[],store=new Map(),sessionStore=new Map();
   const q=id=>element('#full-'+id);
@@ -899,6 +973,61 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('AI草稿切换账号时丢弃迟到结果',async()=>{
     q('#aiDraftText').value='task';let resolve;app.api=()=>new Promise(r=>resolve=r);const pending=ex('generateAIDraft()');
     ex("selectedAccount='another';accountEpoch++;resetAIAssistant()");resolve({ok:true,draft:app.generated});await pending;assert.strictEqual(ex('aiDraft'),null);assert(!q('#aiDraftBtn').disabled);
+  });
+  await test('最近执行待确认保留原因实际回复与当日不重发说明',async()=>{
+    for(const result of [{ok:0,detail:{status:'unconfirmed',reason:'等待回复超时'}},{ok:null,detail:{status:'unconfirmed',error:'缺少最终证据'}},{ok:true,status:'unconfirmed',detail:null}]){
+      app.pendingTask={type:'signin',last_result:{ts:1,reply:'处理中',...result}};const text=ex('autoLastResult(pendingTask)');
+      assert(text.includes(' · 待确认'));assert(!text.includes(' · 失败')&&!text.includes(' · 成功'));assert(text.includes('实际回复：处理中'));assert(text.includes('待确认原因：'));assert(text.includes('本日不自动重发'));
+      assert(text.includes(result.detail?.reason||result.detail?.error||'等待最终回复超时，结果仍未知'));
+    }
+  });
+  await test('待确认任务卡片独立保留启用停用及折叠操作并转义原因',async()=>{
+    for(const enabled of [0,1])for(const topStatus of [false,true]){
+      app.pendingTask={id:501,type:'signin',name:'待确认任务',enabled,target:'@dummy',command:'/sign',status:topStatus?'unconfirmed':undefined,last_result:{ts:1,ok:0,reply:'<img src=x>',detail:{status:topStatus?undefined:'unconfirmed',reason:'<script>reason</script>'}}};
+      ex("autos=[pendingTask];openedAutoIds.clear();renderAutoList('signin')");let markup=q('#aListSign').innerHTML;
+      assert(markup.includes('class="tag pending" role="status">待确认'));assert(markup.includes(enabled?'已启用':'已停用'));assert(!markup.includes('auto-details'));assert(markup.includes('aria-expanded="false"'));
+      assert(markup.includes('data-auto-action="toggle"'));assert.strictEqual(ex('autos[0].enabled'),enabled);
+      ex('toggleAutoExpanded(501)');markup=q('#aListSign').innerHTML;assert(markup.includes('待确认原因'));assert(markup.includes('&lt;script&gt;reason'));assert(!markup.includes('<script>reason')&&!markup.includes('<img src=x>'));
+    }
+  });
+  await test('AI 填入草稿结果等待默认零与边界并完整保存为停用',async()=>{
+    for(const fields of [{},{result_delay:null,result_timeout:null},{result_delay:0,result_timeout:1},{result_delay:120,result_timeout:300},{result_delay:0.1,result_timeout:30}]){
+      app.resultDraft={type:'signin',name:'等待结果草稿',target:'@dummy',command:'/sign',retries:0,...fields};ex('resetAIAssistant();aiDraft={account:accountContext(),draft:resultDraft}');let sent=[];
+      app.api=async(p,o)=>{sent.push([p,o]);return {}};ex('fillAIDraft()');assert.strictEqual(sent.length,0);
+      assert.strictEqual(q('#sResultDelay').value,String(fields.result_delay??0));assert.strictEqual(q('#sResultTimeout').value,String(fields.result_timeout??30));
+      await ex("saveAuto('signin')");assert.strictEqual(sent.length,1);const [url,options]=sent[0],body=JSON.parse(options.body);
+      assert.strictEqual(url,'/api/autos');assert.strictEqual(body.result_delay,fields.result_delay??0);assert.strictEqual(body.result_timeout,fields.result_timeout??30);assert.strictEqual(body.retries,0);assert.strictEqual(body.enabled,0);
+    }
+  });
+  await test('AI 配置投影保留结果等待排除运行状态并参与变更指纹',async()=>{
+    app.resultTask={id:601,type:'signin',name:'AI 参数保留',target:'@dummy',command:'/sign',enabled:0,command_delay:0,button_delay:2,result_delay:0,result_timeout:300,retries:0,icon_url:'https://dummy.invalid/icon.png',last_result:{ok:0,detail:{status:'unconfirmed'}},status:'unconfirmed'};
+    const projected=copy(ex('taskConfig(resultTask)'));assert.strictEqual(projected.result_delay,0);assert.strictEqual(projected.result_timeout,300);assert.strictEqual(projected.retries,0);assert(!('id' in projected)&&!('last_result' in projected)&&!('status' in projected));
+    const before=ex('taskFingerprint(resultTask)');ex('resultTask.result_timeout=30');assert.notStrictEqual(ex('taskFingerprint(resultTask)'),before);ex('resultTask.result_timeout=300;resultTask.result_delay=0.1');assert.notStrictEqual(ex('taskFingerprint(resultTask)'),before);ex('resultTask.result_delay=0');
+  });
+  await test('AI 结果等待建议接受合法数值拒绝越界步进和错误类型',async()=>{
+    for(const [field,valid,invalid,label] of [['result_delay',[0,0.1,120],[-0.1,120.1,1.05,'0',null,Infinity,NaN],'结果判断前延迟（秒）'],['result_timeout',[1,30,300],[0,301,1.1,'30',null,Infinity,NaN],'等待最终回复上限（秒）']]){
+      for(const value of valid){app.suggestion={field,value};assert(ex("aiSuggestionValid(suggestion,'signin')"));assert(!ex("aiSuggestionValid(suggestion,'custom')"));assert(!ex("aiSuggestionValid(suggestion,'keepalive')"));}
+      for(const value of invalid){app.suggestion={field,value};assert(!ex("aiSuggestionValid(suggestion,'signin')"));}
+      app.field=field;assert.strictEqual(ex('AI_LABELS[field]'),label);assert.strictEqual(ex('AI_DIAG_LABELS[field]'),label);
+    }
+  });
+  await test('AI 应用其他建议 PUT 仍保留结果等待完整配置和零重试',async()=>{
+    ex("resetAIAssistant();autos=[resultTask];aiDiagnoses.set(601,{account:accountContext(),fingerprint:taskFingerprint(resultTask),applied:new Set(),suggestions:[{field:'button_delay',value:4}]})");
+    const before=copy(ex('taskConfig(resultTask)'));let requests=[];app.window.confirm=()=>true;
+    app.api=async(p,o)=>{requests.push([p,o]);return o?.method==='PUT'?{}:{autos:[copy(app.resultTask)]}};
+    await ex('applyAISuggestion(601,0)');assert.strictEqual(requests.length,2);assert.strictEqual(requests[1][0],'/api/autos/601');assert.strictEqual(requests[1][1].method,'PUT');assert.deepStrictEqual(JSON.parse(requests[1][1].body),{...before,button_delay:4});
+  });
+  await test('AI 结果等待单项建议确认后保存其余参数完全不变',async()=>{
+    for(const [field,value] of [['result_delay',0.1],['result_timeout',1]]){
+      app.suggestion={field,value};ex('resetAIAssistant();autos=[resultTask];aiDiagnoses.set(601,{account:accountContext(),fingerprint:taskFingerprint(resultTask),applied:new Set(),suggestions:[suggestion]})');let puts=[];
+      app.api=async(p,o)=>{if(o?.method==='PUT')puts.push(JSON.parse(o.body));return {autos:[copy(app.resultTask)]}};const before=copy(ex('taskConfig(resultTask)'));
+      app.window.confirm=()=>false;await ex('applyAISuggestion(601,0)');assert.strictEqual(puts.length,0);
+      app.window.confirm=()=>true;await ex('applyAISuggestion(601,0)');assert.deepStrictEqual(puts,[{...before,[field]:value}]);
+    }
+  });
+  await test('AI 直接保存草稿白名单保留结果等待且不携带运行状态',async()=>{
+    ex('resetAIAssistant();aiDraft={account:accountContext(),draft:resultTask}');let sent=[];app.window.confirm=()=>true;app.api=async(p,o)=>{sent.push([p,JSON.parse(o.body)]);return {}};
+    await ex('saveAIDraft()');assert.strictEqual(sent.length,1);assert.strictEqual(sent[0][0],'/api/autos');assert.strictEqual(sent[0][1].result_delay,0);assert.strictEqual(sent[0][1].result_timeout,300);assert.strictEqual(sent[0][1].enabled,0);assert(!('last_result' in sent[0][1])&&!('status' in sent[0][1]));
   });
   console.log(`前端回归 ${count} 项全部通过`);
 })().catch(e=>{console.error(e);process.exitCode=1});

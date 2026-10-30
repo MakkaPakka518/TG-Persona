@@ -114,7 +114,8 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_unconfirmed_result_not_marked_success(self):
         aid=await self.create();self.answer_result='请输入验证码'
         await self.run_flow(aid)
-        self.assertEqual(self.row(aid)['last_status'],'failed');self.assertEqual(self.row(aid)['last_at'],'')
+        self.assertEqual(self.row(aid)['last_status'],'unconfirmed');self.assertEqual(self.row(aid)['last_at'],'')
+        self.b['_signin_tick']();self.assertNotIn(aid,self.b['_auto_running'])
 
     async def test_custom_success_keyword_is_respected(self):
         aid=await self.create(success_kw='积分到账');self.answer_result='积分到账'
@@ -181,6 +182,39 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
         self.b['client'].get_messages=AsyncMock(return_value=[confirmed])
         _,status=await self.b['_await_signin_result']('entity',103,baseline=baseline,require_success=True)
         self.assertEqual(status,'success')
+
+    async def test_scheduled_failures_notify_once_only_after_retry_budget_exhausted(self):
+        aid=await self.create(retries=1,success_kw='永不命中')
+        self.b['run_signin']=AsyncMock(return_value=False)
+        self.b['_signin_deadline']=lambda *args: time.time()+3600
+        self.b['notify_event'].reset_mock()
+        await self.b['_execute_auto'](aid,manual=False)
+        self.b['notify_event'].assert_not_called()
+        self.b['conn'].execute('UPDATE automations SET next_run_at=0 WHERE id=?',(aid,));self.b['conn'].commit()
+        await self.b['_execute_auto'](aid,manual=False)
+        self.assertEqual(self.b['notify_event'].call_count,1)
+        self.assertIn('本轮重试已结束',self.b['notify_event'].call_args.args[2])
+        self.b['conn'].execute('UPDATE automations SET next_run_at=0 WHERE id=?',(aid,));self.b['conn'].commit()
+        self.b['_signin_tick']()
+        self.assertNotIn(aid,self.b['_auto_running'])
+        self.assertEqual(self.b['notify_event'].call_count,1)
+
+    async def test_success_balance_message_supplements_configured_keyword(self):
+        text='🧧恭喜获得 | 4 问币\n💵当前持有 | 275 问币\n⌛签到日期 | 2026-10-30'
+        self.assertTrue(self.b['_signin_succeeded'](text,'成功'))
+
+    async def test_latest_success_beats_older_failure(self):
+        self.b['client'].get_messages=AsyncMock(return_value=[message(108,'签到成功'),message(107,'验证码错误！')])
+        text,status=await self.b['_await_signin_result']('entity',105,require_success=True)
+        self.assertEqual((text,status),('签到成功','success'))
+
+    async def test_unconfirmed_stops_same_day_scheduler_even_retries_change(self):
+        aid=await self.create(retries=1)
+        db=self.b['conn'];db.execute("UPDATE automations SET retry_day='2026-10-30',retry_count=1,last_status='unconfirmed',next_run_at=0 WHERE id=?",(aid,));db.commit()
+        self.b['_signin_tick']();self.assertNotIn(aid,self.b['_auto_running'])
+        body=self.b['AutoIn'](name='fixture',target='@dummy',command='/start',retries=0)
+        await self.b['update_auto'](aid,body);self.assertEqual(self.row(aid)['last_status'],'unconfirmed')
+        self.b['_signin_tick']();self.assertNotIn(aid,self.b['_auto_running'])
 
     async def test_delay_and_mode_validation_and_copy(self):
         aid=await self.create(command_delay=0,button_delay=120,refresh_buttons=0)

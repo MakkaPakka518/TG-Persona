@@ -40,6 +40,7 @@ try:
 except ImportError:                     # 3.8 没有 zoneinfo,退化为固定偏移
     ZoneInfo = None
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 try:
@@ -174,6 +175,9 @@ def db_init(database=None):
         ("button_delay", "REAL DEFAULT 2.0"),
         ("refresh_buttons", "INTEGER DEFAULT 1"),
         ("icon_url", "TEXT DEFAULT ''"),
+        ("result_delay", "REAL DEFAULT 0"),
+        ("result_timeout", "INTEGER DEFAULT 30"),
+        ("failure_notified", "TEXT DEFAULT ''"),
         ("last_attempt", "INTEGER DEFAULT 0"),
         ("retry_count", "INTEGER DEFAULT 0"),
         ("retry_day", "TEXT DEFAULT ''"),
@@ -465,16 +469,27 @@ def _ai_endpoint(base):
     return base if base.endswith("/chat/completions") else base + "/chat/completions"
 
 
-async def _call_ai(cfg, content, max_tokens=512):
+async def _call_ai(cfg, content, max_tokens=512, assistant_mode=False):
     if not cfg.get("base") or not cfg.get("key") or not cfg.get("model"):
         raise ValueError("请填写 AI API 地址、密钥和模型名")
     endpoint = _ai_endpoint(cfg["base"])
     if httpx is None:
         raise RuntimeError("服务器未安装 httpx，请重新安装项目依赖")
-    async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+    payload = {"model": cfg["model"], "messages": [{"role": "user", "content": content}], "max_tokens": max_tokens}
+    if assistant_mode:
+        # GLM-5.3 官方接口强制思考，disabled 会报错；仅助手降低思考强度。
+        # https://docs.bigmodel.cn/cn/guide/capabilities/thinking
+        from urllib.parse import urlsplit
+        host = (urlsplit(endpoint).hostname or "").lower()
+        model = str(cfg["model"]).strip().lower()
+        if host == "open.bigmodel.cn" and re.fullmatch(r"glm-5\.3(?:-flashx?)?", model):
+            payload["thinking"] = {"type": "enabled"}
+            payload["reasoning_effort"] = "low"
+            payload["max_tokens"] = max(max_tokens, 8192)
+    async with httpx.AsyncClient(timeout=90 if assistant_mode else 30, follow_redirects=False) as client:
+        # 不自动重发计费请求；失败由用户明确点击重试。
         response = await client.post(endpoint,
-            headers={"Authorization": "Bearer " + cfg["key"]},
-            json={"model": cfg["model"], "messages": [{"role": "user", "content": content}], "max_tokens": max_tokens})
+            headers={"Authorization": "Bearer " + cfg["key"]}, json=payload)
         try:
             data = response.json()
         except (ValueError, TypeError):
@@ -490,10 +505,18 @@ async def _call_ai(cfg, content, max_tokens=512):
             if isinstance(reply, list):
                 reply = "".join(str(part.get("text", "")) for part in reply if isinstance(part, dict))
             reply = str(reply or "").strip()
-        except (KeyError, IndexError, TypeError):
+            reasoning = data["choices"][0]["message"].get("reasoning_content")
+            finish = data["choices"][0].get("finish_reason")
+        except (KeyError, IndexError, TypeError, AttributeError):
             raise RuntimeError("AI 返回格式不兼容，缺少 choices/message/content") from None
+        if assistant_mode and finish in ("length", "max_tokens"):
+            raise RuntimeError("AI 输出达到本次上限（" + str(payload["max_tokens"]) + "），正文不完整；未使用截断内容，请简化描述或换用较少思考的模型")
         if not reply:
-            raise RuntimeError("AI 未返回正文，请检查模型是否支持此接口或是否耗尽输出额度")
+            if isinstance(reasoning, str) and reasoning.strip():
+                raise RuntimeError("AI 仅返回思考过程、没有最终正文；未将思考内容用作任务，请检查模型输出设置")
+            if finish == "content_filter":
+                raise RuntimeError("AI 服务未提供正文（响应被内容过滤），请调整描述")
+            raise RuntimeError("AI 返回空正文；接口已响应，但没有可用答案，请重试或检查模型配置")
         return reply
 
 
@@ -1209,11 +1232,33 @@ class _RetryLater(Exception):
         self.seconds = max(60, int(seconds) + 1)
 
 
+_failure_context = ContextVar("persona_failure_notice", default=None)
+
+
+def _notify_task_failure(a, message):
+    context = _failure_context.get()
+    if context is not None and context["id"] == a["id"]:
+        context["message"] = str(message)[:200]
+        return  # 自动尝试中间只记日志，耗尽后由执行器通知一次。
+    notify_event("fail", a["name"], str(message)[:200])
+
+
+def _task_unconfirmed(a, message, content="", reply=""):
+    context = _failure_context.get()
+    if context is not None:
+        context["unconfirmed"] = True
+    add_hit(a["type"], False, chat_id=a["target"], rule_id=-a["id"], grp_name=a["name"],
+            content=content, reply=reply, detail={"kind":a["type"],"task":a["name"],"bot":a["target"],
+            "status":"unconfirmed","error":str(message)[:200],"result_delay":a["result_delay"],"result_timeout":a["result_timeout"]})
+    _notify_task_failure(a, message)
+    return False
+
+
 def _task_failure(a, message, content=""):
     add_hit(a["type"], False, chat_id=a["target"], rule_id=-a["id"], grp_name=a["name"],
             content=content, detail={"kind": a["type"], "task": a["name"],
                                      "error": str(message)[:200]})
-    notify_event("fail", a["name"], str(message)[:200])
+    _notify_task_failure(a, message)
     log.warning("任务失败 %s: %s", a["name"], message)
     return False
 
@@ -1225,7 +1270,12 @@ def _signin_failed(text, configured=""):
 
 def _signin_succeeded(text, configured=""):
     defaults = "签到成功,签到完成,今日已签到,已经签到,已签到,check-in successful,check in successful,already checked in"
-    return match_keywords(configured or defaults, text)
+    if match_keywords(configured + "," + defaults, text):
+        return True
+    # 严格组合证据：本轮新回复同时含奖励、余额、当日签到日期才确认。
+    today = now_local().strftime("%Y-%m-%d")
+    return ("恭喜获得" in text and "当前持有" in text and "签到日期" in text and today in text)
+
 
 
 async def _await_signin_result(ent, min_id, success_kw="", fail_kw="", baseline=None, require_success=False, timeout=12):
@@ -1240,10 +1290,13 @@ async def _await_signin_result(ent, min_id, success_kw="", fail_kw="", baseline=
             text = "\n".join(str(getattr(m, "raw_text", "") or "") for m in reversed(fresh)).strip()
             if text:
                 last_text = text
-                if _signin_failed(text, fail_kw):
-                    return text, "failed"
-                if _signin_succeeded(text, success_kw):
-                    return text, "success"
+                # 从最新回复开始判定：旧错误不能压过后来的明确成功。
+                for message in sorted(fresh, key=lambda item: item.id, reverse=True):
+                    current_text = str(getattr(message, "raw_text", "") or "").strip()
+                    if _signin_failed(current_text, fail_kw):
+                        return current_text, "failed"
+                    if _signin_succeeded(current_text, success_kw):
+                        return current_text, "success"
                 if not require_success and not success_kw:
                     return text, "received"
         except errors.FloodWaitError as error:
@@ -1266,11 +1319,13 @@ async def run_signin(a):
     ent = await resolve_entity(target)
     if ent is None:
         return _task_failure(a, "签到目标解析失败", cmd)
-    captcha_baseline = await _message_snapshot(ent) if a["signin_captcha"] else None
+    captcha_baseline = await _message_snapshot(ent)
+    outcome_baseline = captcha_baseline
     try:
         sent_msg = await get_runtime().client.send_message(ent, cmd)
         min_id = sent_msg.id
         captcha_min_id = min_id
+        result_min_id = min_id
     except errors.FloodWaitError as e:
         raise _RetryLater(e.seconds) from e
     except Exception as e:
@@ -1303,12 +1358,15 @@ async def run_signin(a):
                                     button_message = latest_button_message
                             except Exception:
                                 pass
-                    if a["signin_captcha"] and (i == 0 or a["refresh_buttons"]):
+                    if i == 0 or a["refresh_buttons"]:
                         # 必须在点击前取快照，点击产生的新消息不能被误纳入旧边界。
                         captcha_baseline = await _message_snapshot(ent)
                         if button_message is not None:
                             captcha_baseline.setdefault(button_message.id, _message_signature(button_message))
                         captcha_min_id = max([min_id] + list(captcha_baseline))
+                        if i == 0:
+                            outcome_baseline = captcha_baseline
+                            result_min_id = captcha_min_id
                     await b.click()
                 clicked_btn = True
                 btn_text_clicked = getattr(b, "text", "") or ""
@@ -1317,11 +1375,22 @@ async def run_signin(a):
         except errors.FloodWaitError as e:
             raise _RetryLater(e.seconds) from e
         except Exception as e:
+            if type(e).__name__ in ("MessageIdInvalidError", "BotResponseTimeoutError", "QueryIdInvalidError"):
+                await asyncio.sleep(float(a["result_delay"]))
+                response, outcome = await _await_signin_result(ent, result_min_id, a["success_kw"], a["fail_kw"],
+                    baseline=outcome_baseline, require_success=True, timeout=a["result_timeout"])
+                if outcome == "success":
+                    add_hit("signin", True, chat_id=target, rule_id=-a["id"], grp_name=a["name"], content=cmd, reply=response,
+                            detail={"kind":"signin","task":a["name"],"bot":target,"reply":response,"note":"按钮回调失效，但收到本轮成功确认"})
+                    notify_event("success", a["name"], response[:120])
+                    return True
+                if outcome == "failed":
+                    return _task_failure(a, "按钮回调失效，机器人明确回复失败："+response[:100], cmd)
+                return _task_unconfirmed(a, "按钮回调失效，未能确认结果；本日停止自动重发，请查看机器人", cmd, response)
             return _task_failure(a, f"签到点按钮失败: {e}", cmd)
 
     # 可选:点签到后出现图片验证码,自动识别并回复
     cap_ans, cap_m = "", None
-    outcome_baseline = None
     if a["signin_captcha"]:
         cap_m, img = await _await_signin_captcha(ent, 25, min_id=captcha_min_id, baseline=captcha_baseline)
         if not img:
@@ -1333,33 +1402,26 @@ async def run_signin(a):
             outcome_baseline = await _message_snapshot(ent)
             cap_sent = await get_runtime().client.send_message(ent, cap_ans)
             min_id = cap_sent.id
+            result_min_id = min_id
             log.info("签到验证码已回复")
         except errors.FloodWaitError as e:
             raise _RetryLater(e.seconds) from e
         except Exception as e:
             return _task_failure(a, f"验证码回复失败: {e}", cmd)
 
-    # 未配置关键词也识别常见明确错误；验证码提交后必须有成功确认。
+    # 操作完成后先按配置等待，再持续轮询直到明确结果或上限。
+    await asyncio.sleep(float(a["result_delay"]))
     ok, points, fail = True, "", False
     skw = str(a["success_kw"] or "").strip()
     fkw = str(a["fail_kw"] or "").strip()
     ppat = str(a["points_pat"] or "").strip()
-    reply_txt, failure_reason = "", ""
-    if skw or fkw or ppat or cap_ans:
-        reply_txt, result_status = await _await_signin_result(ent, min_id, skw, fkw,
-            baseline=outcome_baseline, require_success=bool(cap_ans or skw))
-        fail = result_status == "failed"
-        ok = result_status in ("success", "received")
-        if fail:
-            failure_reason = "机器人明确拒绝本次请求：" + reply_txt[:120]
-        elif not ok:
-            failure_reason = "未收到本轮签到成功确认" + ("，请配置正确的成功关键词" if not skw else "（" + skw + "）")
-    else:
-        reply_txt, _ = await _fetch_reply(ent, min_id=min_id)
-        fail = _signin_failed(reply_txt, fkw)
-        ok = not fail
-        if fail:
-            failure_reason = "机器人明确拒绝本次请求：" + reply_txt[:120]
+    reply_txt, result_status = await _await_signin_result(ent, result_min_id, skw, fkw,
+        baseline=outcome_baseline, require_success=True, timeout=a["result_timeout"])
+    fail = result_status == "failed"
+    ok = result_status == "success"
+    failure_reason = "机器人明确拒绝本次请求：" + reply_txt[:120] if fail else ""
+    if not ok and not fail:
+        return _task_unconfirmed(a, "等待最终回复超时，结果未知；本日不自动重发，请检查机器人实际结果", cmd, reply_txt)
     if ppat and reply_txt:
         try:
             m = re.search(ppat, reply_txt)
@@ -1376,10 +1438,10 @@ async def run_signin(a):
         desc += f" · 积分 {points}"
     if fail:
         desc += " (失败)"
-        notify_event("fail", a["name"], failure_reason)
+        _notify_task_failure(a, failure_reason)
     elif ok is False:
         desc += " (未达成功条件)"
-        notify_event("fail", a["name"], failure_reason)
+        _notify_task_failure(a, failure_reason)
     else:
         notify_event("success", a["name"], f"签到成功{('· 积分 '+points) if points else ''} · {target}")
     add_hit("signin", not (fail or ok is False), chat_id=target, rule_id=-a["id"], grp_name=a["name"],
@@ -1391,6 +1453,7 @@ async def run_signin(a):
                     "captcha_prompt": str(getattr(cap_m, "raw_text", "") or "")[:160],
                     "command_delay": a["command_delay"], "button_delay": a["button_delay"],
                     "refresh_buttons": a["refresh_buttons"], "error": failure_reason,
+                    "result_delay": a["result_delay"], "result_timeout": a["result_timeout"],
                     "points": points, "note": desc})
     log.info("签到%s 任务=%s 目标=%s", "失败" if fail or ok is False else "成功", a["name"], target)
     return not (fail or ok is False)
@@ -1648,7 +1711,7 @@ async def run_custom(a):
     if final_ok:
         notify_event("success", a["name"], hits_desc)
     else:
-        notify_event("fail", a["name"], hits_desc)
+        _notify_task_failure(a, hits_desc)
     log.info("自定义任务%s 任务=%s 目标=%s", "成功" if final_ok else "失败", a["name"], target)
     return final_ok
 
@@ -1678,7 +1741,7 @@ async def run_keepalive(a, reason="定时"):
         add_hit("keepalive", False, chat_id=target, rule_id=-a["id"], grp_name=target, content=txt,
                 detail={"kind": "keepalive", "task": a["name"], "group": target, "message": txt,
                         "error": str(e)[:200], "reason": reason})
-        notify_event("fail", a["name"], f"发言失败: {e}")
+        _notify_task_failure(a, f"发言失败: {e}")
         return False
     add_hit("keepalive", True, chat_id=target, rule_id=-a["id"], grp_name=target, content=txt,
             detail={"kind": "keepalive", "task": a["name"], "group": target, "message": txt,
@@ -1718,22 +1781,37 @@ def _forget_auto_schedule(aid):
 
 def _reset_auto_schedule(aid, clear_success=False):
     _forget_auto_schedule(aid)
-    a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    db = get_account_db()
+    a = db.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
     if a is None:
-        return  # batch/import deletion still forgets only this account's schedule
+        return
     now = int(time.time())
     last = "" if clear_success else (a["last_at"] or "")
+    # 时间、重试设置、启停或图标变化不能重新发放当天重试额度。
+    if not clear_success and (a["last_attempt"] or a["last_status"] == "unconfirmed"):
+        next_at = int(a["next_run_at"] or 0)
+        if a["type"] == "signin":
+            if a["last_status"] in ("success", "unconfirmed") or a["retry_count"] >= _retry_limit(a):
+                next_at = 0
+        elif a["type"] == "keepalive":
+            interval = max(60, int(a["poll_interval"] or 60))
+            if a["last_status"] == "success":
+                next_at = max(now, int(last or now) + interval)
+            elif a["retry_count"] >= _retry_limit(a):
+                next_at = max(next_at, int(a["last_attempt"]) + interval)
+        db.execute("UPDATE automations SET next_run_at=? WHERE id=?", (next_at, aid))
+        db.commit()
+        return
     next_at = 0
     if a["type"] == "keepalive":
         try:
             base = int(last) if last else now
         except ValueError:
-            base = now
-            last = ""
+            base, last = now, ""
         next_at = max(now, base + max(60, int(a["poll_interval"] or 60)))
-    get_account_db().execute("UPDATE automations SET last_at=?,last_attempt=0,retry_count=0,retry_day='',"
-                 "next_run_at=?,last_status='' WHERE id=?", (last, next_at, aid))
-    get_account_db().commit()
+    db.execute("UPDATE automations SET last_at=?,last_attempt=0,retry_count=0,retry_day='',"
+               "next_run_at=?,last_status='',failure_notified='' WHERE id=?", (last,next_at,aid))
+    db.commit()
 
 
 def _global_signin_window():
@@ -1768,6 +1846,8 @@ def _queue_auto(aid, manual=False):
 async def _execute_auto(aid, manual=False):
     """持久尝试/指数退避/成功状态;手动也走同一执行器,失败不污染 last_at。"""
     a = None
+    notice = {"id": aid, "message": "", "unconfirmed": False}
+    notice_token = _failure_context.set(notice)
     try:
         a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
         if a is None or (not manual and not a["enabled"]):
@@ -1777,12 +1857,19 @@ async def _execute_auto(aid, manual=False):
         now = int(time.time())
         today = now_local().strftime("%Y-%m-%d")
         count = int(a["retry_count"] or 0)
-        if (a["type"] == "signin" and a["retry_day"] != today) or (manual and count >= _retry_limit(a)):
+        if not manual:
+            if a["type"] == "signin" and (a["last_at"] == today or
+                    (a["retry_day"] == today and (a["last_status"] == "unconfirmed" or count >= _retry_limit(a))) or
+                    (a["next_run_at"] and now < a["next_run_at"])):
+                return
+            if a["type"] == "keepalive" and now < int(a["next_run_at"] or 0):
+                return
+        if a["type"] == "signin" and a["retry_day"] != today:
             count = 0
         if a["type"] == "keepalive" and count >= _retry_limit(a):
             count = 0  # 上轮耗尽后只在完整间隔届满开启下一轮
         count += 1
-        backoff = min(3600, RETRY_BASE * 2 ** (count - 1))
+        backoff = min(3600, RETRY_BASE * 2 ** min(count - 1, 6))
         get_account_db().execute("UPDATE automations SET last_attempt=?,retry_count=?,retry_day=?,"
                      "last_status='running',next_run_at=? WHERE id=?",
                      (now, count, today, now + backoff, aid))
@@ -1810,24 +1897,37 @@ async def _execute_auto(aid, manual=False):
             _task_failure(a, "任务被中断,未记为成功")
             raise
         except asyncio.TimeoutError:
-            _task_failure(a, "签到超过窗口结束,已取消本轮后续动作")
+            _task_unconfirmed(a, "执行超过窗口或等待上限，结果未知；本日不自动重发")
         except Exception as e:
             _task_failure(a, f"执行异常: {e}")
         finally:
             finished = int(time.time())
+            if notice["unconfirmed"]:
+                status = "unconfirmed"
             next_at = finished + backoff
+            exhausted = count >= _retry_limit(a)
+            if a["type"] == "signin" and (exhausted or status == "unconfirmed"):
+                next_at = 0
             if ok:
                 stamp = now_local().strftime("%Y-%m-%d") if a["type"] == "signin" else str(finished)
                 next_at = finished + max(60, int(a["poll_interval"] or 60)) if a["type"] == "keepalive" else 0
                 get_account_db().execute("UPDATE automations SET last_at=?,retry_count=0,next_run_at=?,"
-                             "last_status='success' WHERE id=?", (stamp, next_at, aid))
+                             "last_status='success',failure_notified='' WHERE id=?", (stamp, next_at, aid))
             else:
                 if a["type"] == "keepalive" and count >= _retry_limit(a):
                     next_at = finished + max(backoff, max(60, int(a["poll_interval"] or 60)))
                 get_account_db().execute("UPDATE automations SET next_run_at=?,last_status=? WHERE id=?",
                              (next_at, status, aid))
             get_account_db().commit()
+            # 中间失败只记录日志；结束/待确认只推一次，每任务每天持久去重。
+            if not ok and status != "interrupted" and (exhausted or status == "unconfirmed" or manual):
+                changed = get_account_db().execute("UPDATE automations SET failure_notified=? WHERE id=? AND COALESCE(failure_notified,'')!=?", (today,aid,today))
+                get_account_db().commit()
+                if changed.rowcount:
+                    suffix = "本日停止自动重发，请人工确认" if status == "unconfirmed" else "本轮重试已结束" if exhausted else "手动执行失败"
+                    notify_event("fail", a["name"], (notice["message"] or "任务未成功") + "；" + suffix)
     finally:
+        _failure_context.reset(notice_token)
         get_runtime().auto_tasks.pop(aid, None)
 
 
@@ -1865,7 +1965,7 @@ def _signin_tick():
         if w0 is None or w1 is None or w0 >= w1 or not w0 <= nowm < w1:
             continue
         if a["retry_day"] == today:
-            if a["retry_count"] >= _retry_limit(a) or now < a["next_run_at"]:
+            if a["last_status"] == "unconfirmed" or a["retry_count"] >= _retry_limit(a) or now < a["next_run_at"]:
                 continue
         elif a["retry_count"]:
             get_account_db().execute("UPDATE automations SET retry_count=0,next_run_at=0 WHERE id=?", (a["id"],))
@@ -2513,6 +2613,8 @@ class AutoIn(BaseModel):
     command_delay: float = Field(1.6, ge=0, le=120)  # 命令后等待秒数
     button_delay: float = Field(2.0, ge=0, le=120)   # 点击按钮后等待秒数
     refresh_buttons: int = Field(1, ge=0, le=1)       # 连点前刷新/固定按钮
+    result_delay: float = Field(0, ge=0, le=120)  # 操作后等待多久开始判定
+    result_timeout: int = Field(30, ge=1, le=300) # 轮询最终结果上限（秒）
     success_kw: str = ""          # signin: 成功关键词
     fail_kw: str = ""             # signin: 失败关键词(回复含它判失败)
     points_pat: str = ""          # signin: 积分提取正则
@@ -2535,6 +2637,8 @@ def _valid_auto(body: AutoIn):
         raise HTTPException(400, "类型必须是 signin / grabcodes / redpacket / custom")
     if not body.name.strip():
         raise HTTPException(400, "请填写任务名称")
+    if not math.isfinite(body.result_delay) or not 0 <= body.result_delay <= 120 or not 1 <= body.result_timeout <= 300:
+        raise HTTPException(400, "结果判断延迟应为0–120秒，回复等待上限应为1–300秒")
     if body.icon_url:
         from urllib.parse import urlsplit
         try:
@@ -2591,7 +2695,7 @@ def _valid_auto(body: AutoIn):
 
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
-              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url")
+              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout")
 
 
 def _auto_vals(body: AutoIn, extra=None):
@@ -2604,6 +2708,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
         body.poll_interval, body.custom_steps.strip(), body.chain_retry,
         body.cooldown, body.enabled, body.command_delay, body.button_delay, body.refresh_buttons, body.icon_url.strip(),
+        body.result_delay, body.result_timeout,
     ] + (extra or [])
 
 
@@ -3053,6 +3158,7 @@ app.include_router(build_icon_router(root_get_setting, root_set_setting))
 from ai_assistant import build_ai_assistant_router
 
 async def assistant_call_ai(*args, **kwargs):
+    kwargs['assistant_mode'] = True
     return await _call_ai(*args, **kwargs)
 
 app.include_router(build_ai_assistant_router(

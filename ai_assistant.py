@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field, ValidationError
 TEXT_LIMIT = 2000
 NUMERIC = {'command_delay': (0,120), 'button_delay': (0,120),
            'refresh_buttons': (0,1), 'click_times': (1,20),
-           'click_interval': (50,3000), 'retries': (0,5), 'poll_interval': (60,90*86400)}
+           'click_interval': (50,3000), 'retries': (0,5), 'poll_interval': (60,90*86400),
+           'result_delay': (0,120), 'result_timeout': (1,300)}
 TEXT_FIELDS = {'win_start','win_end','success_kw','fail_kw','btn_text','btn_emoji','command'}
 SUGGESTIONS = set(NUMERIC) | TEXT_FIELDS
 STEPS = {'send': {'t','v'}, 'wait': {'t','v'}, 'click': {'t','v','any','ai'},
@@ -70,7 +71,7 @@ def valid_suggestion(field, value, kind):
     if field in NUMERIC:
         lo, hi = NUMERIC[field]
         return (type(value) in (int,float) and lo <= value <= hi and math.isfinite(value)
-                and (field in ('command_delay','button_delay') or type(value) is int))
+                and (field in ('command_delay','button_delay','result_delay') or type(value) is int))
     if not isinstance(value,str) or len(value) > 500:
         return False
     if field in ('win_start','win_end'):
@@ -177,8 +178,8 @@ def build_ai_assistant_router(get_db, model_type, validate, values, columns, ai_
             '只能生成 type=signin/custom/keepalive，enabled=0。目标必须来自用户描述，不猜测。'
             '只有开始时刻时，结束默认开始后30分钟（不能跨日）；没说时间则08:00–12:00。'
             '字段参考：name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,command_delay,button_delay,'
-            'click_times,click_interval,refresh_buttons,success_kw,fail_kw,retries,custom_steps,reply_text,poll_interval。'
-            '签到延迟单位秒0–120，连点间隔毫秒50–3000，次数1–20；保号间隔秒60–7776000。'
+            'click_times,click_interval,refresh_buttons,result_delay,result_timeout,success_kw,fail_kw,retries,custom_steps,reply_text,poll_interval。'
+            '签到延迟单位秒0–120，结果判断前等待0–120秒、最终回复上限1–300秒，连点间隔毫秒50–3000，次数1–20；保号间隔秒60–7776000。'
             'custom_steps是 JSON 字符串，步骤仅send(v字符串)、wait(v毫秒)、click(v按钮文字，any=0/1)、'
             'until(success/fail关键词，timeout毫秒)。不生成captcha或自动提交验证码，遇到验证使用人工处理后等待回复。'
             '不生成API地址/密钥/手机号/会话，不生成未描述的命令或条件。')

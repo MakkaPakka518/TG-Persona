@@ -56,7 +56,7 @@ class TaskManagementTests(unittest.TestCase):
             path = Path(self.tmp.name) / ("root.sqlite3" if account == "default" else "accounts/other/account.sqlite3")
             path.parent.mkdir(parents=True, exist_ok=True)
             db = sqlite3.connect(path, check_same_thread=False)
-            fields = ",".join(c + (" REAL" if c in ("command_delay", "button_delay") else
+            fields = ",".join(c + (" REAL" if c in ("command_delay", "button_delay", "result_delay") else
                                    " INTEGER" if isinstance(getattr(Auto(), c), int) else " TEXT")
                               for c in COLS.split(","))
             db.executescript("CREATE TABLE automations(id INTEGER PRIMARY KEY AUTOINCREMENT," + fields + ","

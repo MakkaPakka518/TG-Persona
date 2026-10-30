@@ -184,5 +184,21 @@ class AITest(unittest.IsolatedAsyncioTestCase):
         factory.assert_called_once_with(show_ad=False);self.assertEqual(classifier.call_count,2)
 
 
+    async def test_glm53_assistant_mode_uses_low_reasoning_without_changing_image_calls(self):
+        self.b['_call_ai'] = self.b['_call_ai']
+        self.b['httpx'] = self.b['httpx']
+        # Existing fake client captures the exact request body.
+        self.b['_call_ai'].__globals__['httpx'] = self.b['httpx']
+        import asyncio
+        await self.b['_call_ai']({'base':'https://open.bigmodel.cn/api/paas/v4','key':'dummy-key','model':'glm-5.3-flash'},'task',1800,True)
+        payload=self.calls[-1][1]['json']
+        self.assertEqual(payload['thinking'],{'type':'enabled'})
+        self.assertEqual(payload['reasoning_effort'],'low')
+        self.assertGreaterEqual(payload['max_tokens'],8192)
+        self.calls.clear()
+        await self.b['_call_ai']({'base':'https://open.bigmodel.cn/api/paas/v4','key':'dummy-key','model':'glm-5.3-flash'},'image',20,False)
+        self.assertNotIn('thinking',self.calls[-1][1]['json'])
+
+
 if __name__ == '__main__':
     unittest.main()
