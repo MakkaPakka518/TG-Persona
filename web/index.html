@@ -158,6 +158,7 @@ h2{display:none}
 .switch.on{background:#22c55e;box-shadow:0 0 0 1px rgba(34,197,94,.25)}
 .autof{display:none;position:fixed;inset:0;z-index:130;background:rgba(8,10,18,.55);padding:14px;overflow:auto;-webkit-overflow-scrolling:touch}
 .autof.show{display:block}
+#iconPicker{z-index:170}
 .autof-card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;padding:16px;max-width:560px;margin:10px auto 40px;box-shadow:var(--sh-lg)}
 .autof-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .autof-head b{font-size:15px}
@@ -2494,9 +2495,9 @@ async function loadLogs(){
   try{
     const url='/api/logs?n=80&kind='+encodeURIComponent(kind)+(q?('&q='+encodeURIComponent(q)):'');
     const d=await api(url,{_account:c});if(!isCurrentAccount(c)||kind!==logKind||q!==logQ)return;
-    const c=d.counts||{};
+    const counts=d.counts||{};
     if(!logQ)document.querySelectorAll('#logSeg button').forEach(b=>{
-      const n=c[b.dataset.k]||0;
+      const n=counts[b.dataset.k]||0;
       b.textContent=LOG_KINDS[b.dataset.k]+(n?' '+n:'');
     });
     document.getElementById('logList').innerHTML=d.hits.length?d.hits.map(logRow).join(''):('<div class="empty">'+(logQ?'没有匹配「'+esc(logQ)+'」的记录':'这一类还没有记录')+'</div>');
