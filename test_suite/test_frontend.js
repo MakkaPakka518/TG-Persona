@@ -629,11 +629,11 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   // 整份真实前端脚本在独立离线 VM 中运行，避免仅测试复制实现。
   const fullCalls=[],downloaded=[],timers=[],store=new Map(),sessionStore=new Map();
   const q=id=>element('#full-'+id);
-  const fullDocument={querySelector:q,querySelectorAll:()=>[],getElementById:id=>q('#'+id),documentElement:{dataset:{}},body:{style:{},appendChild(n){downloaded.push(n);return n}},createElement(){const node=q('node-'+(++nodeId));Object.defineProperty(node,'innerHTML',{get(){return ''},set(){throw new Error('新功能禁止不可信 HTML sink')}});return node}};
+  const fullDocument={visibilityState:'visible',listeners:{},addEventListener(t,fn){this.listeners[t]=fn},querySelector:q,querySelectorAll:()=>[],getElementById:id=>q('#'+id),documentElement:{dataset:{}},body:{style:{},appendChild(n){downloaded.push(n);return n}},createElement(){const node=q('node-'+(++nodeId));Object.defineProperty(node,'innerHTML',{get(){return ''},set(){throw new Error('新功能禁止不可信 HTML sink')}});return node}};
   const app=vm.createContext({console,FileReader:MockFileReader,Blob,URL:Object.assign(class extends URL {},{createObjectURL(blob){fullCalls.push(['blob',blob]);return 'blob:mock-config'},revokeObjectURL(url){fullCalls.push(['revoke',url])}}),document:fullDocument,window:{confirm(message){fullCalls.push(['confirm',message]);return false}},confirm:()=>false,sessionStorage:{getItem:k=>sessionStore.get(k)||null,setItem:(k,v)=>sessionStore.set(k,String(v))},localStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,String(v))},fetch(){throw new Error('离线测试禁止真实网络')},setTimeout(fn){timers.push(fn);return timers.length},clearTimeout(){},setInterval(){return 1},clearInterval(){},btoa:s=>Buffer.from(s,'binary').toString('base64'),unescape,encodeURIComponent});
   const ex=s=>vm.runInContext(s,app),copy=x=>JSON.parse(JSON.stringify(x));
   ex(js.replace(/\nbootstrap\(\);\s*$/,''));
-  const realApi=app.api;
+  const realApi=app.api, realLogLoader=app.loadLogs;
   const mockConfig=(name='纯配置')=>({format:'tg-persona-config',schema_version:1,account:{id:'default',label:'默认'},automations:[{type:'custom',name,target:'@dummy',custom_steps:'[{"t":"send","v":"/start"}]',enabled:1}],rules:[],watched_groups:[]});
   function useConfig(data=mockConfig()){q('#configFile').files=[{name:'backup.json',type:'application/json',size:1024}];ex('readConfigFile()');readers.at(-1).complete(JSON.stringify(data))}
   function resetBatch(kind='window'){ex('batchBusy=false;selectedAutoIds=new Set([1,2]);invalidateBatchPreview()');q('#batchKind').value=kind;q('#batchStart').value='08:00';q('#batchEnd').value='12:00';q('#batchEvery').value='1';q('#batchUnit').value='60'}
@@ -1028,6 +1028,79 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('AI 直接保存草稿白名单保留结果等待且不携带运行状态',async()=>{
     ex('resetAIAssistant();aiDraft={account:accountContext(),draft:resultTask}');let sent=[];app.window.confirm=()=>true;app.api=async(p,o)=>{sent.push([p,JSON.parse(o.body)]);return {}};
     await ex('saveAIDraft()');assert.strictEqual(sent.length,1);assert.strictEqual(sent[0][0],'/api/autos');assert.strictEqual(sent[0][1].result_delay,0);assert.strictEqual(sent[0][1].result_timeout,300);assert.strictEqual(sent[0][1].enabled,0);assert(!('last_result' in sent[0][1])&&!('status' in sent[0][1]));
+  });
+  await test('并发控件默认二且说明清楚每批与整轮重试',async()=>{
+    const control=html.match(/<select id="sTaskConcurrency">([\s\S]*?)<\/select>/);assert(control);assert(control[1].includes('<option value="2" selected>2</option>'));
+    for(let i=1;i<=5;i++)assert(control[1].includes('value="'+i+'"'));assert(html.includes('按任务列表顺序，每批两个；整轮结束再排失败重试'));
+  });
+  await test('设置并发按账号载入保存且迟到响应不覆盖新账号',async()=>{
+    app.loadTz=app.loadSessions=()=>{};ex("selectedAccount='settings-a';accountEpoch++");let resolves=[];app.api=()=>new Promise(r=>resolves.push(r));
+    const old=ex('loadSettings()');ex("selectedAccount='settings-b';accountEpoch++");const fresh=ex('loadSettings()');
+    resolves[1]({task_concurrency:'5',ai_key_present:false});await fresh;assert.strictEqual(q('#sTaskConcurrency').value,'5');
+    resolves[0]({task_concurrency:'1',ai_key_present:true});await old;assert.strictEqual(q('#sTaskConcurrency').value,'5');
+    q('#sTaskConcurrency').value='4';q('#sAiKey').value='';let posted;app.api=async(p,o)=>{if(o?.method==='POST'){posted=[p,o];return {ok:true}}return {task_concurrency:'4',ai_key_present:false}};
+    await ex('saveSettings()');assert.strictEqual(posted[0],'/api/settings');assert.strictEqual(posted[1]._account.id,'settings-b');assert.strictEqual(JSON.parse(posted[1].body).task_concurrency,'4');assert.strictEqual(JSON.parse(posted[1].body).ai_key,'');
+  });
+  await test('AI Key 永不回填，保存后清空并只更新存在提示',async()=>{
+    ex("selectedAccount='default';accountEpoch++");app.loadTz=app.loadSessions=()=>{};
+    app.api=async()=>({task_concurrency:'2',ai_key:'<img src=x onerror=bad()>',ai_key_present:true});await ex('loadSettings()');
+    assert.strictEqual(q('#sAiKey').value,'');assert.strictEqual(q('#sAiKey').placeholder,'已保存，留空不修改');assert(!q('#sAiKey').innerHTML.includes('img'));
+    q('#sAiKey').value='mock-new-key';let body;app.api=async(p,o)=>{if(o?.method==='POST'){body=JSON.parse(o.body);return {ok:true}}return {task_concurrency:'2',ai_key:'malicious-returned-key',ai_key_present:true}};
+    await ex('saveSettings()');assert.strictEqual(body.ai_key,'mock-new-key');assert.strictEqual(q('#sAiKey').value,'');assert.strictEqual(q('#sAiKey').placeholder,'已保存，留空不修改');
+    assert(![...store.values()].join('|').includes('mock-new-key'));
+  });
+  await test('运行与排队任务显示停止取消按钮并正确启用停止全部',async()=>{
+    app.runTask={id:701,type:'signin',name:'运行任务',target:'@dummy',command:'/sign',enabled:1,running:true,queued:false};app.queueTask={id:702,type:'signin',name:'排队任务',target:'@dummy',command:'/sign',enabled:1,running:false,queued:true};
+    ex('autos=[runTask,queueTask];autoStopBusy.clear();autoStopAllBusy=false;renderAutoList("signin");syncStopAllButton()');const markup=q('#aListSign').innerHTML;
+    assert(markup.includes('data-auto-action="stop"'));assert(markup.includes('>停止</button>'));assert(markup.includes('>取消排队</button>'));assert(markup.includes('>运行中</span>'));assert(markup.includes('>排队中</span>'));assert(!q('#autoStopAll').disabled);
+    ex('autos=[{...runTask,running:false,queued:false}];syncStopAllButton()');assert(q('#autoStopAll').disabled);
+  });
+  await test('单项停止二次确认防重复并携带冻结账号',async()=>{
+    ex("selectedAccount='stop-a';accountEpoch++;autos=[runTask];autoStopBusy.clear();autoStopAllBusy=false");let requests=[],done,loads=0;app.loadAutos=async()=>{loads++};
+    app.window.confirm=message=>{assert(message.includes('中止当前正在执行的步骤'));return false};app.api=async(p,o)=>{requests.push([p,o]);return {ok:true}};await ex('stopAuto(701)');assert.strictEqual(requests.length,0);
+    app.window.confirm=()=>true;app.api=(p,o)=>{requests.push([p,o]);return new Promise(r=>done=r)};const pending=ex('stopAuto(701)');await Promise.resolve();const duplicate=ex('stopAuto(701)');assert.strictEqual(requests.length,1);assert.strictEqual(requests[0][0],'/api/autos/701/stop');assert.strictEqual(requests[0][1]._account.id,'stop-a');done({ok:true,status:'stopped'});await pending;await duplicate;assert.strictEqual(loads,1);assert.strictEqual(ex('autoStopBusy.size'),0);
+  });
+  await test('旧任务DOM不能停止新账号同ID任务且停止全部需确认',async()=>{
+    ex("selectedAccount='old-stop';accountEpoch++;autos=[runTask];renderAutoList('signin')");const oldHandler=q('#aListSign').onclick;let requests=[];app.api=async(p,o)=>{requests.push([p,o]);return {ok:true,stopped:[701,702]}};app.loadAutos=async()=>{};app.window.confirm=()=>true;
+    ex("selectedAccount='new-stop';accountEpoch++;autos=[{...runTask,name:'新账号同ID'}]");oldHandler({target:{closest:()=>({dataset:{autoAction:'stop',autoId:'701'}})}});assert.strictEqual(requests.length,0);
+    ex('autos=[runTask,queueTask];autoStopAllBusy=false');app.window.confirm=()=>false;await ex('stopAllAutos()');assert.strictEqual(requests.length,0);
+    let done;app.window.confirm=message=>{assert(message.includes('中止当前步骤'));return true};app.api=(p,o)=>{requests.push([p,o]);return new Promise(r=>done=r)};const stopping=ex('stopAllAutos()');await Promise.resolve();const duplicate=ex('stopAllAutos()');assert.strictEqual(requests.length,1);assert.strictEqual(requests[0][0],'/api/autos/stop-all');assert.strictEqual(requests[0][1]._account.id,'new-stop');done({ok:true,stopped:[701,702]});await stopping;await duplicate;assert.strictEqual(ex('autoStopAllBusy'),false);
+  });
+  const realAnomalyLoader=app.loadAnomalies;
+  await test('异常分类走独立接口并安全渲染状态次数时间回复',async()=>{
+    ex("selectedAccount='anomaly-a';accountEpoch++;logKind='anomaly';anomalySeq++;anomalies=[]");app.loadLogs=realLogLoader;let paths=[];app.api=async p=>{paths.push(p);return {count:4,items:[
+      {id:'x<1',name:'<img src=x onerror=bad()>',type:'signin',status:'failed',retry_count:1,retry_limit:3,last_attempt:'昨天',next_run_at:'明天',running:false,queued:false,last_result:{reply:'<script>bad()</script>'}},
+      {id:2,name:'排队异常',type:'custom',status:'interrupted',retry_count:2,retry_limit:2,running:false,queued:true,last_result:null},
+      {id:3,name:'待确认异常',type:'keepalive',status:'unconfirmed',retry_count:0,retry_limit:1,running:false,queued:false,last_result:null},
+      {id:4,name:'停止异常',type:'custom',status:'stopped',retry_count:0,retry_limit:0,running:false,queued:false,last_result:null}
+    ]}};await ex('loadLogs()');assert.deepStrictEqual(paths,['/api/anomalies']);const markup=q('#logList').innerHTML;
+    assert(markup.includes('&lt;img src=x onerror=bad()&gt;'));assert(markup.includes('&lt;script&gt;bad()&lt;/script&gt;'));assert(!markup.includes('<img src=x')&&!markup.includes('<script>bad()'));
+    assert(markup.includes('失败'));assert(markup.includes('中断'));assert(markup.includes('待确认'));assert(markup.includes('已停止'));assert(markup.includes('重试 1 / 3'));assert(markup.includes('上次 昨天'));assert(markup.includes('最后回复：'));assert(markup.includes('确认成功'));assert(markup.includes('disabled'));
+  });
+  await test('异常四项动作发送精确请求体并刷新异常与任务',async()=>{
+    let requests=[],refreshA=0,refreshT=0;app.api=async(p,o)=>{requests.push([p,o]);return {ok:true}};app.loadAnomalies=async()=>{refreshA++};app.loadAutos=async()=>{refreshT++};app.window.confirm=()=>true;
+    for(const action of ['confirm_success','mark_failed','retry_once','disable']){
+      ex("anomalies=[{id:801,name:'待处理',type:'signin',status:'unconfirmed',running:false,queued:false}];anomalyBusyIds.clear()");await ex(`resolveAnomaly('801','${action}')`);
+      const [path,options]=requests.at(-1);assert.strictEqual(path,'/api/anomalies/801/resolve');assert.strictEqual(options.method,'POST');assert.deepStrictEqual(JSON.parse(options.body),{action});assert.strictEqual(options._account.id,'anomaly-a');
+    }
+    assert.strictEqual(requests.length,4);assert.strictEqual(refreshA,4);assert.strictEqual(refreshT,4);
+  });
+  await test('异常动作取消、运行排队禁用且非签到不可确认成功',async()=>{
+    let sent=0;app.api=async()=>{sent++;return {}};app.loadAnomalies=async()=>{};app.loadAutos=async()=>{};app.window.confirm=()=>false;
+    ex("anomalies=[{id:1,name:'取消',type:'signin',running:false,queued:false}]");await ex("resolveAnomaly('1','mark_failed')");assert.strictEqual(sent,0);
+    app.window.confirm=()=>true;for(const state of [{running:true,queued:false},{running:false,queued:true}]){app.stateFix=state;ex("anomalies=[{id:2,name:'忙碌',type:'signin',...stateFix}]");await ex("resolveAnomaly('2','retry_once')")};
+    ex("anomalies=[{id:3,name:'自定义',type:'custom',running:false,queued:false}]");await ex("resolveAnomaly('3','confirm_success')");assert.strictEqual(sent,0);
+  });
+  await test('异常旧响应在切账号清空后不得覆盖新账号',async()=>{
+    app.loadAnomalies=realAnomalyLoader;ex("selectedAccount='stale-a';accountEpoch++;logKind='anomaly';anomalies=[{id:9,name:'旧缓存'}]");let done;app.api=()=>new Promise(r=>done=r);const pending=ex('loadAnomalies()');
+    ex("selectedAccount='stale-b';accountEpoch++;anomalySeq++;anomalies=[]");done({count:1,items:[{id:10,name:'迟到异常',type:'signin',status:'failed'}]});await pending;assert.strictEqual(ex('anomalies.length'),0);assert(!q('#logList').innerHTML.includes('迟到异常'));
+  });
+  await test('隐藏时暂停五秒轮询，回前台立即刷新当前分类',async()=>{
+    let tick,states=0,logs=0;app.setInterval=fn=>{tick=fn;return 99};app.clearInterval=()=>{};app.api=async()=>({});
+    app.loadState=()=>{states++};app.loadLogs=()=>{logs++};for(const name of ['loadAccounts','loadSettings','loadRules','loadAutos','loadRuleGroups','renderAccounts','renderEmojis','pickAction','pickGrabAct','applyTheme'])app[name]=()=>{};
+    ex("activeTab='logs';bootstrapTimer=null");await ex('bootstrap()');states=logs=0;
+    ex("document.visibilityState='hidden'");tick();assert.strictEqual(states,0);assert.strictEqual(logs,0);ex('document.listeners.visibilitychange()');assert.strictEqual(states,0);assert.strictEqual(logs,0);
+    ex("document.visibilityState='visible'");assert.strictEqual(ex('pageIsHidden()'),false);ex('refreshVisibleTab()');assert.strictEqual(states,1);assert.strictEqual(logs,1);assert(js.includes("addEventListener('visibilitychange',()=>{if(!pageIsHidden())refreshVisibleTab()})"));tick();assert.strictEqual(states,2);assert.strictEqual(logs,2);
   });
   console.log(`前端回归 ${count} 项全部通过`);
 })().catch(e=>{console.error(e);process.exitCode=1});

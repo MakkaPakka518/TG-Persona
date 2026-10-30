@@ -468,9 +468,10 @@ input[readonly]:focus{border-color:var(--acc)}
         <div><label for="batchUnit">单位</label><select id="batchUnit" onchange="invalidateBatchPreview()"><option value="60">分钟</option><option value="3600">小时</option><option value="86400">天</option></select></div>
       </div>
       <div class="hint" id="batchTz">签到窗口使用当前设置的时区；不适用的任务将跳过。</div>
-      <div class="flex" style="gap:8px;margin-top:12px">
+      <div class="flex" style="gap:8px;margin-top:12px;flex-wrap:wrap">
         <button class="ghost" id="batchPreviewBtn" onclick="previewBatch()">预览修改</button>
         <button class="btn" id="batchApplyBtn" disabled onclick="applyBatch()">确认提交</button>
+        <button class="danger" id="autoStopAll" disabled onclick="stopAllAutos()">停止本账号全部任务</button>
       </div>
       <pre id="batchResult" class="hint" style="white-space:pre-wrap" role="status" aria-live="polite"></pre>
       <hr style="border:0;border-top:1px solid var(--hair)">
@@ -494,7 +495,7 @@ input[readonly]:focus{border-color:var(--acc)}
         <label style="margin-top:12px">AI API 地址(OpenAI 兼容,如 https://api.openai.com/v1)</label>
         <input type="text" id="sAiBase" placeholder="https://api.openai.com/v1">
         <label>AI API Key</label>
-        <input type="password" id="sAiKey" placeholder="留空沿用已保存 Key" autocomplete="off">
+        <input type="password" id="sAiKey" placeholder="sk-..." autocomplete="new-password">
         <label>AI 模型名</label>
         <input type="text" id="sAiModel" placeholder="gpt-4o-mini">
         <div class="flex" style="gap:10px;flex-wrap:wrap;margin-top:14px">
@@ -815,6 +816,7 @@ input[readonly]:focus{border-color:var(--acc)}
     </div>
     <div class="seg" id="logSeg">
       <button class="on" data-k="reply" onclick="pickLogKind('reply')">回复</button>
+      <button data-k="anomaly" onclick="pickLogKind('anomaly')">异常</button>
       <button data-k="signin" onclick="pickLogKind('signin')">签到</button>
       <button data-k="grabcodes" onclick="pickLogKind('grabcodes')">抢注</button>
       <button data-k="redpacket" onclick="pickLogKind('redpacket')">红包</button>
@@ -891,6 +893,11 @@ input[readonly]:focus{border-color:var(--acc)}
         <div><label>命中后随机延迟(秒,最小 最大)</label><input type="text" id="sDelay" placeholder="1.0 3.0"></div>
         <div><label style="display:flex;align-items:center;gap:8px;margin-top:14px"><input type="checkbox" id="sIgnore" style="width:auto"> 忽略机器人消息</label></div>
       </div>
+      <label for="sTaskConcurrency">每账号任务并发上限</label>
+      <select id="sTaskConcurrency">
+        <option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+      </select>
+      <div class="hint">按任务列表顺序，每批两个；整轮结束再排失败重试</div>
       <label>日志保留天数(0 = 永久保留)</label>
       <input type="number" id="sLogKeep" min="0" max="3650" value="30">
       <div class="hint">每小时检查一次,超过天数的记录自动删除并压缩数据库</div>
@@ -1048,11 +1055,11 @@ async function loadAccounts(){
 }
 function resetAccountCaches(){
   state={tg:{},logged_in:false,running:false,stats:{watched_groups:0,rules:0,hits:0}};
-  autos=[];openedAutoIds.clear();persistAutoExpanded();closeIconPicker();signinGlobalDirty=false;signinGlobalBusy=false;$('#signinGlobalSave').disabled=false;$('#signinGlobalResult').textContent='';renderSigninGlobal();
+  autos=[];openedAutoIds.clear();persistAutoExpanded();autoStopBusy.clear();autoStopAllBusy=false;syncStopAllButton();closeIconPicker();signinGlobalDirty=false;signinGlobalBusy=false;$('#signinGlobalSave').disabled=false;$('#signinGlobalResult').textContent='';renderSigninGlobal();
   allGroups=[];allRules=[];watchedGroups=[];ruleGroupSel.clear();
   autoGroupSel.grabcodes.clear();autoGroupSel.redpacket.clear();selectedAutoIds.clear();
   editingRule=null;editAuto=null;editAutoAccount=null;ruleEditAccount=null;tgPhase='idle';window._prevLoggedIn=null;if(typeof resetAIAssistant==='function')resetAIAssistant();
-  logQ='';logKind='reply';clearTimeout(logQtimer);$('#logQ').value='';$('#gSearch').value='';
+  logQ='';logKind='reply';anomalySeq++;anomalies=[];anomalyBusyIds.clear();clearTimeout(logQtimer);$('#logQ').value='';$('#gSearch').value='';
   batchBusy=false;exportBusy=false;$('#configExportAll').disabled=false;
   for(const id of ['gAll','gWatched','rList','logList','tgCard'])$('#'+id).replaceChildren();
   for(const id of ['ovName','ovUser','ovGroups','ovRules','ovHits','gCnt'])$('#'+id).textContent='--';
@@ -1063,6 +1070,7 @@ function resetAccountCaches(){
     const reset=$('#batchTz');reset.textContent='签到窗口使用当前账号设置的时区（加载中…）';$('#sTz').replaceChildren();$('#tzNow').textContent='';
   invalidateBatchPreview();cancelConfigImport();resetAccountTests();
   for(const id of ['sAiBase','sAiKey','sAiModel','sBark','sBt','sBc','sFlPool'])$('#'+id).value='';
+  $('#sAiKey').placeholder='sk-...';$('#sTaskConcurrency').value='2';
   syncAutoSelection();
 }
 function switchAccount(id){
@@ -1094,7 +1102,9 @@ async function manageAccount(action){
 }
 
 // ---------- Tab ----------
+let activeTab='overview';
 function goTab(t){
+  activeTab=t;
   ['overview','autos','groups','rules','logs','settings'].forEach(x=>{
     $('#tab-'+x).classList.toggle('act',x===t);
     $('#t-'+x).classList.toggle('act',x===t);
@@ -1392,6 +1402,9 @@ try{const saved=JSON.parse(sessionStorage.getItem('tgp_open_autos')||'null');if(
 function persistAutoExpanded(){try{sessionStorage.setItem('tgp_open_autos',JSON.stringify({account:selectedAccount,ids:[...openedAutoIds]}))}catch(e){}}
 function toggleAutoExpanded(id){if(!autos.some(a=>a.id===id))return;openedAutoIds.has(id)?openedAutoIds.delete(id):openedAutoIds.add(id);persistAutoExpanded();const a=autos.find(x=>x.id===id);renderAutoList(a.type)}
 let autos=[], editAuto=null, editAutoAccount=null;
+let autoStopBusy=new Set(), autoStopAllBusy=false;
+function hasActiveAutos(){return autos.some(a=>a.running===true||a.queued===true)}
+function syncStopAllButton(){const btn=$('#autoStopAll');if(btn)btn.disabled=autoStopAllBusy||!hasActiveAutos()}
 let selectedAutoIds=new Set(), batchPreview=null, batchSeq=0, batchBusy=false;
 function syncAutoSelection(){
   const ids=autos.map(a=>Number(a.id));
@@ -1469,21 +1482,21 @@ async function loadAutos(){
   try{const d=await api('/api/autos',{_account:c});if(!isCurrentAccount(c))return;autos=(d.autos||[]).filter(a=>Number.isSafeInteger(a.id))}
   catch(e){if(!isCurrentAccount(c)||e.staleAccount)return;toast(e.message,1);return}
   for(const id of openedAutoIds)if(!autos.some(a=>a.id===id))openedAutoIds.delete(id);persistAutoExpanded();
-  syncAutoSelection();Object.keys(AUTO_TYPE).forEach(t=>renderAutoList(t));
+  syncAutoSelection();syncStopAllButton();Object.keys(AUTO_TYPE).forEach(t=>renderAutoList(t));
 }
 function renderAutoList(type){
   const [suffix]=AUTO_MAP[type],list=autos.filter(a=>a.type===type&&Number.isSafeInteger(a.id)),box=$('#aList'+suffix),c=accountContext();
   $('#aCnt'+suffix).textContent=list.length;$('#aEmpty'+suffix).style.display=list.length?'none':'block';
   const label=accounts.find(a=>a.id===c.id)?.label||c.id;
   box.innerHTML=list.map(a=>{
-    const open=openedAutoIds.has(a.id),action=(name,text,extra='')=>`<button type="button" class="${name==='delete'?'danger':name==='expand'?'ghost auto-chevron':'ghost'}" data-auto-action="${name}" data-auto-id="${a.id}" ${extra}>${text}</button>`;
+    const open=openedAutoIds.has(a.id),active=a.running===true||a.queued===true,stopBusy=autoStopBusy.has(a.id),action=(name,text,extra='')=>`<button type="button" class="${name==='delete'||(name==='stop'&&a.running===true)?'danger':name==='expand'?'ghost auto-chevron':'ghost'}" data-auto-action="${name}" data-auto-id="${a.id}" ${extra}>${text}</button>`;
     return `<div class="card auto-card" data-auto-card="${a.id}">
       <div class="auto-top">
         <input type="checkbox" style="width:auto;flex:none" aria-label="选择任务 ${esc(a.name)}" data-auto-action="select" data-auto-id="${a.id}" ${selectedAutoIds.has(a.id)?'checked':''}>
         <span data-task-icon="${a.id}"></span>
-        <div class="grow"><div class="auto-title" title="${esc(a.name)}">${esc(a.name||'未命名任务')}</div>${a.type==='signin'?`<div class="s" style="font-size:10px">${esc(autoWindow(a))}</div>`:''}${autoUnconfirmed(a)?'<span class="tag pending" role="status">待确认</span>':''}</div>
+        <div class="grow"><div class="auto-title" title="${esc(a.name)}">${esc(a.name||'未命名任务')}</div>${a.type==='signin'?`<div class="s" style="font-size:10px">${esc(autoWindow(a))}</div>`:''}${a.running===true?'<span class="tag pending" role="status">运行中</span>':a.queued===true?'<span class="tag pending" role="status">排队中</span>':''}${autoUnconfirmed(a)?'<span class="tag pending" role="status">待确认</span>':''}</div>
         <span class="tag ${a.enabled?'ok':'off'}">${a.enabled?'已启用':'已停用'}</span>
-        ${['signin','custom','keepalive'].includes(a.type)?action('run','执行'):''}
+        ${active?action('stop',a.running===true?'停止':'取消排队',(stopBusy||autoStopAllBusy)?'disabled':''):['signin','custom','keepalive'].includes(a.type)?action('run','执行'):''}
         ${action('expand','▸',`aria-label="${open?'收起':'展开'}任务详情" aria-expanded="${open}"`)}
       </div>
 
@@ -1500,6 +1513,7 @@ function renderAutoList(type){
     if(action==='select')toggleAutoSelection(id,button.checked);
     else if(action==='expand')toggleAutoExpanded(id);
     else if(action==='aidiag'){if(typeof diagnoseAuto==='function')diagnoseAuto(id)}
+    else if(action==='stop')stopAuto(id,c);
     else ({run:runAuto,toggle:toggleAuto,edit:editAutoItem,duplicate:dupAuto,delete:delAuto}[action])?.(id);
   };
 }
@@ -1785,6 +1799,30 @@ async function delAuto(id){
 }
 async function runAuto(id){
   try{await api('/api/autos/'+id+'/run',{method:'POST'});toast('已触发,稍后查看日志')}catch(e){toast(e.message,1)}
+}
+function renderAllAutoLists(){syncStopAllButton();Object.keys(AUTO_TYPE).forEach(renderAutoList)}
+async function stopAuto(id,c=accountContext()){
+  const a=autos.find(x=>x.id===id);if(!a||(!a.running&&!a.queued)||autoStopBusy.has(id)||autoStopAllBusy||!isCurrentAccount(c))return;
+  const message=a.running?'确定停止任务「'+String(a.name||id)+'」？这会中止当前正在执行的步骤。':'确定取消任务「'+String(a.name||id)+'」的排队？';
+  if(!window.confirm(message)||!isCurrentAccount(c))return;
+  autoStopBusy.add(id);renderAllAutoLists();
+  try{
+    await api('/api/autos/'+id+'/stop',{method:'POST',_account:c});
+    if(!isCurrentAccount(c))return;
+    toast(a.running?'任务已停止':'已取消排队');await loadAutos();
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
+  finally{if(isCurrentAccount(c)){autoStopBusy.delete(id);renderAllAutoLists()}}
+}
+async function stopAllAutos(){
+  const c=accountContext();if(autoStopAllBusy||!hasActiveAutos())return;
+  if(!window.confirm('停止本账号全部正在运行或排队的任务？正在运行的任务会中止当前步骤，排队任务会被取消。')||!isCurrentAccount(c))return;
+  autoStopAllBusy=true;renderAllAutoLists();
+  try{
+    const d=await api('/api/autos/stop-all',{method:'POST',_account:c});
+    if(!isCurrentAccount(c))return;
+    toast('已停止 '+(Array.isArray(d.stopped)?d.stopped.length:0)+' 个任务');await loadAutos();
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
+  finally{if(isCurrentAccount(c)){autoStopAllBusy=false;renderAllAutoLists()}}
 }
 
 // ---------- 配置导入导出（仅配置，不读凭证或会话） ----------
@@ -2235,6 +2273,8 @@ async function loadSettings(){
     $('#sDelay').value=s.delay||'1.0 3.0';
     $('#sIgnore').checked=s.ignore_bots!=='0';
     $('#sLogKeep').value=s.log_keep_days==null?30:s.log_keep_days;
+    const concurrency=String(s.task_concurrency??'2');
+    $('#sTaskConcurrency').value=/^[1-5]$/.test(concurrency)?concurrency:'2';
     $('#ovCooldown').textContent=(s.cooldown||20)+'s';
     $('#ovDelay').textContent=(s.delay||'1.0 3.0').replace(' ','~')+'s';
     $('#ovIgnore').textContent=s.ignore_bots==='0'?'关':'开';
@@ -2246,7 +2286,8 @@ async function loadSettings(){
     $('#sAiOn').checked=s.ai_enabled==='1';
     $('#sOcrOn').checked=s.ocr_enabled!=='0';
     $('#sAiBase').value=s.ai_base||'';
-    $('#sAiKey').value=s.ai_key||'';
+    $('#sAiKey').value='';
+    $('#sAiKey').placeholder=s.ai_key_present===true?'已保存，留空不修改':'sk-...';
     $('#sAiModel').value=s.ai_model||'';
     $('#sFl').checked=s.flock_enabled==='1';
     $('#sFlCnt').value=s.flock_count||5;
@@ -2257,11 +2298,15 @@ async function loadSettings(){
   }catch(e){}
 }
 async function saveSettings(){
+  const concurrency=String($('#sTaskConcurrency').value||'2'),c=accountContext(),key=$('#sAiKey').value.trim();
+  if(!/^[1-5]$/.test(concurrency))return toast('每账号任务并发上限须为 1–5',1);
+  const keyWasPresent=$('#sAiKey').placeholder==='已保存，留空不修改';
   try{
     await api('/api/settings',{method:'POST',body:JSON.stringify({
       cooldown:+$('#sCooldown').value,
       delay:$('#sDelay').value.trim(),
       ignore_bots:$('#sIgnore').checked?'1':'0',
+      task_concurrency:concurrency,
       log_keep_days:+$('#sLogKeep').value||0,
       notify_bark:$('#sBark').value.trim(),
       notify_bt:$('#sBt').value.trim(),
@@ -2271,16 +2316,18 @@ async function saveSettings(){
       ai_enabled:$('#sAiOn').checked?'1':'0',
       ocr_enabled:$('#sOcrOn').checked?'1':'0',
       ai_base:$('#sAiBase').value.trim(),
-      ai_key:$('#sAiKey').value.trim(),
+      ai_key:key,
       ai_model:$('#sAiModel').value.trim(),
       flock_enabled:$('#sFl').checked?'1':'0',
       flock_count:$('#sFlCnt').value||5,
       flock_minutes:$('#sFlMin').value||5,
       flock_pool:$('#sFlPool').value.trim(),
       theme:document.documentElement.dataset.theme||'dark'
-    })});
+    }),_account:c});
+    if(!isCurrentAccount(c))return;
+    $('#sAiKey').value='';$('#sAiKey').placeholder=(key||keyWasPresent)?'已保存，留空不修改':'sk-...';
     toast('设置已保存');loadSettings();
-  }catch(e){toast(e.message,1)}
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 // ---------- AI 与验证码测试 ----------
 function currentAIConfig(){
@@ -2606,11 +2653,62 @@ async function delRule(id){if(!confirm('删除规则 #'+id+'?'))return;try{await
 
 // ---------- 日志 ----------
 let logKind='reply';
-const LOG_KINDS={reply:'回复',signin:'签到',grabcodes:'抢注',redpacket:'红包',custom:'自定义',keepalive:'群聊'};
+const LOG_KINDS={reply:'回复',anomaly:'异常',signin:'签到',grabcodes:'抢注',redpacket:'红包',custom:'自定义',keepalive:'群聊'};
 function pickLogKind(k){
   logKind=k;
+  if(k!=='anomaly')anomalySeq++;
   document.querySelectorAll('#logSeg button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
   loadLogs();
+}
+let anomalies=[], anomalySeq=0, anomalyBusyIds=new Set();
+const ANOMALY_STATUS={failed:'失败',unconfirmed:'待确认',interrupted:'中断',stopped:'已停止'};
+const ANOMALY_ACTIONS={confirm_success:'确认成功',mark_failed:'标记失败',retry_once:'再执行一次',disable:'停用'};
+function anomalyTime(value){
+  if(value==null||value==='')return '无';
+  if(typeof value==='number'&&Number.isFinite(value))return fmt(value);
+  return String(value);
+}
+function setAnomalyCount(count){
+  document.querySelectorAll('#logSeg button').forEach(b=>{if(b.dataset.k==='anomaly')b.textContent='异常'+(count?' '+count:'')});
+}
+function renderAnomalies(c=accountContext()){
+  const box=$('#logList');
+  box.innerHTML=anomalies.length?anomalies.map(item=>{
+    const id=String(item.id??''),active=item.running===true||item.queued===true,busy=anomalyBusyIds.has(id),disabled=active||busy?'disabled':'';
+    const action=(name,label)=>`<button type="button" class="ghost" data-anomaly-action="${name}" data-anomaly-id="${esc(id)}" ${disabled}>${label}</button>`;
+    const last=item.last_result&&typeof item.last_result==='object'?item.last_result:null;
+    return `<div class="card" data-anomaly-card="${esc(id)}" style="padding:12px;margin-bottom:8px">
+      <div class="auto-top"><div class="grow"><b>${esc(item.name||'未命名任务')}</b> <span class="tag pending">${esc(ANOMALY_STATUS[item.status]||item.status||'异常')}</span></div>${active?`<span class="tag pending">${item.running===true?'运行中':'排队中'}</span>`:''}</div>
+      <div class="s">重试 ${esc(item.retry_count??0)} / ${esc(item.retry_limit??0)} · 上次 ${esc(anomalyTime(item.last_attempt))} · 下次 ${esc(anomalyTime(item.next_run_at))}</div>
+      <div class="s">最后回复：${esc(last?.reply??'（无）')}</div>
+      <div class="auto-actions">${['signin','keepalive'].includes(item.type)?action('confirm_success','确认成功'):''}${action('mark_failed','标记失败')}${action('retry_once','再执行一次')}${action('disable','停用')}</div>
+    </div>`;
+  }).join(''):'<div class="empty">当前没有异常任务</div>';
+  box.onclick=e=>{
+    const button=e.target.closest('[data-anomaly-action]');if(!button||!box.contains(button)||!isCurrentAccount(c))return;
+    resolveAnomaly(button.dataset.anomalyId,button.dataset.anomalyAction,c);
+  };
+}
+async function loadAnomalies(){
+  const c=accountContext(),seq=++anomalySeq;
+  try{
+    const d=await api('/api/anomalies',{_account:c});
+    if(!isCurrentAccount(c)||seq!==anomalySeq||logKind!=='anomaly')return;
+    anomalies=Array.isArray(d.items)?d.items:[];setAnomalyCount(Number.isInteger(d.count)?d.count:anomalies.length);renderAnomalies(c);
+  }catch(e){if(isCurrentAccount(c)&&seq===anomalySeq&&!e.staleAccount)toast(e.message,1)}
+}
+async function resolveAnomaly(id,action,c=accountContext()){
+  id=String(id);const item=anomalies.find(x=>String(x.id)===id);
+  if(!item||!Object.prototype.hasOwnProperty.call(ANOMALY_ACTIONS,action)||item.running===true||item.queued===true||anomalyBusyIds.has(id)||!isCurrentAccount(c))return;
+  if(action==='confirm_success'&&!['signin','keepalive'].includes(item.type))return;
+  if(!window.confirm('对任务「'+String(item.name||id)+'」执行“'+ANOMALY_ACTIONS[action]+'”？')||!isCurrentAccount(c))return;
+  anomalyBusyIds.add(id);renderAnomalies(c);
+  try{
+    await api('/api/anomalies/'+encodeURIComponent(id)+'/resolve',{method:'POST',body:JSON.stringify({action}),_account:c});
+    if(!isCurrentAccount(c))return;
+    toast('异常已处理');await Promise.all([loadAnomalies(),loadAutos()]);
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
+  finally{if(isCurrentAccount(c)){anomalyBusyIds.delete(id);if(logKind==='anomaly')renderAnomalies(c)}}
 }
 function logRow(h){
   const okv=(h.ok===undefined||h.ok===null)?-1:(h.ok?1:0);
@@ -2677,12 +2775,14 @@ async function clearLogs(days){
   }catch(e){toast(e.message,1)}
 }
 async function loadLogs(){
+  if(logKind==='anomaly')return loadAnomalies();
   const c=accountContext(),kind=logKind,q=logQ;
   try{
     const url='/api/logs?n=80&kind='+encodeURIComponent(kind)+(q?('&q='+encodeURIComponent(q)):'');
     const d=await api(url,{_account:c});if(!isCurrentAccount(c)||kind!==logKind||q!==logQ)return;
     const counts=d.counts||{};
     if(!logQ)document.querySelectorAll('#logSeg button').forEach(b=>{
+      if(b.dataset.k==='anomaly')return;
       const n=counts[b.dataset.k]||0;
       b.textContent=LOG_KINDS[b.dataset.k]+(n?' '+n:'');
     });
@@ -2692,6 +2792,17 @@ async function loadLogs(){
 
 // ---------- 启动 ----------
 let bootstrapTimer=null;
+function pageIsHidden(){return document.visibilityState==='hidden'}
+function refreshVisibleTab(){
+  if(pageIsHidden())return;
+  loadState();
+  if(activeTab==='logs')loadLogs();
+  else if(activeTab==='autos')loadAutos();
+  else if(activeTab==='groups')loadDialogs();
+  else if(activeTab==='rules')loadRules();
+  else if(activeTab==='settings')loadSettings();
+}
+if(document.addEventListener)document.addEventListener('visibilitychange',()=>{if(!pageIsHidden())refreshVisibleTab()});
 async function bootstrap(){
   const c=accountContext();
   // 把添加任务的弹窗挪到 body 下,避免受折叠面板的 display:none 影响
@@ -2703,7 +2814,7 @@ async function bootstrap(){
   renderAccounts();loadAccounts();loadState();loadSettings();loadRules();loadAutos();loadRuleGroups();
   applyTheme((localStorage.getItem('tgp_theme'))||'dark');
   if(bootstrapTimer)clearInterval(bootstrapTimer);
-  bootstrapTimer=setInterval(()=>{loadState();loadLogs()},5000);
+  bootstrapTimer=setInterval(()=>{if(!pageIsHidden()){loadState();loadLogs()}},5000);
 }
 bootstrap();
 </script>

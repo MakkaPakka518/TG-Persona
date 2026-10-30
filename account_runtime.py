@@ -92,6 +92,14 @@ class AccountRuntime:
     signin_plans: dict = field(default_factory=dict)
     poll_last: dict = field(default_factory=dict)
     auto_tasks: dict = field(default_factory=dict)
+    # Queue reservations live in auto_tasks for backwards-compatible guards;
+    # auto_workers contains only attempts that are actually consuming a slot.
+    auto_pending: list = field(default_factory=list)
+    auto_queued: set = field(default_factory=set)
+    auto_workers: dict = field(default_factory=dict)
+    auto_stop_requested: set = field(default_factory=set)
+    auto_queue_task: object = None
+    auto_queue_wakeup: object = None
     watcher_task: object = None
     signin_task: object = None
     poll_task: object = None
@@ -198,6 +206,21 @@ class AccountRuntime:
                 self.tasks.discard(task)
         return bound
 
+    def clear_auto_queue(self):
+        """Drop queue reservations after owned dispatcher/workers are stopped."""
+        self.auto_stop_requested.update(self.auto_tasks)
+        self.auto_pending[:] = []
+        self.auto_queued.clear()
+        self.auto_workers.clear()
+        for completion in list(self.auto_tasks.values()):
+            if completion is not None and not completion.done():
+                completion.cancel()
+        self.auto_tasks.clear()
+        self.auto_stop_requested.clear()
+        self.auto_queue_task = None
+        if self.auto_queue_wakeup is not None:
+            self.auto_queue_wakeup.set()
+
     async def cancel_tasks(self):
         """Cancel/await owned writers without disconnecting any account yet."""
         current = asyncio.current_task()
@@ -226,7 +249,7 @@ class AccountRuntime:
                     pass
             self.client = None
             self.handler_registered = False
-            self.auto_tasks.clear()
+            self.clear_auto_queue()
             for name in ("watcher_task", "signin_task", "poll_task", "keepalive_task", "housekeeping_task", "health_task"):
                 setattr(self, name, None)
             self.tg_phone = ""

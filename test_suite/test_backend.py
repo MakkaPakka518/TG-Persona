@@ -377,7 +377,7 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.b['_signin_deadline'] = lambda *_: time.time()-1
         await self.execute(aid)
         self.assertEqual(self.row(aid)['last_at'], '')
-        self.assertEqual(self.row(aid)['last_status'], 'failed')
+        self.assertEqual(self.row(aid)['last_status'], 'unconfirmed')
         self.b['run_signin'].assert_not_awaited()
         self.assertEqual(self.b['conn'].execute("SELECT COUNT(*) FROM hits WHERE ok=0").fetchone()[0], 1)
 
@@ -444,7 +444,7 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         with patch.object(asyncio, 'sleep', new=AsyncMock()):
             await self.execute(aid, True)
         self.assertEqual(self.row(aid)['last_at'], '')
-        self.assertEqual(self.row(aid)['last_status'], 'failed')
+        self.assertEqual(self.row(aid)['last_status'], 'unconfirmed')
         self.assertEqual(self.b['conn'].execute('SELECT ok FROM hits ORDER BY id DESC').fetchone()[0], 0)
 
     async def test_signin_new_success_marks_successful(self):

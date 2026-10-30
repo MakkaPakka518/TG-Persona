@@ -94,8 +94,9 @@ def get_current_account_label() -> str:
 
 
 def get_running_task_ids():
-    """Immutable current-account execution reservations for batch/import guards."""
-    return frozenset(get_runtime().auto_tasks)
+    """Current-account execution and queue reservations for mutation guards."""
+    runtime = get_runtime()
+    return frozenset(set(runtime.auto_tasks) | set(runtime.auto_queued) | set(runtime.auto_workers))
 
 
 def get_root_db() -> sqlite3.Connection:
@@ -1831,29 +1832,150 @@ def _signin_deadline(a, current):
     return current.replace(hour=end // 60, minute=end % 60, second=0, microsecond=0).timestamp()
 
 
-def _queue_auto(aid, manual=False):
-    if aid in get_runtime().auto_tasks:
-        return False
-    get_runtime().auto_tasks[aid] = None  # 不等待协程开始就占锁
+def _auto_runtime_state():
+    """Lazily fill queue fields for old test/runtime fixtures."""
+    runtime = get_runtime()
+    defaults = (("auto_pending", list), ("auto_queued", set), ("auto_workers", dict),
+                ("auto_stop_requested", set), ("auto_tasks", dict))
+    for name, factory in defaults:
+        if not isinstance(getattr(runtime, name, None), factory):
+            setattr(runtime, name, factory())
+    if not hasattr(runtime, "auto_queue_task"):
+        runtime.auto_queue_task = None
+    if not isinstance(getattr(runtime, "auto_queue_wakeup", None), asyncio.Event):
+        runtime.auto_queue_wakeup = asyncio.Event()
+    return runtime
+
+
+def _task_concurrency():
     try:
-        get_runtime().auto_tasks[aid] = get_runtime().spawn(_execute_auto(aid, manual))
-    except BaseException:
-        get_runtime().auto_tasks.pop(aid, None)
-        raise
+        return max(1, min(5, int(get_setting("task_concurrency", "2"))))
+    except (TypeError, ValueError):
+        return 2
+
+
+def _finish_auto_reservation(aid):
+    runtime = _auto_runtime_state()
+    runtime.auto_queued.discard(aid)
+    runtime.auto_workers.pop(aid, None)
+    completion = runtime.auto_tasks.pop(aid, None)
+    if completion is not None and not completion.done():
+        completion.set_result(None)
+    runtime.auto_stop_requested.discard(aid)
+
+
+def _queue_auto(aid, manual=False):
+    """Reserve one task synchronously and let the account dispatcher batch it."""
+    runtime = _auto_runtime_state()
+    if aid in runtime.auto_tasks or aid in runtime.auto_queued or aid in runtime.auto_workers:
+        return False
+    completion = asyncio.get_running_loop().create_future()
+    runtime.auto_tasks[aid] = completion
+    runtime.auto_pending.append({"id": aid, "manual": bool(manual)})
+    runtime.auto_queued.add(aid)
+    runtime.auto_stop_requested.discard(aid)
+    runtime.auto_queue_wakeup.set()
+    dispatcher = runtime.auto_queue_task
+    if dispatcher is None or dispatcher.done():
+        try:
+            runtime.auto_queue_task = runtime.spawn(_auto_dispatcher())
+        except BaseException:
+            runtime.auto_pending[:] = [item for item in runtime.auto_pending if item["id"] != aid]
+            _finish_auto_reservation(aid)
+            raise
     return True
 
 
+async def _wait_retry_round(entries):
+    runtime = _auto_runtime_state()
+    while True:
+        active = [item for item in entries if item["id"] in runtime.auto_tasks and
+                  item["id"] not in runtime.auto_stop_requested]
+        if not active:
+            return []
+        deadline = max(item["next_at"] for item in active)
+        delay = deadline - time.time()
+        if delay <= 0:
+            return active
+        runtime.auto_queue_wakeup.clear()
+        try:
+            await asyncio.wait_for(runtime.auto_queue_wakeup.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            return [item for item in active if item["id"] not in runtime.auto_stop_requested]
+
+
+async def _auto_dispatcher():
+    """Account-local, barrier-batched dispatcher with coordinated retry rounds."""
+    runtime = _auto_runtime_state()
+    try:
+        # One turn lets a tick/API burst collect before the first DESC-sorted batch.
+        await asyncio.sleep(0)
+        while runtime.auto_pending:
+            current = runtime.auto_pending[:]
+            runtime.auto_pending[:] = []
+            current = [item for item in current if item["id"] in runtime.auto_tasks and
+                       item["id"] not in runtime.auto_stop_requested]
+            current.sort(key=lambda item: item["id"], reverse=True)
+            while current:
+                retries = []
+                offset = 0
+                while offset < len(current):
+                    # Settings changes apply at the next barrier, never interrupt a batch.
+                    width = _task_concurrency()
+                    batch = current[offset:offset + width]
+                    offset += width
+                    workers = []
+                    for item in batch:
+                        aid = item["id"]
+                        if aid not in runtime.auto_tasks or aid in runtime.auto_stop_requested:
+                            _finish_auto_reservation(aid)
+                            continue
+                        runtime.auto_queued.discard(aid)
+                        worker = runtime.spawn(_execute_auto(aid, item["manual"]))
+                        runtime.auto_workers[aid] = worker
+                        workers.append((item, worker))
+                    if not workers:
+                        continue
+                    results = await asyncio.gather(*(worker for _, worker in workers), return_exceptions=True)
+                    for (item, worker), result in zip(workers, results):
+                        aid = item["id"]
+                        runtime.auto_workers.pop(aid, None)
+                        if isinstance(result, dict) and result.get("retry") and aid not in runtime.auto_stop_requested:
+                            retries.append({"id": aid, "manual": False,
+                                            "next_at": int(result.get("next_at") or time.time())})
+                            runtime.auto_queued.add(aid)
+                        else:
+                            _finish_auto_reservation(aid)
+                if not retries:
+                    current = []
+                    continue
+                # All initial attempts/batches have crossed the barrier. Start the
+                # next retry round together at that round's latest backoff deadline.
+                retries.sort(key=lambda item: item["id"], reverse=True)
+                current = await _wait_retry_round(retries)
+            # Tasks submitted while this set was running begin only afterwards.
+            await asyncio.sleep(0)
+    finally:
+        runtime.auto_queue_task = None
+        # Unexpected dispatcher cancellation/error must not leave queue locks.
+        if runtime.closing or runtime.stopping or runtime.closed:
+            return
+        if runtime.auto_pending:
+            runtime.auto_queue_task = runtime.spawn(_auto_dispatcher())
+
+
 async def _execute_auto(aid, manual=False):
-    """持久尝试/指数退避/成功状态;手动也走同一执行器,失败不污染 last_at。"""
+    """Execute one attempt; the dispatcher alone decides coordinated retries."""
     a = None
+    result = {"retry": False, "next_at": 0}
     notice = {"id": aid, "message": "", "unconfirmed": False}
     notice_token = _failure_context.set(notice)
     try:
         a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
         if a is None or (not manual and not a["enabled"]):
-            return
+            return result
         if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
-            return
+            return result
         now = int(time.time())
         today = now_local().strftime("%Y-%m-%d")
         count = int(a["retry_count"] or 0)
@@ -1861,13 +1983,13 @@ async def _execute_auto(aid, manual=False):
             if a["type"] == "signin" and (a["last_at"] == today or
                     (a["retry_day"] == today and (a["last_status"] == "unconfirmed" or count >= _retry_limit(a))) or
                     (a["next_run_at"] and now < a["next_run_at"])):
-                return
+                return result
             if a["type"] == "keepalive" and now < int(a["next_run_at"] or 0):
-                return
+                return result
         if a["type"] == "signin" and a["retry_day"] != today:
             count = 0
         if a["type"] == "keepalive" and count >= _retry_limit(a):
-            count = 0  # 上轮耗尽后只在完整间隔届满开启下一轮
+            count = 0
         count += 1
         backoff = min(3600, RETRY_BASE * 2 ** min(count - 1, 6))
         get_account_db().execute("UPDATE automations SET last_attempt=?,retry_count=?,retry_day=?,"
@@ -1891,51 +2013,62 @@ async def _execute_auto(aid, manual=False):
                 ok = bool(await run_custom(a))
         except _RetryLater as e:
             backoff = max(backoff, e.seconds)
-            _task_failure(a, f"Telegram 限流,至少 {backoff} 秒后重试")
+            _task_failure(a, "Telegram 限流,至少 %s 秒后重试" % backoff)
         except asyncio.CancelledError:
-            status = "interrupted"
-            _task_failure(a, "任务被中断,未记为成功")
-            raise
+            if aid in _auto_runtime_state().auto_stop_requested:
+                status = "stopped"
+                notice["message"] = "用户手动停止"
+                add_hit(a["type"], False, chat_id=a["target"], rule_id=-aid,
+                        grp_name=a["target"], content="用户手动停止",
+                        detail={"kind": a["type"], "task": a["name"],
+                                "error": "用户手动停止", "manual_stop": True})
+            else:
+                status = "interrupted"
+                _task_failure(a, "任务被中断,未记为成功")
+                raise
         except asyncio.TimeoutError:
             _task_unconfirmed(a, "执行超过窗口或等待上限，结果未知；本日不自动重发")
         except Exception as e:
-            _task_failure(a, f"执行异常: {e}")
+            _task_failure(a, "执行异常: %s" % e)
         finally:
             finished = int(time.time())
             if notice["unconfirmed"]:
                 status = "unconfirmed"
             next_at = finished + backoff
             exhausted = count >= _retry_limit(a)
-            if a["type"] == "signin" and (exhausted or status == "unconfirmed"):
+            if a["type"] == "signin" and (exhausted or status in ("unconfirmed", "stopped")):
                 next_at = 0
-            if ok:
+            if status == "stopped":
+                next_at = 0
+                get_account_db().execute("UPDATE automations SET next_run_at=0,last_status='stopped' WHERE id=?", (aid,))
+            elif ok:
                 stamp = now_local().strftime("%Y-%m-%d") if a["type"] == "signin" else str(finished)
                 next_at = finished + max(60, int(a["poll_interval"] or 60)) if a["type"] == "keepalive" else 0
                 get_account_db().execute("UPDATE automations SET last_at=?,retry_count=0,next_run_at=?,"
                              "last_status='success',failure_notified='' WHERE id=?", (stamp, next_at, aid))
             else:
-                if a["type"] == "keepalive" and count >= _retry_limit(a):
+                if a["type"] == "keepalive" and exhausted:
                     next_at = finished + max(backoff, max(60, int(a["poll_interval"] or 60)))
                 get_account_db().execute("UPDATE automations SET next_run_at=?,last_status=? WHERE id=?",
                              (next_at, status, aid))
             get_account_db().commit()
-            # 中间失败只记录日志；结束/待确认只推一次，每任务每天持久去重。
-            if not ok and status != "interrupted" and (exhausted or status == "unconfirmed" or manual):
-                changed = get_account_db().execute("UPDATE automations SET failure_notified=? WHERE id=? AND COALESCE(failure_notified,'')!=?", (today,aid,today))
+            if not ok and status not in ("interrupted", "stopped") and (exhausted or status == "unconfirmed" or manual):
+                changed = get_account_db().execute("UPDATE automations SET failure_notified=? WHERE id=? AND COALESCE(failure_notified,'')!=?", (today, aid, today))
                 get_account_db().commit()
                 if changed.rowcount:
                     suffix = "本日停止自动重发，请人工确认" if status == "unconfirmed" else "本轮重试已结束" if exhausted else "手动执行失败"
                     notify_event("fail", a["name"], (notice["message"] or "任务未成功") + "；" + suffix)
+            retry = (not manual and not ok and status == "failed" and not exhausted and
+                     a["type"] in ("signin", "keepalive") and aid not in _auto_runtime_state().auto_stop_requested)
+            result = {"retry": retry, "next_at": next_at}
+        return result
     finally:
         _failure_context.reset(notice_token)
-        get_runtime().auto_tasks.pop(aid, None)
-
-
 def _keepalive_tick():
     if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         return
     now = int(time.time())
-    for a in get_account_db().execute("SELECT * FROM automations WHERE enabled=1 AND type='keepalive' AND target!=''").fetchall():
+    for a in get_account_db().execute("SELECT * FROM automations WHERE enabled=1 AND type='keepalive' AND target!='' ORDER BY id DESC").fetchall():
         if a["id"] in get_runtime().auto_tasks:
             continue
         if not a["next_run_at"]:
@@ -1956,7 +2089,7 @@ def _signin_tick():
     for key in list(get_runtime().signin_plans):
         if key[1] != today:
             get_runtime().signin_plans.pop(key, None)
-    for a in get_account_db().execute("SELECT * FROM automations WHERE enabled=1 AND type='signin'").fetchall():
+    for a in get_account_db().execute("SELECT * FROM automations WHERE enabled=1 AND type='signin' ORDER BY id DESC").fetchall():
         if a["id"] in get_runtime().auto_tasks or a["last_at"] == today:
             continue
         start_text, end_text = _effective_signin_window(a)
@@ -2734,7 +2867,8 @@ async def list_autos():
     for row in rows:
         start, end = _effective_signin_window(row)
         output.append(dict(row, signed_today=(row["type"] == "signin" and row["last_at"] == today),
-            running=(row["id"] in get_runtime().auto_tasks), last_result=results.get(row["id"]),
+            running=(row["id"] in _auto_runtime_state().auto_workers),
+            queued=(row["id"] in _auto_runtime_state().auto_queued), last_result=results.get(row["id"]),
             uses_global_window=(row["type"] == "signin" and window["enabled"]),
             effective_win_start=start, effective_win_end=end))
     return {"autos": output}
@@ -2823,7 +2957,152 @@ async def run_auto_now(aid: int):
         raise HTTPException(409, "TG 尚未登录")
     if not _queue_auto(aid, manual=True):
         raise HTTPException(409, "任务正在执行,请勿重复提交")
-    return {"ok": True, "running": True}
+    return {"ok": True, "running": False, "queued": True}
+
+
+async def _stop_auto_task(aid):
+    runtime = _auto_runtime_state()
+    row = get_account_db().execute("SELECT id FROM automations WHERE id=?", (aid,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "任务不存在")
+    queued = aid in runtime.auto_queued
+    worker = runtime.auto_workers.get(aid)
+    if not queued and worker is None:
+        raise HTTPException(409, "任务未在运行或排队")
+    runtime.auto_stop_requested.add(aid)
+    runtime.auto_pending[:] = [item for item in runtime.auto_pending if item["id"] != aid]
+    runtime.auto_queue_wakeup.set()
+    if worker is not None and not worker.done():
+        worker.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(worker), timeout=5)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+    if aid in runtime.auto_tasks and (worker is None or worker.done()):
+        _finish_auto_reservation(aid)
+    get_account_db().execute("UPDATE automations SET last_status='stopped',next_run_at=0 WHERE id=?", (aid,))
+    get_account_db().commit()
+    return aid
+
+
+@app.post("/api/autos/{aid}/stop")
+async def stop_auto(aid: int):
+    await _stop_auto_task(aid)
+    return {"ok": True, "stopped": [aid]}
+
+
+@app.post("/api/autos/stop-all")
+async def stop_all_autos():
+    runtime = _auto_runtime_state()
+    ids = sorted(set(runtime.auto_tasks) | set(runtime.auto_queued) | set(runtime.auto_workers), reverse=True)
+    if not ids:
+        return {"ok": True, "stopped": []}
+    runtime.auto_stop_requested.update(ids)
+    runtime.auto_pending[:] = [item for item in runtime.auto_pending if item["id"] not in ids]
+    runtime.auto_queue_wakeup.set()
+    workers = [runtime.auto_workers[aid] for aid in ids
+               if aid in runtime.auto_workers and not runtime.auto_workers[aid].done()]
+    for worker in workers:
+        worker.cancel()
+    if workers:
+        try:
+            await asyncio.wait_for(asyncio.gather(*workers, return_exceptions=True), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+    for aid in ids:
+        worker = runtime.auto_workers.get(aid)
+        if aid in runtime.auto_tasks and (worker is None or worker.done()):
+            _finish_auto_reservation(aid)
+    placeholders = ",".join("?" for _ in ids)
+    get_account_db().execute("UPDATE automations SET last_status='stopped',next_run_at=0 WHERE id IN (%s)" % placeholders, ids)
+    get_account_db().commit()
+    return {"ok": True, "stopped": ids}
+
+
+def _latest_auto_results():
+    rows = get_account_db().execute(
+        "SELECT ts,rule_id,ok,content,reply,detail,action FROM hits WHERE id IN "
+        "(SELECT MAX(id) FROM hits WHERE rule_id<0 GROUP BY rule_id)").fetchall()
+    output = {}
+    for hit in rows:
+        try:
+            detail = json.loads(hit["detail"] or "{}")
+        except (TypeError, ValueError):
+            detail = {}
+        if not isinstance(detail, dict):
+            detail = {}
+        output[-hit["rule_id"]] = {"ts": hit["ts"], "ok": hit["ok"],
+            "action": hit["action"], "reply": hit["reply"] or detail.get("error") or hit["content"],
+            "detail": detail}
+    return output
+
+
+@app.get("/api/anomalies")
+async def list_anomalies():
+    runtime = _auto_runtime_state()
+    rows = get_account_db().execute(
+        "SELECT * FROM automations WHERE last_status IN "
+        "('failed','unconfirmed','interrupted','stopped') OR retry_count>0 ORDER BY id DESC").fetchall()
+    latest = _latest_auto_results()
+    items = []
+    for row in rows:
+        items.append({"id": row["id"], "name": row["name"], "type": row["type"],
+            "status": row["last_status"], "last_attempt": row["last_attempt"],
+            "retry_count": row["retry_count"], "retry_limit": _retry_limit(row),
+            "next_run_at": row["next_run_at"], "enabled": bool(row["enabled"]),
+            "running": row["id"] in runtime.auto_workers,
+            "queued": row["id"] in runtime.auto_queued,
+            "last_result": latest.get(row["id"])})
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/anomalies/{aid}/resolve")
+async def resolve_anomaly(aid: int, body: dict):
+    action = body.get("action") if isinstance(body, dict) else None
+    allowed = ("confirm_success", "mark_failed", "retry_once", "disable")
+    if action not in allowed:
+        raise HTTPException(400, "异常处理动作无效")
+    db = get_account_db()
+    row = db.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "任务不存在")
+    runtime = _auto_runtime_state()
+    active = aid in runtime.auto_tasks or aid in runtime.auto_queued or aid in runtime.auto_workers
+    if active and action != "disable":
+        raise HTTPException(409, "任务正在执行或排队")
+    if action == "disable":
+        if active:
+            await _stop_auto_task(aid)
+        db.execute("UPDATE automations SET enabled=0,next_run_at=0,last_status='stopped' WHERE id=?", (aid,))
+        db.commit()
+        return {"ok": True, "action": action}
+    today = now_local().strftime("%Y-%m-%d")
+    if action == "confirm_success":
+        if row["type"] not in ("signin", "keepalive"):
+            raise HTTPException(400, "仅签到或保号任务可人工确认成功")
+        stamp = today if row["type"] == "signin" else str(int(time.time()))
+        db.execute("UPDATE automations SET last_at=?,retry_count=0,retry_day='',next_run_at=0,"
+                   "last_status='success',failure_notified='' WHERE id=?", (stamp, aid))
+        db.commit()
+        add_hit(row["type"], True, chat_id=row["target"], rule_id=-aid,
+                grp_name=row["target"], content="人工确认成功",
+                detail={"kind": "manual_resolution", "task": row["name"],
+                        "task_type": row["type"], "resolution": "confirm_success"})
+        return {"ok": True, "action": action}
+    if action == "mark_failed":
+        db.execute("UPDATE automations SET retry_count=?,retry_day=?,next_run_at=0,"
+                   "last_status='failed',failure_notified=? WHERE id=?",
+                   (_retry_limit(row), today, today, aid))
+        db.commit()
+        return {"ok": True, "action": action}
+    if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
+        raise HTTPException(409, "TG 尚未登录")
+    db.execute("UPDATE automations SET retry_count=0,retry_day='',next_run_at=0,"
+               "last_status='',failure_notified='' WHERE id=?", (aid,))
+    db.commit()
+    if not _queue_auto(aid, manual=True):
+        raise HTTPException(409, "任务正在执行或排队")
+    return {"ok": True, "action": action, "queued": True}
 
 
 @app.delete("/api/rules/{rid}")
@@ -2838,20 +3117,34 @@ async def delete_rule(rid: int):
 SETTING_KEYS = ["tz", "log_keep_days", "cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar",
                 "notify_bark", "notify_bt", "notify_bc", "notify_on_success", "notify_on_fail",
                 "ai_base", "ai_key", "ai_model", "ai_enabled", "ocr_enabled",
-                "flock_enabled", "flock_count", "flock_minutes", "flock_pool",
+                "flock_enabled", "flock_count", "flock_minutes", "flock_pool", "task_concurrency",
                 "signin_global_enabled", "signin_global_start", "signin_global_end"]
 DEFAULTS = {"cooldown": "20", "delay": "1.0 3.0", "ignore_bots": "1", "theme": "dark",
-            "flock_count": "5", "flock_minutes": "5", "ocr_enabled": "1", "log_keep_days": "30",
+            "flock_count": "5", "flock_minutes": "5", "task_concurrency": "2", "ocr_enabled": "1", "log_keep_days": "30",
             "signin_global_enabled": "0", "signin_global_start": "00:05", "signin_global_end": "00:41"}
 
 
 @app.get("/api/settings")
 async def get_settings():
-    return {k: get_setting(k, DEFAULTS.get(k)) for k in SETTING_KEYS}
+    values = {k: get_setting(k, DEFAULTS.get(k)) for k in SETTING_KEYS}
+    # 密钥只写不读：浏览器只知道是否已保存，永远拿不到完整值。
+    values["ai_key_present"] = bool(values.get("ai_key"))
+    values["ai_key"] = ""
+    return values
 
 
 @app.post("/api/settings")
 async def update_settings(body: dict):
+    if "task_concurrency" in body:
+        value = body["task_concurrency"]
+        if isinstance(value, bool) or not (isinstance(value, int) or
+                (isinstance(value, str) and re.fullmatch(r"[0-9]+", value))):
+            raise HTTPException(400, "任务并发数须为 1-5 的整数")
+        concurrency = int(value)
+        if concurrency < 1 or concurrency > 5:
+            raise HTTPException(400, "任务并发数须为 1-5 的整数")
+        body = dict(body)
+        body["task_concurrency"] = str(concurrency)
     if "tz" in body:
         name = str(body.get("tz") or "").strip()
         if name and not tz_valid(name):
@@ -2892,6 +3185,8 @@ async def update_settings(body: dict):
                 runtime.signin_plans.clear()
     for k, v in body.items():
         if k in SETTING_KEYS and k not in global_keys:
+            if k == "ai_key" and str(v or "").strip() == "":
+                continue  # 留空代表沿用已保存密钥。
             set_setting(k, str(v))
     if "tz" in body:
         for runtime in account_registry.accounts.values():
