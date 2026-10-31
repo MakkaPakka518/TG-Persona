@@ -452,6 +452,10 @@ html[data-theme="light"] .switch{background:#cbd6c5}
 section.act,.fold.open .fold-b{animation:none}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition-duration:.01ms!important}}
 
+
+/* 品牌版本与更新提示 */
+.logo-copy{display:flex;min-width:0;flex-direction:column;line-height:1.12}.logo-title{white-space:nowrap}.logo-copy small{display:block!important;margin-top:4px;color:var(--dim);font-size:9px;font-weight:550;letter-spacing:.055em;white-space:nowrap}.logo #brandUpdate{color:var(--acc);font-weight:750}.logo #brandUpdate.hidden{display:none!important}
+@media(max-width:340px){.logo-copy small{font-size:8px;letter-spacing:0}.logo-title{font-size:10.5px}}
 </style>
 </head>
 <body>
@@ -484,7 +488,7 @@ section.act,.fold.open .fold-b{animation:none}
 </div>
 
 <header>
-  <div class="logo"><span class="dot" id="dotHead"></span>TG PERSONA <small>人形分身</small></div>
+  <div class="logo"><span class="dot" id="dotHead"></span><span class="logo-copy"><span class="logo-title">TG PERSONA</span><small>人形分身 · <span id="brandVersion">v--</span><span id="brandUpdate" class="hidden"> · 有更新</span></small></span></div>
   <div class="spacer"></div>
   <select id="accountTop" aria-label="当前 Telegram 账号" onchange="switchAccount(this.value)" style="width:auto;max-width:160px"><option value="default">默认账号</option></select>
   <button class="icon" id="btnTheme" onclick="toggleTheme()" title="切换主题">
@@ -959,6 +963,28 @@ section.act,.fold.open .fold-b{animation:none}
     <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</h2>
     <div class="sub">触发行为与面板安全</div>
     <div class="card fold">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>系统更新</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div class="hint" id="updInfo">版本信息加载中…</div>
+        <div class="flex" style="margin-top:10px">
+          <button class="btn" id="updCheck" style="flex:1" onclick="checkUpdate()">检查更新</button>
+          <button class="btn" id="updBtn" style="flex:1" onclick="doUpdate()">立即更新</button>
+        </div>
+        <pre id="updLog" class="hint" style="white-space:pre-wrap;display:none;margin-top:12px;max-height:260px;overflow:auto"></pre>
+        <div class="hint">更新会自动备份当前文件到 data/backup-时间戳,再拉取仓库最新文件并重启服务;data 数据和 venv 不受影响。</div>
+        <h4 style="margin:16px 0 8px">备份管理</h4>
+        <div class="hint" id="backupsInfo" aria-live="polite">尚未加载备份列表</div>
+        <div class="hint" id="backupsReason">请先查看备份；清理只删除备份，不删除数据库、会话或 venv。</div>
+        <div class="flex" style="margin-top:10px;flex-wrap:wrap">
+          <button class="ghost" type="button" id="backupsLoadBtn" onclick="loadBackups()">查看备份</button>
+          <button class="btn" type="button" id="backupsKeepBtn" onclick="cleanupBackups('keep_latest')" disabled>保留最新一份，清理其余（推荐）</button>
+          <button class="danger" type="button" id="backupsAllBtn" onclick="cleanupBackups('all')" disabled>删除全部备份</button>
+        </div>
+        <div id="backupsList" style="margin-top:10px;max-height:260px;overflow:auto"></div>
+        <div class="hint" id="backupsResult" aria-live="polite" style="margin-top:8px"></div>
+      </div>
+    </div>
+    <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">Telegram 多账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
       <label for="accountSettings">当前账号（客户端可同时登录，切换只改变面板范围）</label>
@@ -984,28 +1010,6 @@ section.act,.fold.open .fold-b{animation:none}
         <label for="iconLibraryUrl">图标库 JSON URL</label><input type="url" id="iconLibraryUrl" placeholder="https://example.com/icons.json">
         <button class="btn" type="button" id="iconLibraryAdd" style="margin-top:10px" onclick="addIconLibrary()">保存共享图标库</button>
         <div id="iconLibrariesResult" class="hint" role="status" aria-live="polite"></div><pre id="iconLibraryErrors" class="hint" style="white-space:pre-wrap"></pre>
-      </div>
-    </div>
-    <div class="card fold open">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>系统更新</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <div class="hint" id="updInfo">版本信息加载中…</div>
-        <div class="flex" style="margin-top:10px">
-          <button class="btn" id="updCheck" style="flex:1" onclick="checkUpdate()">检查更新</button>
-          <button class="btn" id="updBtn" style="flex:1" onclick="doUpdate()">立即更新</button>
-        </div>
-        <pre id="updLog" class="hint" style="white-space:pre-wrap;display:none;margin-top:12px;max-height:260px;overflow:auto"></pre>
-        <div class="hint">更新会自动备份当前文件到 data/backup-时间戳,再拉取仓库最新文件并重启服务;data 数据和 venv 不受影响。</div>
-        <h4 style="margin:16px 0 8px">备份管理</h4>
-        <div class="hint" id="backupsInfo" aria-live="polite">尚未加载备份列表</div>
-        <div class="hint" id="backupsReason">请先查看备份；清理只删除备份，不删除数据库、会话或 venv。</div>
-        <div class="flex" style="margin-top:10px;flex-wrap:wrap">
-          <button class="ghost" type="button" id="backupsLoadBtn" onclick="loadBackups()">查看备份</button>
-          <button class="btn" type="button" id="backupsKeepBtn" onclick="cleanupBackups('keep_latest')" disabled>保留最新一份，清理其余（推荐）</button>
-          <button class="danger" type="button" id="backupsAllBtn" onclick="cleanupBackups('all')" disabled>删除全部备份</button>
-        </div>
-        <div id="backupsList" style="margin-top:10px;max-height:260px;overflow:auto"></div>
-        <div class="hint" id="backupsResult" aria-live="polite" style="margin-top:8px"></div>
       </div>
     </div>
     <div class="card fold">
@@ -1182,7 +1186,7 @@ function resetAccountCaches(){
   allGroups=[];allRules=[];watchedGroups=[];ruleGroupSel.clear();
   autoGroupSel.grabcodes.clear();autoGroupSel.redpacket.clear();selectedAutoIds.clear();
   editingRule=null;editAuto=null;editAutoAccount=null;ruleEditAccount=null;tgPhase='idle';window._prevLoggedIn=null;if(typeof resetAIAssistant==='function')resetAIAssistant();
-  logQ='';logKind='reply';anomalySeq++;anomalies=[];anomalyBusyIds.clear();clearTimeout(logQtimer);$('#logQ').value='';$('#gSearch').value='';
+  logQ='';logKind='reply';resetLogOpenState();anomalySeq++;anomalies=[];anomalyBusyIds.clear();clearTimeout(logQtimer);$('#logQ').value='';$('#gSearch').value='';
   batchBusy=false;exportBusy=false;$('#configExportAll').disabled=false;
   for(const id of ['gAll','gWatched','rList','logList','tgCard'])$('#'+id).replaceChildren();
   for(const id of ['ovName','ovUser','ovGroups','ovRules','ovHits','gCnt'])$('#'+id).textContent='--';
@@ -1302,7 +1306,16 @@ async function cleanupBackups(mode){
   }catch(e){backupsCleanupAllowed=false;$('#backupsResult').textContent='备份清理或列表刷新失败：'+e.message;toast(e.message,1)}
   finally{backupsBusy=false;syncBackupButtons()}
 }
+function renderBrandVersion(s){
+  const current=String(s&&s.current||'--').replace(/^v/i,'');
+  $('#brandVersion').textContent=current==='--'?'v--':'v'+current;
+  const badge=$('#brandUpdate');
+  const available=!!(s&&s.available);
+  badge.classList.toggle('hidden',!available);
+  badge.title=available&&s.latest?'最新版本 '+String(s.latest):'';
+}
 function renderUpd(s){
+  renderBrandVersion(s);
   backupsUpdateBusy=!!s.running;syncBackupButtons();
   const info=$('#updInfo'); if(!info) return;
   let line=`当前版本 <b>${esc(s.current)}</b>`;
@@ -1339,6 +1352,9 @@ async function loadUpd(check){
     $('#updCheck').disabled=false;
     if(check)throw e;
   }
+}
+async function autoCheckVersion(){
+  try{await loadUpd(true)}catch(e){try{await loadUpd(false)}catch(_){}}
 }
 async function checkUpdate(){
   $('#updCheck').disabled=true;
@@ -2778,6 +2794,7 @@ async function delRule(id){if(!confirm('删除规则 #'+id+'?'))return;try{await
 let logKind='reply';
 const LOG_KINDS={reply:'回复',anomaly:'异常',signin:'签到',grabcodes:'抢注',redpacket:'红包',custom:'自定义',keepalive:'群聊'};
 function pickLogKind(k){
+  if(k!==logKind)resetLogOpenState();
   logKind=k;
   if(k!=='anomaly')anomalySeq++;
   document.querySelectorAll('#logSeg button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
@@ -2833,6 +2850,12 @@ async function resolveAnomaly(id,action,c=accountContext()){
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
   finally{if(isCurrentAccount(c)){anomalyBusyIds.delete(id);if(logKind==='anomaly')renderAnomalies(c)}}
 }
+let logOpenIds=new Set();
+function logStableId(h){
+  if(h&&h.id!==undefined&&h.id!==null)return String(h.id);
+  return [h?.ts??'',h?.action??'',h?.rule_id??'',h?.chat_id??''].join('|');
+}
+function resetLogOpenState(){logOpenIds.clear()}
 function logRow(h){
   const okv=(h.ok===undefined||h.ok===null)?-1:(h.ok?1:0);
   const d=h.detail||{},pending=d.status==='unconfirmed';
@@ -2879,7 +2902,8 @@ function logRow(h){
     add('指令',d.probe);
   }
   if(pending){add('待确认原因',d.reason||d.error||'等待最终回复超时，结果仍未知');if(h.action==='signin')add('后续','本日不自动重发，请先核对机器人实际结果。')}
-  return '<div class="logitem" onclick="this.classList.toggle(\'open\')">'+
+  const logId=logStableId(h),open=logOpenIds.has(logId)?' open':'';
+  return '<div class="logitem'+open+'" data-log-id="'+esc(logId)+'">'+
     '<div class="logrow"><span class="st '+ok+'">'+(pending?'待确认':ok==='ok'?'成功':(ok==='no'?'失败':'记录'))+'</span>'+
     '<span class="t">'+esc(title)+'</span><span class="tm">'+fmt(h.ts)+'</span></div>'+
     '<div class="logdetail">'+(lines.join('')||'<div class="line">无详情</div>')+'</div></div>';
@@ -2887,7 +2911,7 @@ function logRow(h){
 let logQ='', logQtimer=null;
 function onLogSearch(){
   clearTimeout(logQtimer);
-  logQtimer=setTimeout(()=>{logQ=(document.querySelector('#logQ')||{}).value||'';loadLogs()},350);
+  logQtimer=setTimeout(()=>{const next=(document.querySelector('#logQ')||{}).value||'';if(next!==logQ)resetLogOpenState();logQ=next;loadLogs()},350);
 }
 async function clearLogs(days){
   const tip=days?('删除 '+days+' 天前的日志?'):'清空全部日志?此操作不可恢复';
@@ -2909,7 +2933,16 @@ async function loadLogs(){
       const n=counts[b.dataset.k]||0;
       b.textContent=LOG_KINDS[b.dataset.k]+(n?' '+n:'');
     });
-    document.getElementById('logList').innerHTML=d.hits.length?d.hits.map(logRow).join(''):('<div class="empty">'+(logQ?'没有匹配「'+esc(logQ)+'」的记录':'这一类还没有记录')+'</div>');
+    const hits=Array.isArray(d.hits)?d.hits:[];
+    const visible=new Set(hits.map(logStableId));
+    for(const id of [...logOpenIds])if(!visible.has(id))logOpenIds.delete(id);
+    const box=document.getElementById('logList');
+    box.innerHTML=hits.length?hits.map(logRow).join(''):('<div class="empty">'+(logQ?'没有匹配「'+esc(logQ)+'」的记录':'这一类还没有记录')+'</div>');
+    box.onclick=e=>{
+      const item=e.target.closest('.logitem[data-log-id]');if(!item||!box.contains(item))return;
+      const id=item.dataset.logId;item.classList.toggle('open');
+      if(item.classList.contains('open'))logOpenIds.add(id);else logOpenIds.delete(id);
+    };
   }catch(e){toast(e.message,1)}
 }
 
@@ -2936,6 +2969,7 @@ async function bootstrap(){
   renderEmojis();pickAction('reply');pickGrabAct('reply');
   renderAccounts();loadAccounts();loadState();loadSettings();loadRules();loadAutos();loadRuleGroups();
   applyTheme((localStorage.getItem('tgp_theme'))||'dark');
+  autoCheckVersion();
   if(bootstrapTimer)clearInterval(bootstrapTimer);
   bootstrapTimer=setInterval(()=>{if(!pageIsHidden()){loadState();loadLogs()}},5000);
 }

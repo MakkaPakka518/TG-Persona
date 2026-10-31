@@ -603,7 +603,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('签到日志显示来源和失败原因且不执行服务端文本',async()=>{
     context.LOG_KINDS={signin:'签到'};context.fmt=()=>'';
-    run(slice('function logRow(h){','let logQ='));
+    run(slice('let logOpenIds=new Set();','let logQ='));
     context.logFixture={action:'signin',ok:0,ts:1,chat_id:'@dummy',detail:{task:'fixture',command:'/start',error:'<img src=x onerror=bad()>',captcha_message_id:102,captcha_prompt:'请输入测试信息',command_delay:0,button_delay:3,refresh_buttons:0}};
     const markup=run('logRow(logFixture)');
     assert(markup.includes('失败原因'));assert(markup.includes('图片来源'));assert(markup.includes('消息 #102'));
@@ -1101,6 +1101,28 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     ex("activeTab='logs';bootstrapTimer=null");await ex('bootstrap()');states=logs=0;
     ex("document.visibilityState='hidden'");tick();assert.strictEqual(states,0);assert.strictEqual(logs,0);ex('document.listeners.visibilitychange()');assert.strictEqual(states,0);assert.strictEqual(logs,0);
     ex("document.visibilityState='visible'");assert.strictEqual(ex('pageIsHidden()'),false);ex('refreshVisibleTab()');assert.strictEqual(states,1);assert.strictEqual(logs,1);assert(js.includes("addEventListener('visibilitychange',()=>{if(!pageIsHidden())refreshVisibleTab()})"));tick();assert.strictEqual(states,2);assert.strictEqual(logs,2);
+  });
+  await test('日志轮询重绘保留当前展开详情',async()=>{
+    assert(js.includes('let logOpenIds=new Set()'));
+    assert(js.includes("open=logOpenIds.has(logId)?' open':''"));
+    assert(js.includes("item.classList.toggle('open')"));
+    assert(js.includes('data-log-id='));
+    assert(!js.includes('class="logitem" onclick="this.classList.toggle'));
+  });
+  await test('系统更新位于设置最顶部且默认收起',async()=>{
+    const start=html.indexOf('<section id="tab-settings">'),end=html.indexOf('</section>',start);
+    const part=html.slice(start,end),update=part.indexOf('系统更新'),accounts=part.indexOf('Telegram 多账号');
+    assert(update>0&&accounts>update);
+    const before=part.slice(Math.max(0,update-300),update);
+    assert(before.includes('class="card fold"'));
+    assert(!before.includes('class="card fold open"'));
+  });
+  await test('品牌显示当前版本并在每次面板启动静默检测更新',async()=>{
+    assert(html.includes('id="brandVersion"'));
+    assert(html.includes('id="brandUpdate"'));
+    assert(js.includes('function renderBrandVersion(s)'));
+    assert(js.includes("autoCheckVersion();"));
+    assert(js.includes("await loadUpd(true)"));
   });
   console.log(`前端回归 ${count} 项全部通过`);
 })().catch(e=>{console.error(e);process.exitCode=1});
