@@ -853,7 +853,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('统一签到默认禁用00:05–00:41且字段收起，旧设置缺失兼容',async()=>{
     ex('signinGlobalDirty=false;acceptSigninGlobalSettings({})');assert.strictEqual(ex('signinGlobal.enabled'),false);assert.strictEqual(q('#signinGlobalStart').value,'00:05');assert.strictEqual(q('#signinGlobalEnd').value,'00:41');assert(!q('#signinGlobalEnabled').checked);
-    assert(/id="signinGlobalFields" class="hidden"/.test(html));const button=q('global-toggle');app.globalButton=button;ex('toggleSigninGlobalFields(globalButton)');assert.strictEqual(button.getAttribute('aria-expanded'),'true');ex('toggleSigninGlobalFields(globalButton)');assert.strictEqual(button.getAttribute('aria-expanded'),'false');
+    assert(/id="signinGlobalFields" class="hidden"/.test(html));assert(html.includes('所有任务及失败重试轮完成后只推送一条汇总'));const button=q('global-toggle');app.globalButton=button;ex('toggleSigninGlobalFields(globalButton)');assert.strictEqual(button.getAttribute('aria-expanded'),'true');ex('toggleSigninGlobalFields(globalButton)');assert.strictEqual(button.getAttribute('aria-expanded'),'false');
   });
   await test('统一设置独立POST只保存三个keys，不连带AI或其他设置',async()=>{
     ex("selectedAccount='default';accountEpoch++;signinGlobalDirty=true;signinGlobalBusy=false");q('#signinGlobalEnabled').checked=true;q('#signinGlobalStart').value='00:05';q('#signinGlobalEnd').value='00:41';q('#sAiKey').value='mock-unsaved-key';q('#sAiBase').value='mock-unsaved-base';let requests=[];

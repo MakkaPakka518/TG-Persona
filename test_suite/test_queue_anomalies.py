@@ -42,6 +42,38 @@ class QueueAnomalyTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(count):
             await asyncio.sleep(0)
 
+    async def test_global_window_sends_one_account_summary_after_all_rounds(self):
+        first = await self.create(name='成功任务')
+        second = await self.create(name='失败任务', retries=1)
+        self.b['set_setting']('signin_global_enabled', '1')
+        self.b['set_setting']('signin_global_start', '00:00')
+        self.b['set_setting']('signin_global_end', '23:59')
+        today = self.b['now_local']().strftime('%Y-%m-%d')
+        db = self.b['conn']
+        db.execute("UPDATE automations SET last_at=?,last_status='success' WHERE id=?", (today, first))
+        db.commit()
+        self.assertFalse(self.b['_maybe_notify_global_signin_summary'](), 'pending task blocks early summary')
+        limit = self.b['_retry_limit'](db.execute('SELECT * FROM automations WHERE id=?',(second,)).fetchone())
+        db.execute("UPDATE automations SET retry_day=?,retry_count=?,last_status='failed',next_run_at=0 WHERE id=?", (today, limit, second))
+        db.commit()
+        self.assertTrue(self.b['_maybe_notify_global_signin_summary']())
+        self.b['notify_event'].assert_called_once()
+        kind, title, detail = self.b['notify_event'].call_args.args
+        self.assertEqual(kind, 'fail')
+        self.assertIn('统一签到汇总', title)
+        self.assertIn('成功 1', detail); self.assertIn('失败 1', detail); self.assertIn('失败任务', detail)
+        self.assertFalse(self.b['_maybe_notify_global_signin_summary'](), 'same account/day sends once')
+        self.b['notify_event'].reset_mock()
+        row = db.execute('SELECT * FROM automations WHERE id=?',(first,)).fetchone()
+        token = self.b['_failure_context'].set({'id':first,'aggregate':True})
+        try:self.b['_notify_signin_success'](row,'single success')
+        finally:self.b['_failure_context'].reset(token)
+        self.b['notify_event'].assert_not_called()
+        token = self.b['_failure_context'].set({'id':first,'aggregate':False})
+        try:self.b['_notify_signin_success'](row,'manual success')
+        finally:self.b['_failure_context'].reset(token)
+        self.b['notify_event'].assert_called_once_with('success','成功任务','manual success')
+
     async def test_desc_barrier_exact_concurrency_and_next_batch_setting(self):
         ids = [await self.create(type='custom', custom_steps='[{"t":"wait","v":0}]') for _ in range(5)]
         await self.b['update_settings']({'task_concurrency': '2'})

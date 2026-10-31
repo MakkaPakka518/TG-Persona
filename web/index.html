@@ -656,7 +656,7 @@ section.act,.fold.open .fold-b{animation:none}
           <div class="hint" id="signinGlobalSummary">未启用 · 默认 00:05–00:41</div>
           <div id="signinGlobalFields" class="hidden">
             <div class="flex"><div><label for="signinGlobalStart">开始（HH:MM）</label><input type="time" id="signinGlobalStart" value="00:05" onchange="markSigninGlobalDirty()"></div><div><label for="signinGlobalEnd">结束（HH:MM）</label><input type="time" id="signinGlobalEnd" value="00:41" onchange="markSigninGlobalDirty()"></div></div>
-            <div class="hint">在时间段内随机开始，按设置时区执行。默认 00:05–00:41，未启用。启用后所有账号的签到任务跟随统一窗口；各任务原窗口保留但不生效。保存不会强行中断正在执行的任务。</div>
+            <div class="hint">在时间段内随机开始，按设置时区执行。默认 00:05–00:41，未启用。启用后所有账号的签到任务跟随统一窗口；各任务原窗口保留但不生效。自动签到不再逐条推送，当前账号所有任务及失败重试轮完成后只推送一条汇总；手动执行仍单独通知。保存不会强行中断正在执行的任务。</div>
           </div>
           <button class="btn" type="button" id="signinGlobalSave" style="margin-top:10px" onclick="saveSigninGlobal()">保存统一时间</button>
           <div class="hint" id="signinGlobalResult" role="status" aria-live="polite"></div>

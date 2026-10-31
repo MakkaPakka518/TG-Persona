@@ -1236,6 +1236,13 @@ class _RetryLater(Exception):
 _failure_context = ContextVar("persona_failure_notice", default=None)
 
 
+def _notify_signin_success(a, detail):
+    context = _failure_context.get()
+    if context is not None and context.get("id") == a["id"] and context.get("aggregate"):
+        return  # 统一时间开启时由本账号整轮汇总通知。
+    notify_event("success", a["name"], detail)
+
+
 def _notify_task_failure(a, message):
     context = _failure_context.get()
     if context is not None and context["id"] == a["id"]:
@@ -1383,7 +1390,7 @@ async def run_signin(a):
                 if outcome == "success":
                     add_hit("signin", True, chat_id=target, rule_id=-a["id"], grp_name=a["name"], content=cmd, reply=response,
                             detail={"kind":"signin","task":a["name"],"bot":target,"reply":response,"note":"按钮回调失效，但收到本轮成功确认"})
-                    notify_event("success", a["name"], response[:120])
+                    _notify_signin_success(a, response[:120])
                     return True
                 if outcome == "failed":
                     return _task_failure(a, "按钮回调失效，机器人明确回复失败："+response[:100], cmd)
@@ -1444,7 +1451,7 @@ async def run_signin(a):
         desc += " (未达成功条件)"
         _notify_task_failure(a, failure_reason)
     else:
-        notify_event("success", a["name"], f"签到成功{('· 积分 '+points) if points else ''} · {target}")
+        _notify_signin_success(a, f"签到成功{('· 积分 '+points) if points else ''} · {target}")
     add_hit("signin", not (fail or ok is False), chat_id=target, rule_id=-a["id"], grp_name=a["name"],
             content=cmd, reply=reply_txt or desc, sender="",
             detail={"kind": "signin", "task": a["name"], "bot": target, "command": cmd,
@@ -1826,6 +1833,67 @@ def _effective_signin_window(a):
     return (window["start"], window["end"]) if window["enabled"] and a["type"] == "signin" else (a["win_start"], a["win_end"])
 
 
+def _summary_names(label, names):
+    if not names:
+        return ""
+    shown = "、".join(str(name) for name in names[:8])
+    if len(names) > 8:
+        shown += " 等 %d 个" % len(names)
+    return "%s：%s" % (label, shown)
+
+
+def _maybe_notify_global_signin_summary():
+    """One account/day summary after every enabled signin reaches a terminal state."""
+    window = _global_signin_window()
+    if not window["enabled"]:
+        return False
+    today = now_local().strftime("%Y-%m-%d")
+    if get_setting("signin_summary_day", "") == today:
+        return False
+    rows = get_account_db().execute(
+        "SELECT * FROM automations WHERE enabled=1 AND type='signin' ORDER BY id DESC").fetchall()
+    if not rows:
+        return False
+    runtime = _auto_runtime_state()
+    active = set(runtime.auto_tasks) | set(runtime.auto_queued) | set(runtime.auto_workers)
+    if any(row["id"] in active for row in rows):
+        return False
+    groups = {"success": [], "unconfirmed": [], "failed": [], "stopped": [], "not_run": []}
+    pending = []
+    for row in rows:
+        if row["last_at"] == today:
+            groups["success"].append(row["name"])
+        elif row["retry_day"] == today and row["last_status"] == "unconfirmed":
+            groups["unconfirmed"].append(row["name"])
+        elif row["retry_day"] == today and row["last_status"] == "stopped":
+            groups["stopped"].append(row["name"])
+        elif row["retry_day"] == today and (row["last_status"] == "interrupted" or
+                (row["last_status"] == "failed" and int(row["retry_count"] or 0) >= _retry_limit(row))):
+            groups["failed"].append(row["name"])
+        else:
+            pending.append(row["name"])
+    end = _win_minutes(window["end"])
+    current = now_local()
+    after_window = end is not None and current.hour * 60 + current.minute >= end
+    if pending and not after_window:
+        return False
+    groups["not_run"].extend(pending)
+    # Mark first so concurrent task completions cannot duplicate the aggregate push.
+    set_setting("signin_summary_day", today)
+    total = len(rows)
+    lines = ["本轮共 %d 个：成功 %d · 待确认 %d · 失败 %d · 已停止 %d · 未执行 %d" % (
+        total, len(groups["success"]), len(groups["unconfirmed"]), len(groups["failed"]),
+        len(groups["stopped"]), len(groups["not_run"]))]
+    for key, label in (("unconfirmed", "待确认"), ("failed", "失败"),
+                       ("stopped", "已停止"), ("not_run", "未执行")):
+        line = _summary_names(label, groups[key])
+        if line:
+            lines.append(line)
+    problem = any(groups[key] for key in ("unconfirmed", "failed", "stopped", "not_run"))
+    notify_event("fail" if problem else "success", "统一签到汇总 · " + get_current_account_label(), "\n".join(lines))
+    return True
+
+
 def _signin_deadline(a, current):
     _, end_text = _effective_signin_window(a)
     end = _win_minutes(end_text)
@@ -1953,6 +2021,8 @@ async def _auto_dispatcher():
                 # next retry round together at that round's latest backoff deadline.
                 retries.sort(key=lambda item: item["id"], reverse=True)
                 current = await _wait_retry_round(retries)
+            # The dispatcher crossed every initial/retry barrier for this collected set.
+            _maybe_notify_global_signin_summary()
             # Tasks submitted while this set was running begin only afterwards.
             await asyncio.sleep(0)
     finally:
@@ -1968,12 +2038,13 @@ async def _execute_auto(aid, manual=False):
     """Execute one attempt; the dispatcher alone decides coordinated retries."""
     a = None
     result = {"retry": False, "next_at": 0}
-    notice = {"id": aid, "message": "", "unconfirmed": False}
+    notice = {"id": aid, "message": "", "unconfirmed": False, "aggregate": False}
     notice_token = _failure_context.set(notice)
     try:
         a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
         if a is None or (not manual and not a["enabled"]):
             return result
+        notice["aggregate"] = bool(not manual and a["type"] == "signin" and _global_signin_window()["enabled"])
         if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
             return result
         now = int(time.time())
@@ -2055,7 +2126,7 @@ async def _execute_auto(aid, manual=False):
             if not ok and status not in ("interrupted", "stopped") and (exhausted or status == "unconfirmed" or manual):
                 changed = get_account_db().execute("UPDATE automations SET failure_notified=? WHERE id=? AND COALESCE(failure_notified,'')!=?", (today, aid, today))
                 get_account_db().commit()
-                if changed.rowcount:
+                if changed.rowcount and not notice["aggregate"]:
                     suffix = "本日停止自动重发，请人工确认" if status == "unconfirmed" else "本轮重试已结束" if exhausted else "手动执行失败"
                     notify_event("fail", a["name"], (notice["message"] or "任务未成功") + "；" + suffix)
             retry = (not manual and not ok and status == "failed" and not exhausted and
@@ -2108,6 +2179,7 @@ def _signin_tick():
             get_runtime().signin_plans[key] = nowm if a["retry_day"] == today and a["retry_count"] else random.randint(w0, w1 - 1)
         if nowm >= get_runtime().signin_plans[key]:
             _queue_auto(a["id"])
+    _maybe_notify_global_signin_summary()
 
 
 async def housekeeping_loop():
@@ -2980,8 +3052,10 @@ async def _stop_auto_task(aid):
             pass
     if aid in runtime.auto_tasks and (worker is None or worker.done()):
         _finish_auto_reservation(aid)
-    get_account_db().execute("UPDATE automations SET last_status='stopped',next_run_at=0 WHERE id=?", (aid,))
+    stopped_at=int(time.time());stopped_day=now_local().strftime("%Y-%m-%d")
+    get_account_db().execute("UPDATE automations SET last_status='stopped',next_run_at=0,last_attempt=?,retry_day=? WHERE id=?", (stopped_at,stopped_day,aid))
     get_account_db().commit()
+    _maybe_notify_global_signin_summary()
     return aid
 
 
@@ -3014,8 +3088,10 @@ async def stop_all_autos():
         if aid in runtime.auto_tasks and (worker is None or worker.done()):
             _finish_auto_reservation(aid)
     placeholders = ",".join("?" for _ in ids)
-    get_account_db().execute("UPDATE automations SET last_status='stopped',next_run_at=0 WHERE id IN (%s)" % placeholders, ids)
+    stopped_at=int(time.time());stopped_day=now_local().strftime("%Y-%m-%d")
+    get_account_db().execute("UPDATE automations SET last_status='stopped',next_run_at=0,last_attempt=?,retry_day=? WHERE id IN (%s)" % placeholders, [stopped_at,stopped_day,*ids])
     get_account_db().commit()
+    _maybe_notify_global_signin_summary()
     return {"ok": True, "stopped": ids}
 
 
@@ -3075,6 +3151,7 @@ async def resolve_anomaly(aid: int, body: dict):
             await _stop_auto_task(aid)
         db.execute("UPDATE automations SET enabled=0,next_run_at=0,last_status='stopped' WHERE id=?", (aid,))
         db.commit()
+        _maybe_notify_global_signin_summary()
         return {"ok": True, "action": action}
     today = now_local().strftime("%Y-%m-%d")
     if action == "confirm_success":
@@ -3088,12 +3165,14 @@ async def resolve_anomaly(aid: int, body: dict):
                 grp_name=row["target"], content="人工确认成功",
                 detail={"kind": "manual_resolution", "task": row["name"],
                         "task_type": row["type"], "resolution": "confirm_success"})
+        _maybe_notify_global_signin_summary()
         return {"ok": True, "action": action}
     if action == "mark_failed":
         db.execute("UPDATE automations SET retry_count=?,retry_day=?,next_run_at=0,"
                    "last_status='failed',failure_notified=? WHERE id=?",
                    (_retry_limit(row), today, today, aid))
         db.commit()
+        _maybe_notify_global_signin_summary()
         return {"ok": True, "action": action}
     if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         raise HTTPException(409, "TG 尚未登录")
