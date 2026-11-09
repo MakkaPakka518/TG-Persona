@@ -195,7 +195,7 @@ label:first-child{margin-top:0}
 label.check{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:400;color:var(--sub);
   margin-top:13px;user-select:none;cursor:pointer}
 label.check input{width:18px;height:18px;flex-shrink:0;accent-color:var(--acc)}
-input[type=text],input[type=password],input[type=number],input[type=email],input[type=datetime-local],select,textarea{
+input[type=text],input[type=password],input[type=number],input[type=email],input[type=date],input[type=time],select,textarea{
   width:100%;background:var(--panel2);border:1px solid var(--hair);border-radius:var(--r-sm);
   color:var(--txt);padding:11px 13px;font-size:14px;font-family:inherit;outline:none;transition:border .15s,box-shadow .15s}
 input::placeholder,textarea::placeholder{color:var(--dim)}
@@ -624,8 +624,12 @@ section.act,.fold.open .fold-b{animation:none}
         <div class="autof" id="af-scheduled_register"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑定时抢注任务</b><button class="ghost" type="button" onclick="closeAutoForm('scheduled_register')">关闭</button></div><form onsubmit="saveAuto('scheduled_register');return false">
           <label for="trName">任务名称</label>
           <input type="text" id="trName" placeholder="如: 某站限时开放注册" required>
-          <label for="trAt">执行时间（按面板设置时区）</label>
-          <input type="datetime-local" id="trAt" step="1" required>
+          <label for="trDate">执行日期（按面板设置时区）</label>
+          <input type="date" id="trDate" required>
+          <div class="flex">
+            <div><label for="trTime">执行时间（时:分）</label><input type="time" id="trTime" step="60" required></div>
+            <div><label for="trSecond">秒</label><input type="number" id="trSecond" value="0" min="0" max="59" step="1" inputmode="numeric" required></div>
+          </div>
           <label for="trTarget">目标机器人（@username 或 ID）</label>
           <input type="text" id="trTarget" placeholder="如: @invite_bot" required>
           <label for="trCommand">发送指令</label>
@@ -1754,7 +1758,8 @@ function editAutoItem(id){
     $('#sRetries').value=a.retries!=null?a.retries:2;
     $('#sCancel').style.display='inline-block';
   }else if(t==='scheduled_register'){
-    $('#trName').value=a.name;$('#trAt').value=a.scheduled_at||'';$('#trTarget').value=a.target||'';
+    const [date='',clock='']=String(a.scheduled_at||'').split('T'),parts=clock.split(':');
+    $('#trName').value=a.name;$('#trDate').value=date;$('#trTime').value=parts.slice(0,2).join(':');$('#trSecond').value=parts[2]||'0';$('#trTarget').value=a.target||'';
     $('#trCommand').value=a.command||'';$('#trButton').value=a.btn_text||'';$('#trTrigger').value=a.keywords||'';
     $('#trReply').value=a.reply_text||'';$('#trSuccess').value=a.success_kw||'';$('#trTimeout').value=a.result_timeout??30;
     $('#trCancel').style.display='inline-block';
@@ -1784,7 +1789,7 @@ function editAutoItem(id){
 function cancelAutoEdit(t){
   editAuto=null;editAutoAccount=null;if(typeof assistantFormDraft!=='undefined')assistantFormDraft=null;
   ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
-    scheduled_register:()=>{$('#trName').value='';$('#trAt').value='';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
+    scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';setVisualSteps('[]');$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'},
@@ -1951,15 +1956,15 @@ async function saveAuto(type){
     if(!Number.isInteger(body.result_timeout)||body.result_timeout<1||body.result_timeout>300)
       return toast('等待最终回复上限须为 1–300 秒，步进 1 秒',1);
   }else if(type==='scheduled_register'){
-    const scheduled=$('#trAt').value.trim(),timeout=Number($('#trTimeout').value);
+    const date=$('#trDate').value.trim(),clock=$('#trTime').value.trim(),second=Number($('#trSecond').value),timeout=Number($('#trTimeout').value);
+    const scheduled=/^\d{4}-\d{2}-\d{2}$/.test(date)&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clock)&&Number.isInteger(second)&&second>=0&&second<=59?date+'T'+clock+':'+String(second).padStart(2,'0'):'';
     body={type,name:$('#trName').value.trim(),scheduled_at:scheduled,target:$('#trTarget').value.trim(),
       command:$('#trCommand').value.trim(),click_btn:1,btn_text:$('#trButton').value.trim(),
       keywords:$('#trTrigger').value.trim(),reply_text:$('#trReply').value.trim(),success_kw:$('#trSuccess').value.trim(),
       result_timeout:timeout,retries:0};
-    if(!body.name||!body.scheduled_at||!body.target||!body.command||!body.btn_text||!body.keywords||!body.reply_text||!body.success_kw)
+    if(!body.scheduled_at)return toast('请选择日期、时分，并填写 0–59 秒',1);
+    if(!body.name||!body.target||!body.command||!body.btn_text||!body.keywords||!body.reply_text||!body.success_kw)
       return toast('请完整填写定时抢注流程',1);
-    if(!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(body.scheduled_at))
-      return toast('执行时间需要精确到秒',1);
     if(!Number.isInteger(timeout)||timeout<1||timeout>300)return toast('每一步最长等待须为 1–300 秒',1);
   }else if(type==='grabcodes'){
     body={type,name:$('#gName').value.trim(),groups:getAutoGroups('grabcodes'),keywords:$('#gKeywords').value.trim(),
