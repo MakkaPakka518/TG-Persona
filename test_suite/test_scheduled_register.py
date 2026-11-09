@@ -106,7 +106,8 @@ class ScheduledRegisterTests(unittest.IsolatedAsyncioTestCase):
         self.b["client"] = SimpleNamespace(send_message=AsyncMock(side_effect=send), get_messages=AsyncMock(side_effect=get_messages))
         self.b["resolve_entity"] = AsyncMock(return_value="entity")
         aid = await self.create(**self.values(history_first=1))
-        self.assertTrue(await self.b["run_scheduled_register"](self.row(aid)))
+        result = await self.b["run_scheduled_register"](self.row(aid))
+        self.assertTrue(result)
         self.assertEqual(events, [("click", "开始注册"), ("send", "TEST-CODE")])
         detail = self.b["conn"].execute("SELECT detail FROM hits ORDER BY id DESC").fetchone()[0]
         self.assertIn('"button_source": "history"', detail)
@@ -130,6 +131,40 @@ class ScheduledRegisterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"button_source": "history"', detail)
         self.assertIn('"test_only": true', detail)
         self.assertIn('"command": "/start"', detail)
+
+    async def test_closed_popup_retries_button_until_it_disappears(self):
+        phase, clicks = "history", 0
+
+        async def click():
+            nonlocal phase, clicks
+            clicks += 1
+            if clicks == 1:
+                return SimpleNamespace(message="自助注册已关闭，等待开启")
+            phase = "trigger"
+            return SimpleNamespace(message="")
+
+        button = SimpleNamespace(text="创建", click=AsyncMock(side_effect=click))
+
+        async def send(_entity, text):
+            nonlocal phase
+            self.assertNotEqual(text, "/start")
+            phase = "success";return SimpleNamespace(id=103)
+
+        async def get_messages(_entity, **_kwargs):
+            if phase == "history": return [message(99, "旧菜单", buttons=[[button]])]
+            if phase == "trigger": return [message(102, "请输入注册码")]
+            if phase == "success": return [message(104, "注册成功")]
+            return []
+
+        self.b["client"] = SimpleNamespace(send_message=AsyncMock(side_effect=send), get_messages=AsyncMock(side_effect=get_messages))
+        self.b["resolve_entity"] = AsyncMock(return_value="entity")
+        aid = await self.create(**self.values(history_first=1, btn_text="创建", fail_kw="注册已关闭,等待开启", poll_interval=2))
+        result = await self.b["run_scheduled_register"](self.row(aid))
+        self.assertTrue(result)
+        self.assertEqual(clicks, 2)
+        detail = self.b["conn"].execute("SELECT detail FROM hits ORDER BY id DESC").fetchone()[0]
+        self.assertIn('"closed_retries": 1', detail)
+        self.assertIn('"retry_interval": 2', detail)
 
     async def test_due_task_executes_once_then_disables(self):
         aid = await self.create(**self.values())

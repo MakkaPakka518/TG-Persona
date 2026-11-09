@@ -1543,6 +1543,9 @@ async def run_scheduled_register(a, test_only=False):
     reply_text = str(a["reply_text"] or "").strip()
     success_keyword = str(a["success_kw"] or "").strip()
     timeout = int(a["result_timeout"] or 30)
+    closed_keywords = str(a["fail_kw"] or "").strip()
+    retry_interval = int(a["poll_interval"] or 0)
+    closed_retries, popup_text = 0, ""
     if not all((target, command, button_keyword, trigger_keyword, reply_text, success_keyword)):
         return _task_failure(a, "定时抢注配置不完整")
     ent = await resolve_entity(target)
@@ -1560,16 +1563,35 @@ async def run_scheduled_register(a, test_only=False):
         if button is None:
             return _task_unconfirmed(a, "等待指定按钮超时，任务不会再次执行", command,
                                      extra={"button_source":"command","test_only":bool(test_only),"command":command})
-        trigger_baseline = await _message_snapshot(ent)
-        trigger_min_id = max(([sent.id] if sent is not None else []) + [button_message.id] + list(trigger_baseline))
-        await button.click()
+        retry_deadline = time.monotonic() + timeout
+        while True:
+            trigger_baseline = await _message_snapshot(ent)
+            trigger_min_id = max(([sent.id] if sent is not None else []) + [button_message.id] + list(trigger_baseline))
+            callback = await button.click()
+            popup_text = str(getattr(callback, "message", callback if isinstance(callback, str) else "") or "")
+            if not retry_interval or not match_keywords(closed_keywords, popup_text):
+                break
+            closed_retries += 1
+            remaining = retry_deadline - time.monotonic()
+            if remaining <= retry_interval:
+                return _task_unconfirmed(a, "关闭提示持续出现，自动重试已到等待上限",
+                                         command if sent is not None else "历史卡片", popup_text,
+                                         {"button_source":source,"test_only":bool(test_only),"command":command,
+                                          "button":str(getattr(button,"text","") or ""),"popup":popup_text,
+                                          "closed_retries":closed_retries,"retry_interval":retry_interval})
+            await asyncio.sleep(retry_interval)
+            latest_message, buttons = await _find_latest_buttons(ent, min_id=0)
+            latest_button = _find_btn(buttons, button_keyword) if buttons else None
+            if latest_button is not None:
+                button_message, button = latest_message, latest_button
         trigger_message, trigger_text = await _await_task_reply(
             ent, trigger_min_id, trigger_keyword, trigger_baseline, timeout)
         if trigger_message is None:
             return _task_unconfirmed(a, "点击按钮后未收到指定内容，任务不会再次执行",
                                      command if sent is not None else "历史卡片", trigger_text,
                                      {"button_source":source,"test_only":bool(test_only),"command":command,
-                                      "button":str(getattr(button,"text","") or "")})
+                                      "button":str(getattr(button,"text","") or ""),"popup":popup_text,
+                                      "closed_retries":closed_retries,"retry_interval":retry_interval})
         success_baseline = await _message_snapshot(ent)
         replied = await get_runtime().client.send_message(ent, reply_text)
         success_message, success_text = await _await_task_reply(
@@ -1577,7 +1599,8 @@ async def run_scheduled_register(a, test_only=False):
         if success_message is None:
             return _task_unconfirmed(a, "回复后未收到成功关键词，任务不会再次执行", reply_text, success_text,
                                      {"button_source":source,"test_only":bool(test_only),"command":command,
-                                      "button":str(getattr(button,"text","") or ""),"sent_reply":reply_text})
+                                      "button":str(getattr(button,"text","") or ""),"sent_reply":reply_text,
+                                      "popup":popup_text,"closed_retries":closed_retries,"retry_interval":retry_interval})
     except errors.FloodWaitError as error:
         raise _RetryLater(error.seconds) from error
     except _RetryLater:
@@ -1589,7 +1612,8 @@ async def run_scheduled_register(a, test_only=False):
             content=(command if sent is not None else "历史卡片"), reply=success_text, detail={"kind": "scheduled_register", "task": a["name"],
             "bot": target, "command": command, "button": button_text, "trigger": trigger_text,
             "sent_reply": reply_text, "success": success_text, "scheduled_at": a["scheduled_at"],
-            "button_source": source, "test_only": bool(test_only)})
+            "button_source": source, "test_only": bool(test_only), "popup": popup_text,
+            "closed_retries": closed_retries, "retry_interval": retry_interval})
     if not test_only:
         notify_event("success", a["name"], "定时抢注成功：" + target)
     log.info("定时抢注成功 任务=%s 目标=%s", a["name"], target)
@@ -3061,6 +3085,8 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "执行时间必须晚于当前面板时间")
         if body.history_first not in (0, 1):
             raise HTTPException(400, "历史卡片优先模式只能为 0 或 1")
+        if body.poll_interval and (body.poll_interval < 1 or body.poll_interval > 300 or not body.fail_kw.strip()):
+            raise HTTPException(400, "关闭弹窗重试需填写关键词，间隔应为 1-300 秒")
     if body.type == "grabcodes" and not body.reply_text.strip():
         raise HTTPException(400, "抢注需要填写动作文本(支持 {code} 占位符)")
     if body.type == "grabcodes" and body.poll_interval:
