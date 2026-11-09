@@ -626,6 +626,12 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(markup.includes('命令后等待'));assert(markup.includes('0 秒'));assert(markup.includes('复用同一按钮'));
     assert(markup.includes('&lt;img'));assert(!markup.includes('<img'));
   });
+  await test('定时抢注日志区分历史按钮和真实发送指令',async()=>{
+    context.logFixture={action:'scheduled_register',ok:0,ts:1,chat_id:'@dummy',content:'/start',detail:{task:'抢注',status:'unconfirmed',button_source:'history',test_only:true,command:'/start',error:'未收到指定内容'}};
+    const history=run('logRow(logFixture)');assert(history.includes('历史卡片按钮'));assert(history.includes('测试流程'));assert(!history.includes('已发送指令'));
+    context.logFixture.detail={...context.logFixture.detail,button_source:'command',test_only:false};const command=run('logRow(logFixture)');assert(command.includes('发送指令'));assert(command.includes('已发送指令'));
+    delete context.logFixture.detail.button_source;const legacy=run('logRow(logFixture)');assert(legacy.includes('配置指令'));assert(!legacy.includes('已发送指令'));
+  });
   await test('签到日志展示结果等待零边界且兼容缺少新字段',async()=>{
     for(const values of [{result_delay:0,result_timeout:1},{result_delay:120,result_timeout:300}]){
       context.logFixture={action:'signin',ok:1,ts:1,detail:{...values}};const markup=run('logRow(logFixture)');

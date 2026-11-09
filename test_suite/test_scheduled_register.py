@@ -122,6 +122,15 @@ class ScheduledRegisterTests(unittest.IsolatedAsyncioTestCase):
         self.b["run_scheduled_register"].assert_awaited_once()
         self.assertTrue(self.b["run_scheduled_register"].await_args.kwargs["test_only"])
 
+    async def test_unconfirmed_log_keeps_real_button_source(self):
+        aid = await self.create(**self.values(history_first=1))
+        self.b["_task_unconfirmed"](self.row(aid), "未收到指定内容", "历史卡片", "",
+                                     {"button_source": "history", "test_only": True, "command": "/start"})
+        detail = self.b["conn"].execute("SELECT detail FROM hits ORDER BY id DESC").fetchone()[0]
+        self.assertIn('"button_source": "history"', detail)
+        self.assertIn('"test_only": true', detail)
+        self.assertIn('"command": "/start"', detail)
+
     async def test_due_task_executes_once_then_disables(self):
         aid = await self.create(**self.values())
         self.b["run_scheduled_register"] = AsyncMock(return_value=True)

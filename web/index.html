@@ -2973,7 +2973,11 @@ function logRow(h){
     if(!pending)add('失败原因',d.error);
   }else if(h.action==='scheduled_register'){
     add('计划时间',String(d.scheduled_at||'').replace('T',' '));
-    add('目标',d.bot||h.chat_id);add('指令',d.command||h.content);add('按钮',d.button);
+    const source=d.button_source||'';
+    add('目标',d.bot||h.chat_id);add('执行',d.test_only?'测试流程':'正式计划');
+    if(source)add('入口',source==='history'?'历史卡片按钮':'发送指令');
+    if(source==='command')add('已发送指令',d.command||h.content);else if(!source)add('配置指令',d.command||h.content);
+    add('按钮',d.button);
     add('触发内容',d.trigger);add('回复内容',d.sent_reply);add('成功内容',d.success||h.reply);
     if(!pending)add('失败原因',d.error);
   }else if(h.action==='custom'){
@@ -2994,7 +2998,7 @@ function logRow(h){
     add('规则',d.rule);
     add('指令',d.probe);
   }
-  if(pending){add('待确认原因',d.reason||d.error||'等待最终回复超时，结果仍未知');if(h.action==='signin')add('后续','本日不自动重发，请先核对机器人实际结果。');if(h.action==='scheduled_register')add('后续','一次性任务已停用，请核对机器人实际结果。')}
+  if(pending){add('待确认原因',d.reason||d.error||'等待最终回复超时，结果仍未知');if(h.action==='signin')add('后续','本日不自动重发，请先核对机器人实际结果。');if(h.action==='scheduled_register')add('后续',d.test_only?'测试未改变正式计划，请核对机器人实际结果。':'一次性任务已停用，请核对机器人实际结果。')}
   const logId=logStableId(h),open=logOpenIds.has(logId)?' open':'';
   return '<div class="logitem'+open+'" data-log-id="'+esc(logId)+'">'+
     '<div class="logrow"><span class="st '+ok+'">'+(pending?'待确认':ok==='ok'?'成功':(ok==='no'?'失败':'记录'))+'</span>'+

@@ -1277,13 +1277,15 @@ def _notify_task_failure(a, message):
     notify_event("fail", a["name"], str(message)[:200])
 
 
-def _task_unconfirmed(a, message, content="", reply=""):
+def _task_unconfirmed(a, message, content="", reply="", extra=None):
     context = _failure_context.get()
     if context is not None:
         context["unconfirmed"] = True
+    detail = {"kind":a["type"],"task":a["name"],"bot":a["target"],
+              "status":"unconfirmed","error":str(message)[:200],"result_delay":a["result_delay"],"result_timeout":a["result_timeout"]}
+    detail.update(extra or {})
     add_hit(a["type"], False, chat_id=a["target"], rule_id=-a["id"], grp_name=a["name"],
-            content=content, reply=reply, detail={"kind":a["type"],"task":a["name"],"bot":a["target"],
-            "status":"unconfirmed","error":str(message)[:200],"result_delay":a["result_delay"],"result_timeout":a["result_timeout"]})
+            content=content, reply=reply, detail=detail)
     _notify_task_failure(a, message)
     return False
 
@@ -1556,20 +1558,26 @@ async def run_scheduled_register(a, test_only=False):
             sent = await get_runtime().client.send_message(ent, command)
             button_message, button = await _await_task_button(ent, sent.id, button_keyword, timeout)
         if button is None:
-            return _task_unconfirmed(a, "等待指定按钮超时，任务不会再次执行", command)
+            return _task_unconfirmed(a, "等待指定按钮超时，任务不会再次执行", command,
+                                     extra={"button_source":"command","test_only":bool(test_only),"command":command})
         trigger_baseline = await _message_snapshot(ent)
         trigger_min_id = max(([sent.id] if sent is not None else []) + [button_message.id] + list(trigger_baseline))
         await button.click()
         trigger_message, trigger_text = await _await_task_reply(
             ent, trigger_min_id, trigger_keyword, trigger_baseline, timeout)
         if trigger_message is None:
-            return _task_unconfirmed(a, "点击按钮后未收到指定内容，任务不会再次执行", command, trigger_text)
+            return _task_unconfirmed(a, "点击按钮后未收到指定内容，任务不会再次执行",
+                                     command if sent is not None else "历史卡片", trigger_text,
+                                     {"button_source":source,"test_only":bool(test_only),"command":command,
+                                      "button":str(getattr(button,"text","") or "")})
         success_baseline = await _message_snapshot(ent)
         replied = await get_runtime().client.send_message(ent, reply_text)
         success_message, success_text = await _await_task_reply(
             ent, max(replied.id, trigger_message.id), success_keyword, success_baseline, timeout)
         if success_message is None:
-            return _task_unconfirmed(a, "回复后未收到成功关键词，任务不会再次执行", reply_text, success_text)
+            return _task_unconfirmed(a, "回复后未收到成功关键词，任务不会再次执行", reply_text, success_text,
+                                     {"button_source":source,"test_only":bool(test_only),"command":command,
+                                      "button":str(getattr(button,"text","") or ""),"sent_reply":reply_text})
     except errors.FloodWaitError as error:
         raise _RetryLater(error.seconds) from error
     except _RetryLater:
