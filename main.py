@@ -250,6 +250,7 @@ def purge_hits(days=None):
 
 
 GLOBAL_SETTING_KEYS = {"tz", "theme", "log_keep_days", "uptime_since", "ocr_enabled", "icon_libraries",
+                       "api_id", "api_hash",
                        "signin_global_enabled", "signin_global_start", "signin_global_end"}
 
 
@@ -276,6 +277,29 @@ def set_setting(key, value):
 
 db_init()
 account_registry = AccountRegistry(DATA, conn, db_init)
+
+
+def migrate_shared_tg_api():
+    """Promote one complete legacy profile credential pair to shared settings."""
+    current_id = conn.execute("SELECT value FROM settings WHERE key='api_id'").fetchone()
+    current_hash = conn.execute("SELECT value FROM settings WHERE key='api_hash'").fetchone()
+    if current_id and current_hash and str(current_id["value"]).isdigit() and len(current_hash["value"]) >= 10:
+        return
+    for runtime in account_registry.accounts.values():
+        if runtime.db is None or runtime.db is conn:
+            continue
+        api_id = runtime.db.execute("SELECT value FROM settings WHERE key='api_id'").fetchone()
+        api_hash = runtime.db.execute("SELECT value FROM settings WHERE key='api_hash'").fetchone()
+        if not api_id or not api_hash or not str(api_id["value"]).isdigit() or len(api_hash["value"]) < 10:
+            continue
+        conn.execute("INSERT INTO settings(key,value) VALUES('api_id',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (api_id["value"],))
+        conn.execute("INSERT INTO settings(key,value) VALUES('api_hash',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (api_hash["value"],))
+        conn.commit()
+        log.info("已将旧账号 Telegram API 配置迁移为全局共用")
+        return
+
+
+migrate_shared_tg_api()
 
 # ---------------- 时区 ----------------
 def tz_name() -> str:
@@ -2643,7 +2667,7 @@ class VerifyPassword(BaseModel):
 @app.post("/api/tg/init")
 @account_locked
 async def tg_init(body: TGInit):
-    """Only explicit user init changes credentials/connects an unlogged profile."""
+    """Save shared Telegram API credentials and initialize the selected profile."""
     if body.api_id <= 0 or len(body.api_hash) < 10:
         raise HTTPException(400, "API_ID 或 API_HASH 无效(在 my.telegram.org 获取)")
     runtime = get_runtime()
@@ -3363,6 +3387,13 @@ async def get_settings():
 
 @app.post("/api/settings")
 async def update_settings(body: dict):
+    if "api_id" in body or "api_hash" in body:
+        api_id = str(body.get("api_id") or "").strip()
+        api_hash = str(body.get("api_hash") or "").strip()
+        if not re.fullmatch(r"[0-9]{4,10}", api_id) or len(api_hash) < 10:
+            raise HTTPException(400, "API_ID 或 API_HASH 无效(在 my.telegram.org 获取)")
+        body = dict(body)
+        body.update(api_id=api_id, api_hash=api_hash)
     if "task_concurrency" in body:
         value = body["task_concurrency"]
         if isinstance(value, bool) or not (isinstance(value, int) or

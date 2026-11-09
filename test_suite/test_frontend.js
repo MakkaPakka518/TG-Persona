@@ -761,13 +761,26 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('状态、任务缓存和TG表单过期响应不覆盖当前账号',async()=>{
     const clean=vm.createContext({...app,fetch(){throw new Error('禁止网络')},localStorage:{getItem:()=>null,setItem(){}},document:fullDocument,window:{confirm:()=>false},setTimeout(){},clearTimeout(){}});vm.runInContext(js.replace(/\nbootstrap\(\);\s*$/,''),clean);const cx=s=>vm.runInContext(s,clean);
-    for(const fn of ['loadState','loadAutos','renderTgCard']){let done;clean.api=()=>new Promise(r=>done=r);const pending=cx(fn+'()');cx("selectedAccount='other';accountEpoch++;state={tg:{},logged_in:false};autos=[]");done(fn==='loadState'?{tg:{me:{name:'迟到client'}},logged_in:true,stats:{}}:fn==='loadAutos'?{autos:[{id:42,name:'迟到任务'}]}:{api_id:123456,api_hash:'mock-old-hash'});await pending;assert.strictEqual(cx('state.logged_in'),false);assert.strictEqual(cx('autos.length'),0);assert(!q('#tgCard').innerHTML.includes('mock-old-hash'));cx("selectedAccount='default';accountEpoch++")}
+    for(const fn of ['loadState','loadAutos','loadSettings']){let done;clean.api=()=>new Promise(r=>done=r);const pending=cx(fn+'()');cx("selectedAccount='other';accountEpoch++;state={tg:{},logged_in:false};autos=[]");done(fn==='loadState'?{tg:{me:{name:'迟到client'}},logged_in:true,stats:{}}:fn==='loadAutos'?{autos:[{id:42,name:'迟到任务'}]}:{api_id:123456,api_hash:'mock-old-hash'});await pending;assert.strictEqual(cx('state.logged_in'),false);assert.strictEqual(cx('autos.length'),0);assert.notStrictEqual(q('#tgApiHash').value,'mock-old-hash');cx("selectedAccount='default';accountEpoch++")}
   });
   await test('账号标签纯文本，默认不可删，其他账号两次确认，管理错误恢复按钮',async()=>{
     ex("accounts=[{id:'default',label:'<img src=x>',logged_in:false},{id:'work',label:'工作',logged_in:true}];selectedAccount='default';renderAccounts()");assert.strictEqual(q('#accountTop').children[0].textContent,'<img src=x> · 未登录');assert(q('#accountDelete').disabled);
     let sent=0;app.api=async()=>{sent++;return {}};await ex("manageAccount('delete')");assert.strictEqual(sent,0);
     ex("selectedAccount='work'");let prompts=0;app.window.confirm=()=>++prompts===1;await ex("manageAccount('delete')");assert.strictEqual(prompts,2);assert.strictEqual(sent,0);
     q('#accountLabel').value='重命名';app.api=async()=>{throw new Error('mock账号冲突')};await ex("manageAccount('rename')");assert(!q('#accountRename').disabled);assert(q('#accountResult').textContent.includes('mock账号冲突'));
+  });
+  await test('账号管理和登录合并，共用API只保存一次',async()=>{
+    assert.strictEqual((html.match(/id="foldTg"/g)||[]).length,1);assert.strictEqual((html.match(/id="tgCard"/g)||[]).length,1);
+    assert(html.includes('添加账号并登录'));assert(html.includes('所有 Telegram 账号共用这一套 API'));assert(!html.includes('Telegram 多账号'));
+    q('#tgApiId').value='12345';q('#tgApiHash').value='dummy-shared-api-hash';const requests=[];
+    app.api=async(p,o)=>{requests.push([p,o]);return {}};await ex('saveTgApi()');
+    assert.deepStrictEqual(requests.map(x=>x[0]),['/api/settings']);assert.deepStrictEqual(JSON.parse(requests[0][1].body),{api_id:'12345',api_hash:'dummy-shared-api-hash'});
+  });
+  await test('填写备注添加账号后自动切换并进入手机号登录',async()=>{
+    const oldSwitch=app.switchAccount,oldLoad=app.loadAccounts,oldRender=app.renderTgCard;let switched='',rendered=0;
+    app.switchAccount=id=>{switched=id};app.loadAccounts=async()=>{};app.renderTgCard=async()=>{rendered++};app.api=async(p,o)=>{assert.strictEqual(p,'/api/accounts');assert.strictEqual(JSON.parse(o.body).label,'测试小号');return {id:'new-account'}};
+    q('#accountLabel').value='测试小号';await ex("manageAccount('create')");assert.strictEqual(switched,'new-account');assert.strictEqual(rendered,1);assert(q('#accountResult').textContent.includes('请输入手机号'));
+    app.switchAccount=oldSwitch;app.loadAccounts=oldLoad;app.renderTgCard=oldRender;
   });
   await test('结构化detail及Pydantic数组提取人话，不输出input或对象',async()=>{
     for(const [detail,want] of [[{message:'当前账号任务不存在',ids:[42],input:'mock-secret'},'当前账号任务不存在'],[[{msg:'Field required',input:'mock-secret',loc:['body','name']}],'请补齐必填项'],[[{msg:'Input should be a valid integer',input:'mock-secret'}],'请填写有效的整数']]){
@@ -1125,7 +1138,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('系统更新位于设置最顶部且默认收起',async()=>{
     const start=html.indexOf('<section id="tab-settings">'),end=html.indexOf('</section>',start);
-    const part=html.slice(start,end),update=part.indexOf('系统更新'),accounts=part.indexOf('Telegram 多账号');
+    const part=html.slice(start,end),update=part.indexOf('系统更新'),accounts=part.indexOf('Telegram 账号');
     assert(update>0&&accounts>update);
     const before=part.slice(Math.max(0,update-300),update);
     assert(before.includes('class="card fold"'));

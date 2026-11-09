@@ -219,7 +219,7 @@ def build_ai_assistant_router(get_db, model_type, validate, values, columns, ai_
             secret = get_shared_setting(key,'')
             if secret:
                 secrets.append(secret)
-        # 额外账号的 TG 凭据属于当前账号库，不能只脱敏默认账号的值。
+        # 兼容升级前遗留在账号库中的 TG 凭据。
         saved_hash = db.execute("SELECT value FROM settings WHERE key='api_hash'").fetchone()
         if saved_hash:
             secrets.append(saved_hash['value'])

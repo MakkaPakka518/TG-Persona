@@ -211,7 +211,7 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
     async def test_parallel_clients_login_codes_and_two_factor(self):
         aid = await self.create()
         await asyncio.gather(self.login('default', 123, '00000000001', '00001'),
-                             self.login(aid, 456, '00000000002', '00002'))
+                             self.login(aid, 123, '00000000002', '00002'))
         first, second = self.rt(), self.rt(aid)
         self.assertIsNot(first.client, second.client)
         self.assertEqual(first.client.signins, [('00000000001', '00001', None)])
@@ -226,7 +226,7 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.avatar_file.stat().st_mode & 0o777, 0o600)
         # A separate new profile can enter 2FA without changing either ready client.
         third = await self.create('2fa')
-        await self.req('POST', '/api/tg/init', third, json={'api_id': 789, 'api_hash': 'offline-fake-hash'})
+        await self.req('POST', '/api/tg/init', third, json={'api_id': 123, 'api_hash': 'offline-fake-hash'})
         self.rt(third).client.need_password = True
         await self.req('POST', '/api/tg/send_code', third, json={'phone': '00000000003'})
         result = await self.req('POST', '/api/tg/verify_code', third, json={'code': '00003'})
@@ -237,7 +237,7 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_tasks_logs_rules_groups_and_pause_isolated(self):
         aid = await self.create()
-        await asyncio.gather(self.login('default', 123), self.login(aid, 456, '00000000002'))
+        await asyncio.gather(self.login('default', 123), self.login(aid, 123, '00000000002'))
         one, two = await self.auto('default', 'one'), await self.auto(aid, 'two')
         self.assertEqual((one, two), (1, 1))  # same DB IDs must not share runtime locks
         for selected, word in [('default', 'first'), (aid, 'second')]:
@@ -294,7 +294,7 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_logout_cancels_owned_work_not_other_account(self):
         aid = await self.create()
-        await asyncio.gather(self.login('default'), self.login(aid, 456, '00000000002'))
+        await asyncio.gather(self.login('default'), self.login(aid, 123, '00000000002'))
         other_client = self.rt().client
         deleted_client = self.rt(aid).client
         owned = self.rt(aid).spawn(asyncio.Event().wait())
@@ -312,12 +312,13 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_global_settings_and_panel_sessions_always_root(self):
         aid = await self.create()
-        response = await self.req('POST', '/api/settings', aid, json={'api_id': '456', 'api_hash': 'fake-private',
+        response = await self.req('POST', '/api/settings', aid, json={'api_id': '45678', 'api_hash': 'fake-private',
                        'avatar': 'fake-avatar', 'cooldown': '77', 'ai_model': 'fake-model', 'notify_on_fail': '0'})
         self.assertEqual(response.status_code, 200)
         root, profile = self.rt().db, self.rt(aid).db
-        self.assertIsNone(root.execute("SELECT value FROM settings WHERE key='api_id'").fetchone())
-        self.assertEqual(profile.execute("SELECT value FROM settings WHERE key='api_id'").fetchone()[0], '456')
+        self.assertEqual(root.execute("SELECT value FROM settings WHERE key='api_id'").fetchone()[0], '45678')
+        self.assertEqual(root.execute("SELECT value FROM settings WHERE key='api_hash'").fetchone()[0], 'fake-private')
+        self.assertIsNone(profile.execute("SELECT value FROM settings WHERE key='api_id'").fetchone())
         self.assertEqual(root.execute("SELECT value FROM settings WHERE key='ai_model'").fetchone()[0], 'fake-model')
         self.assertIsNone(profile.execute("SELECT value FROM settings WHERE key='ai_model'").fetchone())
         self.assertIsNone(profile.execute("SELECT value FROM settings WHERE key='panel_pw_hash'").fetchone())
@@ -360,7 +361,7 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         aid = await self.create('persistent')
         task_id = await self.auto(aid, 'persisted')
         with use_runtime(self.rt(aid)):
-            self.main.set_setting('api_id', '456')
+            self.main.set_setting('api_id', '123')
             self.main.set_setting('api_hash', 'offline-fake-hash')
             self.main.add_hit('custom', True, content='persistent-log')
             self.main.get_account_db().execute("UPDATE automations SET next_run_at=9876543210,last_status='running' WHERE id=?", (task_id,))
@@ -370,7 +371,7 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         # A third profile has credentials but no session: startup must not connect.
         no_session = await self.create('no session')
         with use_runtime(self.rt(no_session)):
-            self.main.set_setting('api_id', '789')
+            self.main.set_setting('api_id', '123')
             self.main.set_setting('api_hash', 'offline-fake-hash')
         await self.http.aclose()
         await self.main.account_registry.shutdown()
@@ -555,6 +556,16 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(self.main.account_registry.accounts), {'default', healthy})
         self.assertTrue(self.main.session_ok(self.token))
         self.assertEqual((await self.req('GET', '/api/state', healthy)).status_code, 200)
+
+    async def test_legacy_profile_api_is_promoted_to_shared_settings(self):
+        aid = await self.create('legacy api')
+        root, profile = self.rt().db, self.rt(aid).db
+        root.execute("DELETE FROM settings WHERE key IN ('api_id','api_hash')")
+        profile.execute("INSERT INTO settings(key,value) VALUES ('api_id','456'),('api_hash','legacy-offline-hash')")
+        root.commit();profile.commit()
+        self.main.migrate_shared_tg_api()
+        self.assertEqual(root.execute("SELECT value FROM settings WHERE key='api_id'").fetchone()[0], '456')
+        self.assertEqual(root.execute("SELECT value FROM settings WHERE key='api_hash'").fetchone()[0], 'legacy-offline-hash')
 
     async def test_avatar_query_only_and_root_auth_before_selector(self):
         aid = await self.create()

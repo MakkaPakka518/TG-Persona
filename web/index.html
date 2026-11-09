@@ -432,6 +432,7 @@ html[data-theme="light"] .switch{background:#cbd6c5}
   .form-actions,.actrow{gap:7px}.form-actions button,.actrow button{padding-inline:6px}.auto-actions button{font-size:11px}.status-pill{padding:5px 7px}.id-card{gap:10px}.avatar.lg{width:48px;height:48px}.id-name{font-size:16px}
   .toast{top:66px}.autof-card{padding:14px}.autof-head{top:-14px;margin:-14px -14px 12px;padding:12px 14px 10px}
   #af-scheduled_register input,#af-scheduled_register textarea,#af-scheduled_register button{min-height:44px}
+  #foldTg input,#foldTg select,#foldTg button{min-height:44px}
 }
 @media(max-width:340px){
   header{padding-inline:6px}.logo{font-size:11px;letter-spacing:.03em}.logo .dot{display:none}#accountTop{max-width:78px!important}.icon{width:34px;height:34px}#btnPanelOut{padding-inline:6px}
@@ -1021,21 +1022,32 @@ section.act,.fold.open .fold-b{animation:none}
         <div class="hint" id="backupsResult" aria-live="polite" style="margin-top:8px"></div>
       </div>
     </div>
-    <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">Telegram 多账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+    <div class="card fold" id="foldTg">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>Telegram 账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-      <label for="accountSettings">当前账号（客户端可同时登录，切换只改变面板范围）</label>
-      <select id="accountSettings" onchange="switchAccount(this.value)"><option value="default">默认账号</option></select>
-      <div id="accountStatus" class="hint" role="status" aria-live="polite">默认账号</div>
-      <label for="accountLabel">账号标签（新建或重命名）</label><input id="accountLabel" maxlength="80" placeholder="如：工作账号">
-      <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:12px">
-        <button class="ghost" id="accountReload" onclick="loadAccounts()">刷新账号</button>
-        <button class="btn" id="accountCreate" onclick="manageAccount('create')">新建账号</button>
-        <button class="ghost" id="accountRename" onclick="manageAccount('rename')">重命名当前</button>
-        <button class="danger" id="accountDelete" disabled onclick="manageAccount('delete')">删除当前</button>
+        <h4 style="margin:0 0 8px">共用 Telegram API</h4>
+        <div class="flex">
+          <div><label for="tgApiId">API_ID</label><input type="text" id="tgApiId" placeholder="12345678" inputmode="numeric"></div>
+          <div><label for="tgApiHash">API_HASH</label><input type="text" id="tgApiHash" placeholder="在 my.telegram.org 获取"></div>
+        </div>
+        <button class="ghost" id="tgApiSave" style="margin-top:10px" onclick="saveTgApi()">保存共用 API</button>
+        <div class="hint">所有 Telegram 账号共用这一套 API，只需配置一次。</div>
+        <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
+        <label for="accountSettings">当前账号</label>
+        <select id="accountSettings" onchange="switchAccount(this.value)"><option value="default">默认账号</option></select>
+        <div id="accountStatus" class="hint" role="status" aria-live="polite">默认账号</div>
+        <label for="accountLabel">账号备注</label><input id="accountLabel" maxlength="80" placeholder="如：工作号、小号">
+        <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:12px">
+          <button class="btn" id="accountCreate" onclick="manageAccount('create')">添加账号并登录</button>
+          <button class="ghost" id="accountRename" onclick="manageAccount('rename')">修改当前备注</button>
+          <button class="ghost" id="accountReload" onclick="loadAccounts()">刷新</button>
+          <button class="danger" id="accountDelete" disabled onclick="manageAccount('delete')">删除当前</button>
+        </div>
+        <div id="accountResult" class="hint" role="status" aria-live="polite"></div>
+        <div class="hint">默认账号不能删除；其他账号删除时会同时移除对应配置和登录会话。</div>
+        <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
+        <div id="tgCard"><div class="empty">加载中...</div></div>
       </div>
-      <div id="accountResult" class="hint" role="status" aria-live="polite"></div>
-      <div class="hint">新账号使用下方原有 Telegram 登录流程。默认账号禁止删除；删除账号需两次确认。</div>      </div>
     </div>
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">共享图标库</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
@@ -1092,10 +1104,6 @@ section.act,.fold.open .fold-b{animation:none}
       <button class="ghost" style="margin-top:8px" onclick="logoutAll()">退出所有设备</button>
       <div class="hint">面板对外暴露时建议只监听 127.0.0.1 并用反向代理 + HTTPS</div>
       </div>
-    </div>
-    <div class="card fold" id="foldTg">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>Telegram 账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b"><div id="tgCard"><div class="empty">加载中...</div></div></div>
     </div>
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>通知推送</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
@@ -1203,7 +1211,7 @@ function renderAccounts(){
     el.value=selectedAccount;
   }
   const a=accounts.find(x=>x.id===selectedAccount)||{label:selectedAccount};
-  const phase=({ready:'就绪',idle:'未登录',code_sent:'等待登录验证码',need_password:'等待两步密码'})[a.phase]||String(a.phase||'');
+  const phase=({ready:'就绪',idle:'',code_sent:'等待登录验证码',need_password:'等待两步密码'})[a.phase]??String(a.phase||'');
   $('#accountStatus').textContent=String(a.label||a.id)+' · '+(a.logged_in?(a.paused?'已登录 · 已暂停':'已登录 · 运行中'):'未登录')+(phase?' · '+phase:'');
   $('#accountDelete').disabled=accountsBusy||selectedAccount==='default';
 }
@@ -1258,9 +1266,15 @@ async function manageAccount(action){
   try{
     const url='/api/accounts'+(action==='create'?'':'/'+encodeURIComponent(id));
     const d=await api(url,{method:action==='create'?'POST':action==='rename'?'PUT':'DELETE',...(action==='delete'?{}:{body:JSON.stringify({label})})});
-    if(action==='create'&&d.id)switchAccount(d.id);
+    if(action==='create'&&d.id){
+      switchAccount(d.id);await loadAccounts();await renderTgCard();
+      $('#accountResult').textContent='账号已添加，请输入手机号继续登录';
+      $('#foldTg').classList.add('open');
+      setTimeout(()=>{const field=$('#tgPhone');if(field){field.focus();field.scrollIntoView({behavior:'smooth',block:'center'})}},100);
+    }
     if(action==='delete'&&selectedAccount===id)switchAccount('default');
-    $('#accountLabel').value='';await loadAccounts();$('#accountResult').textContent='账号操作成功';
+    $('#accountLabel').value='';
+    if(action!=='create'){await loadAccounts();$('#accountResult').textContent='账号操作成功'}
   }catch(e){$('#accountResult').textContent='账号操作失败，可重试：'+e.message}
   finally{accountsBusy=false;syncAccountButtons()}
 }
@@ -2298,12 +2312,13 @@ async function panelLogin(){
 let tgPhase='idle';
 async function renderTgCard(){
   const c=accountContext(),el=$('#tgCard'); if(!el)return;
+  const current=accounts.find(a=>a.id===c.id),label=String(current?.label||c.id);
   if(state.logged_in){
     const av=state.tg.me.avatar||'';
     el.innerHTML=`
       <div class="flex" style="gap:12px;align-items:center">
         <div class="avatar" id="tgAvatar" style="width:42px;height:42px">?</div>
-        <div class="grow"><div class="t">${esc(state.tg.me.name||'--')}</div><div class="s mono">@${esc(state.tg.me.username||state.tg.me.phone||'--')}</div></div>
+        <div class="grow"><div class="t">${esc(label)}：${esc(state.tg.me.name||'--')}</div><div class="s mono">@${esc(state.tg.me.username||state.tg.me.phone||'--')}</div></div>
         <button class="danger" onclick="logoutTG()">退出登录</button>
       </div>
       <div style="margin-top:12px">
@@ -2313,25 +2328,19 @@ async function renderTgCard(){
           <button class="btn" onclick="saveAvatar()">保存</button>
         </div>
       </div>
-      <div class="hint" style="margin-top:10px">会话已保存在服务器 data/tg.session,重启不丢登录;登录后 TG 头像会自动同步</div>`;
+      <div class="hint" style="margin-top:10px">会话已保存在服务器对应账号目录，重启不丢登录；登录后 TG 头像会自动同步。</div>`;
     setAvatar($('#tgAvatar'), av, state.tg.me.name);
     return;
   }
-  const p=await api('/api/settings',{_account:c}).catch(()=>({api_id:'',api_hash:''}));
-  if(!isCurrentAccount(c))return;
+  const apiReady=/^\d{4,10}$/.test($('#tgApiId').value.trim())&&$('#tgApiHash').value.trim().length>=10;
+  const serverPhase=state.tg?.phase;
+  if(serverPhase==='code_sent'||serverPhase==='need_password')tgPhase=serverPhase;
   el.innerHTML=`
-    <div id="tgS0">
-      <label>API_ID</label>
-      <input type="text" id="tgApiId" placeholder="12345678" inputmode="numeric" value="${esc(String(p.api_id||''))}">
-      <label>API_HASH</label>
-      <input type="text" id="tgApiHash" placeholder="在 my.telegram.org → API development tools 获取" value="${esc(p.api_hash||'')}">
-      <button class="btn" style="width:100%;margin-top:10px" onclick="saveTgApi()">保存凭证</button>
-      <div class="hint">在 my.telegram.org 登录后创建应用即可看到这两个值</div>
-    </div>
-    <div id="tgS1" style="display:${tgPhase==='code_sent'||tgPhase==='need_password'?'block':'none'};margin-top:16px">
-      <label>手机号(带国家码)</label>
+    <div class="hint">正在登录：${esc(label)}${apiReady?'':'。请先保存上方共用 API'}</div>
+    <div id="tgS1" style="display:${tgPhase==='need_password'?'none':'block'};margin-top:12px">
+      <label>手机号（带国家码）</label>
       <input type="text" id="tgPhone" placeholder="8613800138000" inputmode="numeric">
-      <button class="btn" style="width:100%;margin-top:10px" onclick="sendTgCode()">发送验证码</button>
+      <button class="btn" style="width:100%;margin-top:10px" onclick="sendTgCode()" ${apiReady?'':'disabled'}>发送验证码</button>
       <div class="hint">Telegram 会给该手机号发送登录验证码</div>
     </div>
     <div id="tgS2" style="display:${tgPhase==='code_sent'?'block':'none'};margin-top:16px">
@@ -2347,15 +2356,13 @@ async function renderTgCard(){
 }
 async function saveTgApi(){
   const id=$('#tgApiId').value.trim(), hash=$('#tgApiHash').value.trim();
-  if(!/^\d{4,9}$/.test(id)||hash.length<10)return toast('API_ID 或 API_HASH 无效(在 my.telegram.org 获取)',1);
+  if(!/^\d{4,10}$/.test(id)||hash.length<10)return toast('API_ID 或 API_HASH 无效(在 my.telegram.org 获取)',1);
   const c=accountContext();
   try{
     await api('/api/settings',{method:'POST',body:JSON.stringify({api_id:id,api_hash:hash}),_account:c});
     if(!isCurrentAccount(c))return;
-    await api('/api/tg/init',{method:'POST',body:JSON.stringify({api_id:+id,api_hash:hash}),_account:c});
-    if(!isCurrentAccount(c))return;
-    tgPhase='code_sent'; toast('凭证已保存,下一步:发送验证码'); renderTgCard();
-    setTimeout(()=>{if(!isCurrentAccount(c))return;const f=$('#tgPhone');if(f)f.focus()},80);
+    toast('共用 API 已保存，所有账号立即生效');renderTgCard();
+    setTimeout(()=>{if(!isCurrentAccount(c))return;const f=$('#tgPhone');if(f){f.focus();f.scrollIntoView({behavior:'smooth',block:'center'})}},80);
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function sendTgCode(){
@@ -2464,6 +2471,9 @@ async function loadSettings(){
   try{
     const s=await api('/api/settings',{_account:c});if(!isCurrentAccount(c))return;
     if(globalRevision===signinGlobalRevision)acceptSigninGlobalSettings(s);
+    $('#tgApiId').value=s.api_id||'';
+    $('#tgApiHash').value=s.api_hash||'';
+    if(!state.logged_in)renderTgCard();
     $('#sCooldown').value=s.cooldown||20;
     $('#sDelay').value=s.delay||'1.0 3.0';
     $('#sIgnore').checked=s.ignore_bots!=='0';
