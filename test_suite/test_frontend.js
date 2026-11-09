@@ -124,6 +124,20 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     context.autoInput=a;assert(!run('autoDesc(autoInput)').includes('今日已签'));assert(run('autoDesc(autoInput)').includes('上次成功'));
     a.signed_today=true;assert(run('autoDesc(autoInput)').includes('今日已签'));
   });
+  await test('定时抢注表单提供秒级时间和完整单次流程字段',async()=>{
+    const form=html.slice(html.indexOf('id="af-scheduled_register"'),html.indexOf('id="af-grabcodes"'));
+    for(const id of ['trName','trAt','trTarget','trCommand','trButton','trTrigger','trReply','trSuccess','trTimeout'])assert(form.includes('id="'+id+'"'));
+    const time=form.match(/<input\b[^>]*id="trAt"[^>]*>/)[0];
+    assert(time.includes('type="datetime-local"'));assert(time.includes('step="1"'));assert(form.includes('执行一次后不会自动重试'));
+  });
+  await test('定时抢注保存精确提交目标、指令、按钮、触发、回复和成功关键词',async()=>{
+    run("cancelAutoEdit('scheduled_register')");
+    const values={trName:'限时注册',trAt:'2026-10-30T09:00:01',trTarget:'@dummy_bot',trCommand:'/start',trButton:'开始注册',trTrigger:'请输入注册码',trReply:'TEST-CODE',trSuccess:'注册成功',trTimeout:'45'};
+    for(const [id,value] of Object.entries(values))element('#'+id).value=value;
+    let body;context.api=async(_path,options)=>{body=JSON.parse(options.body);return {}};
+    await run("saveAuto('scheduled_register')");
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(body)),{type:'scheduled_register',name:'限时注册',scheduled_at:'2026-10-30T09:00:01',target:'@dummy_bot',command:'/start',click_btn:1,btn_text:'开始注册',keywords:'请输入注册码',reply_text:'TEST-CODE',success_kw:'注册成功',result_timeout:45,retries:0});
+  });
   await test('签到表单包含两段中文秒数标签、默认值及范围步进',async()=>{
     const form=html.slice(html.indexOf('id="af-signin"'),html.indexOf('id="af-grabcodes"'));
     for(const [id,label,value] of [['sCommandDelay','发送命令后延迟（秒）','1.6'],['sButtonDelay','点击按钮后延迟（秒）','2']]){

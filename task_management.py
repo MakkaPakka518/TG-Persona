@@ -31,7 +31,7 @@ MAX_BYTES = 2 * 1024 * 1024
 SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
-    "poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout"
+    "poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at"
 ).split(","))
 INTEGER_LIMITS = {
     "click_btn": (0, 1), "is_chat": (0, 1), "signin_captcha": (0, 1),
@@ -41,9 +41,11 @@ INTEGER_LIMITS = {
 }
 # Only effective fields are applied; custom windows/delays are NOT scheduled.
 APPLICABILITY = {
-    **{k: {"signin"} for k in ("win_start", "win_end", "command_delay", "button_delay", "result_delay", "result_timeout",
-                              "refresh_buttons", "click_btn", "btn_text", "btn_emoji",
-                              "click_times", "click_interval")},
+    **{k: {"signin"} for k in ("win_start", "win_end", "command_delay", "button_delay", "result_delay",
+                               "refresh_buttons", "click_btn", "btn_text", "btn_emoji",
+                               "click_times", "click_interval")},
+    "result_timeout": {"signin", "scheduled_register"},
+    "scheduled_at": {"scheduled_register"},
     "poll_interval": {"keepalive", "grabcodes"},
     "cooldown": {"keepalive", "grabcodes", "redpacket"},
     "retries": {"signin", "custom", "keepalive"}, "chain_retry": {"custom"},
@@ -177,12 +179,14 @@ def _check_fields(data, allowed):
             maximum = 262144 if key == "custom_steps" else 16384
             if not isinstance(value, str) or len(value) > maximum:
                 _bad(f"{key} 必须为字符串且不超过 {maximum} 字符")
-            if key == "type" and value not in ("signin", "grabcodes", "redpacket", "custom", "keepalive"):
+            if key == "type" and value not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive"):
                 _bad("未知任务类型")
             if key == "action" and value not in ("reply", "send"):
                 _bad("任务 action 必须为 reply/send")
             if key in ("win_start", "win_end") and not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value):
                 _bad("时间窗口格式需为 HH:MM")
+            if key == "scheduled_at" and value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d", value):
+                _bad("定时执行时间格式需为 YYYY-MM-DDTHH:MM:SS")
             if key == "points_pat" and value:
                 _regex(value)
             if key == "custom_steps" and value.strip():

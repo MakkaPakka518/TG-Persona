@@ -130,7 +130,7 @@ def db_init(database=None):
         );
         CREATE TABLE IF NOT EXISTS automations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            type TEXT NOT NULL,                 -- signin | grabcodes | redpacket
+            type TEXT NOT NULL,                 -- signin | scheduled_register | grabcodes | redpacket
             name TEXT NOT NULL,
             target TEXT DEFAULT '',             -- signin: @机器人 或 群ID
             command TEXT DEFAULT '',            -- signin: 签到命令
@@ -184,6 +184,7 @@ def db_init(database=None):
         ("retry_day", "TEXT DEFAULT ''"),
         ("next_run_at", "INTEGER DEFAULT 0"),
         ("last_status", "TEXT DEFAULT ''"),
+        ("scheduled_at", "TEXT DEFAULT ''"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -1318,6 +1319,45 @@ async def _await_signin_result(ent, min_id, success_kw="", fail_kw="", baseline=
     return last_text, "unknown"
 
 
+async def _await_task_reply(ent, min_id, keywords, baseline=None, timeout=30):
+    """Wait for a fresh bot reply containing one of the configured keywords."""
+    deadline = time.monotonic() + timeout
+    last_text = ""
+    while time.monotonic() < deadline:
+        try:
+            fresh = [m for m in await get_runtime().client.get_messages(ent, limit=12)
+                     if _fresh_reply(m, min_id, baseline)]
+            for message in sorted(fresh, key=lambda item: item.id, reverse=True):
+                text = str(getattr(message, "raw_text", "") or "").strip()
+                if text:
+                    last_text = text
+                if match_keywords(keywords, text):
+                    return message, text
+        except errors.FloodWaitError as error:
+            raise _RetryLater(error.seconds) from error
+        except Exception:
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(0.5, remaining))
+    return None, last_text
+
+
+async def _await_task_button(ent, min_id, keyword, timeout=30):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        message, buttons = await _find_latest_buttons(ent, min_id=min_id)
+        button = _find_btn(buttons, keyword) if buttons else None
+        if button:
+            return message, button
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(0.5, remaining))
+    return None, None
+
+
 async def run_signin(a):
     """单次签到尝试;重试/成功时间由统一执行器管理,不在协程内无限重发。"""
     target = str(a["target"] or "").strip()
@@ -1465,6 +1505,54 @@ async def run_signin(a):
                     "points": points, "note": desc})
     log.info("签到%s 任务=%s 目标=%s", "失败" if fail or ok is False else "成功", a["name"], target)
     return not (fail or ok is False)
+
+
+async def run_scheduled_register(a):
+    """Run the configured one-shot bot registration conversation."""
+    target = str(a["target"] or "").strip()
+    command = str(a["command"] or "").strip()
+    button_keyword = str(a["btn_text"] or "").strip()
+    trigger_keyword = str(a["keywords"] or "").strip()
+    reply_text = str(a["reply_text"] or "").strip()
+    success_keyword = str(a["success_kw"] or "").strip()
+    timeout = int(a["result_timeout"] or 30)
+    if not all((target, command, button_keyword, trigger_keyword, reply_text, success_keyword)):
+        return _task_failure(a, "定时抢注配置不完整")
+    ent = await resolve_entity(target)
+    if ent is None:
+        return _task_failure(a, "定时抢注目标解析失败", command)
+    try:
+        sent = await get_runtime().client.send_message(ent, command)
+        button_message, button = await _await_task_button(ent, sent.id, button_keyword, timeout)
+        if button is None:
+            return _task_unconfirmed(a, "等待指定按钮超时，任务不会再次执行", command)
+        trigger_baseline = await _message_snapshot(ent)
+        trigger_min_id = max([sent.id, button_message.id] + list(trigger_baseline))
+        await button.click()
+        trigger_message, trigger_text = await _await_task_reply(
+            ent, trigger_min_id, trigger_keyword, trigger_baseline, timeout)
+        if trigger_message is None:
+            return _task_unconfirmed(a, "点击按钮后未收到指定内容，任务不会再次执行", command, trigger_text)
+        success_baseline = await _message_snapshot(ent)
+        replied = await get_runtime().client.send_message(ent, reply_text)
+        success_message, success_text = await _await_task_reply(
+            ent, max(replied.id, trigger_message.id), success_keyword, success_baseline, timeout)
+        if success_message is None:
+            return _task_unconfirmed(a, "回复后未收到成功关键词，任务不会再次执行", reply_text, success_text)
+    except errors.FloodWaitError as error:
+        raise _RetryLater(error.seconds) from error
+    except _RetryLater:
+        raise
+    except Exception as error:
+        return _task_failure(a, "定时抢注执行失败: %s" % error, command)
+    button_text = str(getattr(button, "text", "") or "")
+    add_hit("scheduled_register", True, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
+            content=command, reply=success_text, detail={"kind": "scheduled_register", "task": a["name"],
+            "bot": target, "command": command, "button": button_text, "trigger": trigger_text,
+            "sent_reply": reply_text, "success": success_text, "scheduled_at": a["scheduled_at"]})
+    notify_event("success", a["name"], "定时抢注成功：" + target)
+    log.info("定时抢注成功 任务=%s 目标=%s", a["name"], target)
+    return True
 
 
 async def _select_btn_ai(btns, hint):
@@ -2080,6 +2168,8 @@ async def _execute_auto(aid, manual=False):
                     ok = bool(await asyncio.wait_for(run_signin(a), timeout=remaining))
             elif a["type"] == "keepalive":
                 ok = bool(await run_keepalive(a, "手动" if manual else "定时"))
+            elif a["type"] == "scheduled_register":
+                ok = bool(await run_scheduled_register(a))
             else:
                 ok = bool(await run_custom(a))
         except _RetryLater as e:
@@ -2122,6 +2212,8 @@ async def _execute_auto(aid, manual=False):
                     next_at = finished + max(backoff, max(60, int(a["poll_interval"] or 60)))
                 get_account_db().execute("UPDATE automations SET next_run_at=?,last_status=? WHERE id=?",
                              (next_at, status, aid))
+            if a["type"] == "scheduled_register":
+                get_account_db().execute("UPDATE automations SET enabled=0,next_run_at=0 WHERE id=?", (aid,))
             get_account_db().commit()
             if not ok and status not in ("interrupted", "stopped") and (exhausted or status == "unconfirmed" or manual):
                 changed = get_account_db().execute("UPDATE automations SET failure_notified=? WHERE id=? AND COALESCE(failure_notified,'')!=?", (today, aid, today))
@@ -2180,6 +2272,40 @@ def _signin_tick():
         if nowm >= get_runtime().signin_plans[key]:
             _queue_auto(a["id"])
     _maybe_notify_global_signin_summary()
+
+
+def _scheduled_register_tick():
+    if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
+        return
+    due = now_local().strftime("%Y-%m-%dT%H:%M:%S")
+    rows = get_account_db().execute(
+        "SELECT id FROM automations WHERE enabled=1 AND type='scheduled_register' "
+        "AND scheduled_at!='' AND scheduled_at<=? AND last_attempt=0 ORDER BY id DESC", (due,)).fetchall()
+    runtime = _auto_runtime_state()
+    for row in rows:
+        aid = row["id"]
+        if aid in runtime.auto_tasks or aid in runtime.auto_workers:
+            continue
+        # 秒级一次性任务不等待普通签到批次，但仍使用统一停止和状态管理。
+        runtime.auto_tasks[aid] = asyncio.get_running_loop().create_future()
+        runtime.auto_stop_requested.discard(aid)
+        try:
+            worker = runtime.spawn(_execute_auto(aid, False))
+            runtime.auto_workers[aid] = worker
+            worker.add_done_callback(lambda _task, task_id=aid: _finish_auto_reservation(task_id))
+        except BaseException:
+            _finish_auto_reservation(aid)
+            raise
+
+
+async def scheduled_register_loop():
+    """Check one-shot tasks on each wall-clock second."""
+    while True:
+        try:
+            _scheduled_register_tick()
+        except Exception as error:
+            log.warning("定时抢注循环异常: %s", error)
+        await asyncio.sleep(max(0.05, 1 - time.time() % 1))
 
 
 async def housekeeping_loop():
@@ -2644,6 +2770,7 @@ async def finish_login(me=None):
         runtime.client.add_event_handler(runtime.bind_event(on_auto_event, runtime.client), events.NewMessage(incoming=True))
         runtime.handler_registered = True
     for name, loop in (("watcher_task", watcher_loop), ("signin_task", signin_loop),
+                       ("scheduled_task", scheduled_register_loop),
                        ("poll_task", poll_loop), ("keepalive_task", keepalive_loop),
                        ("housekeeping_task", housekeeping_loop), ("health_task", health_loop)):
         task = getattr(runtime, name)
@@ -2803,7 +2930,7 @@ async def toggle_rule(rid: int):
 
 # ---------- 自动化管理 (签到 / 抢注 / 抢红包 / 自定义) ----------
 class AutoIn(BaseModel):
-    type: str = "signin"          # signin | grabcodes | redpacket | custom
+    type: str = "signin"          # signin | scheduled_register | grabcodes | redpacket | custom
     name: str = ""
     icon_url: str = Field("", max_length=2048)  # 任务图标，仅 HTTP(S)
     target: str = ""              # signin/custom: @机器人 或 群ID;grabcodes: 轮询机器人(可选)
@@ -2835,11 +2962,12 @@ class AutoIn(BaseModel):
     chain_retry: int = 1          # custom: 链级重试
     cooldown: int = 30
     enabled: int = 1
+    scheduled_at: str = ""         # scheduled_register: YYYY-MM-DDTHH:MM:SS in panel timezone
 
 
 def _valid_auto(body: AutoIn):
-    if body.type not in ("signin", "grabcodes", "redpacket", "custom", "keepalive"):
-        raise HTTPException(400, "类型必须是 signin / grabcodes / redpacket / custom")
+    if body.type not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive"):
+        raise HTTPException(400, "未知任务类型")
     if not body.name.strip():
         raise HTTPException(400, "请填写任务名称")
     if not math.isfinite(body.result_delay) or not 0 <= body.result_delay <= 120 or not 1 <= body.result_timeout <= 300:
@@ -2879,6 +3007,16 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "发送间隔需在 60 秒 - 90 天之间")
         if body.cooldown < 0 or body.cooldown > 86400:
             raise HTTPException(400, "删除延迟需在 0-86400 秒之间")
+    if body.type == "scheduled_register":
+        if not all(value.strip() for value in (body.target, body.command, body.btn_text, body.keywords,
+                                                body.reply_text, body.success_kw)):
+            raise HTTPException(400, "定时抢注需填写目标、指令、按钮关键词、触发关键词、回复内容和成功关键词")
+        try:
+            scheduled = datetime.strptime(body.scheduled_at, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=tzinfo())
+        except (TypeError, ValueError):
+            raise HTTPException(400, "执行时间格式需为 YYYY-MM-DD HH:MM:SS") from None
+        if body.enabled and scheduled <= now_local():
+            raise HTTPException(400, "执行时间必须晚于当前面板时间")
     if body.type == "grabcodes" and not body.reply_text.strip():
         raise HTTPException(400, "抢注需要填写动作文本(支持 {code} 占位符)")
     if body.type == "grabcodes" and body.poll_interval:
@@ -2900,7 +3038,7 @@ def _valid_auto(body: AutoIn):
 
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
-              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout")
+              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at")
 
 
 def _auto_vals(body: AutoIn, extra=None):
@@ -2913,7 +3051,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
         body.poll_interval, body.custom_steps.strip(), body.chain_retry,
         body.cooldown, body.enabled, body.command_delay, body.button_delay, body.refresh_buttons, body.icon_url.strip(),
-        body.result_delay, body.result_timeout,
+        body.result_delay, body.result_timeout, body.scheduled_at.strip(),
     ] + (extra or [])
 
 
@@ -2974,7 +3112,9 @@ async def update_auto(aid: int, body: AutoIn):
     get_account_db().commit()
     changed = any(previous[key] != value for key, value in (
         ("type", body.type), ("target", body.target.strip()), ("command", body.command.strip()),
-        ("reply_text", body.reply_text.strip()), ("custom_steps", body.custom_steps.strip())))
+        ("reply_text", body.reply_text.strip()), ("custom_steps", body.custom_steps.strip()),
+        ("scheduled_at", body.scheduled_at.strip()), ("btn_text", body.btn_text.strip()),
+        ("keywords", body.keywords.strip()), ("success_kw", body.success_kw.strip())))
     _reset_auto_schedule(aid, clear_success=changed)
     return {"ok": True}
 
@@ -2983,10 +3123,17 @@ async def update_auto(aid: int, body: AutoIn):
 async def toggle_auto(aid: int):
     if aid in get_runtime().auto_tasks:
         raise HTTPException(409, "任务正在执行,请完成后再切换")
-    r = get_account_db().execute("SELECT enabled FROM automations WHERE id=?", (aid,)).fetchone()
+    r = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
     if not r:
         raise HTTPException(404, "任务不存在")
     v = 0 if r["enabled"] else 1
+    if v and r["type"] == "scheduled_register":
+        try:
+            scheduled = datetime.strptime(r["scheduled_at"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=tzinfo())
+        except (TypeError, ValueError):
+            raise HTTPException(400, "请先设置有效的定时抢注执行时间") from None
+        if scheduled <= now_local():
+            raise HTTPException(400, "执行时间已过，请编辑任务后再启用")
     get_account_db().execute("UPDATE automations SET enabled=? WHERE id=?", (v, aid))
     get_account_db().commit()
     _reset_auto_schedule(aid)
@@ -3174,6 +3321,8 @@ async def resolve_anomaly(aid: int, body: dict):
         db.commit()
         _maybe_notify_global_signin_summary()
         return {"ok": True, "action": action}
+    if row["type"] == "scheduled_register":
+        raise HTTPException(400, "定时抢注只执行一次，请修改执行时间后重新启用")
     if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         raise HTTPException(409, "TG 尚未登录")
     db.execute("UPDATE automations SET retry_count=0,retry_day='',next_run_at=0,"
