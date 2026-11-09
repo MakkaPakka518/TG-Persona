@@ -185,6 +185,7 @@ def db_init(database=None):
         ("next_run_at", "INTEGER DEFAULT 0"),
         ("last_status", "TEXT DEFAULT ''"),
         ("scheduled_at", "TEXT DEFAULT ''"),
+        ("history_first", "INTEGER DEFAULT 0"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -1531,7 +1532,7 @@ async def run_signin(a):
     return not (fail or ok is False)
 
 
-async def run_scheduled_register(a):
+async def run_scheduled_register(a, test_only=False):
     """Run the configured one-shot bot registration conversation."""
     target = str(a["target"] or "").strip()
     command = str(a["command"] or "").strip()
@@ -1546,12 +1547,18 @@ async def run_scheduled_register(a):
     if ent is None:
         return _task_failure(a, "定时抢注目标解析失败", command)
     try:
-        sent = await get_runtime().client.send_message(ent, command)
-        button_message, button = await _await_task_button(ent, sent.id, button_keyword, timeout)
+        sent, button_message, button = None, None, None
+        if a["history_first"]:
+            button_message, buttons = await _find_latest_buttons(ent, min_id=0)
+            button = _find_btn(buttons, button_keyword) if buttons else None
+        source = "history" if button is not None else "command"
+        if button is None:
+            sent = await get_runtime().client.send_message(ent, command)
+            button_message, button = await _await_task_button(ent, sent.id, button_keyword, timeout)
         if button is None:
             return _task_unconfirmed(a, "等待指定按钮超时，任务不会再次执行", command)
         trigger_baseline = await _message_snapshot(ent)
-        trigger_min_id = max([sent.id, button_message.id] + list(trigger_baseline))
+        trigger_min_id = max(([sent.id] if sent is not None else []) + [button_message.id] + list(trigger_baseline))
         await button.click()
         trigger_message, trigger_text = await _await_task_reply(
             ent, trigger_min_id, trigger_keyword, trigger_baseline, timeout)
@@ -1571,10 +1578,12 @@ async def run_scheduled_register(a):
         return _task_failure(a, "定时抢注执行失败: %s" % error, command)
     button_text = str(getattr(button, "text", "") or "")
     add_hit("scheduled_register", True, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
-            content=command, reply=success_text, detail={"kind": "scheduled_register", "task": a["name"],
+            content=(command if sent is not None else "历史卡片"), reply=success_text, detail={"kind": "scheduled_register", "task": a["name"],
             "bot": target, "command": command, "button": button_text, "trigger": trigger_text,
-            "sent_reply": reply_text, "success": success_text, "scheduled_at": a["scheduled_at"]})
-    notify_event("success", a["name"], "定时抢注成功：" + target)
+            "sent_reply": reply_text, "success": success_text, "scheduled_at": a["scheduled_at"],
+            "button_source": source, "test_only": bool(test_only)})
+    if not test_only:
+        notify_event("success", a["name"], "定时抢注成功：" + target)
     log.info("定时抢注成功 任务=%s 目标=%s", a["name"], target)
     return True
 
@@ -2987,6 +2996,7 @@ class AutoIn(BaseModel):
     cooldown: int = 30
     enabled: int = 1
     scheduled_at: str = ""         # scheduled_register: YYYY-MM-DDTHH:MM:SS in panel timezone
+    history_first: int = 0          # scheduled_register: click latest matching button before command
 
 
 def _valid_auto(body: AutoIn):
@@ -3041,6 +3051,8 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "执行时间格式需为 YYYY-MM-DD HH:MM:SS") from None
         if body.enabled and scheduled <= now_local():
             raise HTTPException(400, "执行时间必须晚于当前面板时间")
+        if body.history_first not in (0, 1):
+            raise HTTPException(400, "历史卡片优先模式只能为 0 或 1")
     if body.type == "grabcodes" and not body.reply_text.strip():
         raise HTTPException(400, "抢注需要填写动作文本(支持 {code} 占位符)")
     if body.type == "grabcodes" and body.poll_interval:
@@ -3062,7 +3074,7 @@ def _valid_auto(body: AutoIn):
 
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
-              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at")
+              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first")
 
 
 def _auto_vals(body: AutoIn, extra=None):
@@ -3075,7 +3087,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
         body.poll_interval, body.custom_steps.strip(), body.chain_retry,
         body.cooldown, body.enabled, body.command_delay, body.button_delay, body.refresh_buttons, body.icon_url.strip(),
-        body.result_delay, body.result_timeout, body.scheduled_at.strip(),
+        body.result_delay, body.result_timeout, body.scheduled_at.strip(), body.history_first,
     ] + (extra or [])
 
 
@@ -3138,7 +3150,8 @@ async def update_auto(aid: int, body: AutoIn):
         ("type", body.type), ("target", body.target.strip()), ("command", body.command.strip()),
         ("reply_text", body.reply_text.strip()), ("custom_steps", body.custom_steps.strip()),
         ("scheduled_at", body.scheduled_at.strip()), ("btn_text", body.btn_text.strip()),
-        ("keywords", body.keywords.strip()), ("success_kw", body.success_kw.strip())))
+        ("keywords", body.keywords.strip()), ("success_kw", body.success_kw.strip()),
+        ("history_first", body.history_first)))
     _reset_auto_schedule(aid, clear_success=changed)
     return {"ok": True}
 
@@ -3201,6 +3214,24 @@ async def run_auto_now(aid: int):
     if not _queue_auto(aid, manual=True):
         raise HTTPException(409, "任务正在执行,请勿重复提交")
     return {"ok": True, "running": False, "queued": True}
+
+
+@app.post("/api/autos/{aid}/test")
+async def test_scheduled_auto(aid: int):
+    a = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type='scheduled_register'", (aid,)).fetchone()
+    if not a:
+        raise HTTPException(404, "定时抢注任务不存在")
+    if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
+        raise HTTPException(409, "TG 尚未登录")
+    runtime = _auto_runtime_state()
+    if aid in runtime.auto_tasks or aid in runtime.auto_workers:
+        raise HTTPException(409, "任务正在执行,请勿重复测试")
+    runtime.auto_tasks[aid] = asyncio.get_running_loop().create_future()
+    try:
+        ok = bool(await run_scheduled_register(a, test_only=True))
+        return {"ok": ok, "tested": True}
+    finally:
+        _finish_auto_reservation(aid)
 
 
 async def _stop_auto_task(aid):

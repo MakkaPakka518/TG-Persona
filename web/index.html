@@ -209,6 +209,7 @@ select{appearance:none;-webkit-appearance:none;
 .hint{font-size:11.5px;color:var(--dim);margin-top:8px;line-height:1.6}
 .form-actions{display:flex;gap:10px;margin-top:18px}
 .form-actions .btn{flex:1}
+.timed-history-toggle input{width:18px!important;height:18px;flex:none}
 
 /* ---------- 列表项 ---------- */
 .item{display:flex;align-items:center;gap:12px;padding:13px 14px;border:1px solid var(--hair);
@@ -431,7 +432,8 @@ html[data-theme="light"] .switch{background:#cbd6c5}
   main{padding-inline:10px}.card{padding:13px;border-radius:15px}.ctl-div{margin-inline:-13px}.flex{gap:8px}.flex>div{min-width:min(125px,100%)}
   .form-actions,.actrow{gap:7px}.form-actions button,.actrow button{padding-inline:6px}.auto-actions button{font-size:11px}.status-pill{padding:5px 7px}.id-card{gap:10px}.avatar.lg{width:48px;height:48px}.id-name{font-size:16px}
   .toast{top:66px}.autof-card{padding:14px}.autof-head{top:-14px;margin:-14px -14px 12px;padding:12px 14px 10px}
-  #af-scheduled_register input,#af-scheduled_register textarea,#af-scheduled_register button{min-height:44px}
+  #af-scheduled_register input:not([type=checkbox]),#af-scheduled_register textarea,#af-scheduled_register button,.timed-history-toggle{min-height:44px}
+  #aListTimed .auto-actions button{min-height:44px}
   #foldTg input,#foldTg select,#foldTg button{min-height:44px}
 }
 @media(max-width:340px){
@@ -636,6 +638,8 @@ section.act,.fold.open .fold-b{animation:none}
           <input type="text" id="trCommand" placeholder="如: /start" required>
           <label for="trButton">点击按钮关键词</label>
           <input type="text" id="trButton" placeholder="如: 开始注册" required>
+          <label class="timed-history-toggle" style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="trHistoryFirst" style="width:auto"> 优先点击最近回复卡片中的匹配按钮</label>
+          <div class="hint">开启后先检查机器人最近一张带按钮的回复；找到按钮关键词就直接点击，找不到才发送上方指令。</div>
           <label for="trTrigger">收到内容关键词</label>
           <input type="text" id="trTrigger" placeholder="如: 请输入邀请码" required>
           <label for="trReply">回复内容</label>
@@ -644,7 +648,7 @@ section.act,.fold.open .fold-b{animation:none}
           <input type="text" id="trSuccess" placeholder="如: 注册成功" required>
           <label for="trTimeout">每一步最长等待（秒）</label>
           <input type="number" id="trTimeout" value="30" min="1" max="300" step="1" inputmode="numeric" required>
-          <div class="hint">发送指令 → 点击匹配按钮 → 等到内容关键词 → 回复内容 → 等到成功关键词。每个等待阶段使用同一上限，执行一次后不会自动重试。</div>
+          <div class="hint">按所选模式发送指令或直接点击历史按钮 → 等到内容关键词 → 回复内容 → 等到成功关键词。每个等待阶段使用同一上限，正式执行一次后不会自动重试。</div>
           <div class="flex" style="margin-top:14px">
             <button class="btn" type="submit">保存</button>
             <button class="ghost" type="button" onclick="cancelAutoEdit('scheduled_register')" id="trCancel" style="display:none">取消编辑</button>
@@ -1231,7 +1235,7 @@ async function loadAccounts(){
 }
 function resetAccountCaches(){
   state={tg:{},logged_in:false,running:false,stats:{watched_groups:0,rules:0,hits:0}};
-  autos=[];openedAutoIds.clear();persistAutoExpanded();autoStopBusy.clear();autoStopAllBusy=false;syncStopAllButton();closeIconPicker();signinGlobalDirty=false;signinGlobalBusy=false;$('#signinGlobalSave').disabled=false;$('#signinGlobalResult').textContent='';renderSigninGlobal();
+  autos=[];openedAutoIds.clear();persistAutoExpanded();autoStopBusy.clear();autoTestBusy.clear();autoStopAllBusy=false;syncStopAllButton();closeIconPicker();signinGlobalDirty=false;signinGlobalBusy=false;$('#signinGlobalSave').disabled=false;$('#signinGlobalResult').textContent='';renderSigninGlobal();
   allGroups=[];allRules=[];watchedGroups=[];ruleGroupSel.clear();
   autoGroupSel.grabcodes.clear();autoGroupSel.redpacket.clear();selectedAutoIds.clear();
   editingRule=null;editAuto=null;editAutoAccount=null;ruleEditAccount=null;tgPhase='idle';window._prevLoggedIn=null;if(typeof resetAIAssistant==='function')resetAIAssistant();
@@ -1597,7 +1601,7 @@ try{const saved=JSON.parse(sessionStorage.getItem('tgp_open_autos')||'null');if(
 function persistAutoExpanded(){try{sessionStorage.setItem('tgp_open_autos',JSON.stringify({account:selectedAccount,ids:[...openedAutoIds]}))}catch(e){}}
 function toggleAutoExpanded(id){if(!autos.some(a=>a.id===id))return;openedAutoIds.has(id)?openedAutoIds.delete(id):openedAutoIds.add(id);persistAutoExpanded();const a=autos.find(x=>x.id===id);renderAutoList(a.type)}
 let autos=[], editAuto=null, editAutoAccount=null;
-let autoStopBusy=new Set(), autoStopAllBusy=false;
+let autoStopBusy=new Set(), autoTestBusy=new Set(), autoStopAllBusy=false;
 function hasActiveAutos(){return autos.some(a=>a.running===true||a.queued===true)}
 function syncStopAllButton(){const btn=$('#autoStopAll');if(btn)btn.disabled=autoStopAllBusy||!hasActiveAutos()}
 let selectedAutoIds=new Set(), batchPreview=null, batchSeq=0, batchBusy=false;
@@ -1696,7 +1700,7 @@ function renderAutoList(type){
       </div>
 
       ${open?`<div class="auto-details"><div class="s">${autoDesc(a)}</div><div class="s">归属当前账号：${esc(label)}（${esc(c.id)}）</div><div class="s">有效窗口：${esc(autoWindow(a))}</div><pre class="auto-result">${esc(autoLastResult(a))}</pre>${assistantBlock(a)}</div>`:''}
-      <div class="auto-actions">${action('toggle',a.enabled?'停用':'启用')}${action('edit','编辑')}${action('duplicate','复制')}${action('delete','删除')}</div>
+      <div class="auto-actions">${a.type==='scheduled_register'?action('test',autoTestBusy.has(a.id)?'测试中…':'测试流程',autoTestBusy.has(a.id)?'disabled':''):''}${action('toggle',a.enabled?'停用':'启用')}${action('edit','编辑')}${action('duplicate','复制')}${action('delete','删除')}</div>
     </div>`;
   }).join('');
   for(const holder of box.querySelectorAll('[data-task-icon]')){const a=list.find(x=>x.id===Number(holder.dataset.taskIcon));if(a)holder.appendChild(makeTaskIcon(a.name,a.icon_url))}
@@ -1709,12 +1713,12 @@ function renderAutoList(type){
     else if(action==='expand')toggleAutoExpanded(id);
     else if(action==='aidiag'){if(typeof diagnoseAuto==='function')diagnoseAuto(id)}
     else if(action==='stop')stopAuto(id,c);
-    else ({run:runAuto,toggle:toggleAuto,edit:editAutoItem,duplicate:dupAuto,delete:delAuto}[action])?.(id);
+    else ({run:runAuto,test:testAuto,toggle:toggleAuto,edit:editAutoItem,duplicate:dupAuto,delete:delAuto}[action])?.(id);
   };
 }
 function autoDesc(a){
   if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${a.signin_captcha?' · 验证码':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
-  if(a.type==='scheduled_register')return `${esc(a.target)}，${esc(a.command)}，${esc(autoWindow(a))}，按钮 ${esc(a.btn_text)}，收到 ${esc(a.keywords)} 后回复，成功 ${esc(a.success_kw)}，每步等待 ${esc(String(a.result_timeout??30))}秒`;
+  if(a.type==='scheduled_register')return `${esc(a.target)}，${esc(a.command)}，${esc(autoWindow(a))}，按钮 ${esc(a.btn_text)}${a.history_first?'，历史卡片优先':''}，收到 ${esc(a.keywords)} 后回复，成功 ${esc(a.success_kw)}，每步等待 ${esc(String(a.result_timeout??30))}秒`;
   if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}${a.poll_interval>0?' · 轮询'+a.poll_interval+'s@'+esc(a.target):''}`;
   if(a.type==='redpacket')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
   if(a.type==='keepalive'){
@@ -1761,6 +1765,7 @@ function editAutoItem(id){
     const [date='',clock='']=String(a.scheduled_at||'').split('T'),parts=clock.split(':');
     $('#trName').value=a.name;$('#trDate').value=date;$('#trTime').value=parts.slice(0,2).join(':');$('#trSecond').value=parts[2]||'0';$('#trTarget').value=a.target||'';
     $('#trCommand').value=a.command||'';$('#trButton').value=a.btn_text||'';$('#trTrigger').value=a.keywords||'';
+    $('#trHistoryFirst').checked=!!a.history_first;
     $('#trReply').value=a.reply_text||'';$('#trSuccess').value=a.success_kw||'';$('#trTimeout').value=a.result_timeout??30;
     $('#trCancel').style.display='inline-block';
   }else if(t==='grabcodes'){
@@ -1789,7 +1794,7 @@ function editAutoItem(id){
 function cancelAutoEdit(t){
   editAuto=null;editAutoAccount=null;if(typeof assistantFormDraft!=='undefined')assistantFormDraft=null;
   ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
-    scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
+    scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trHistoryFirst').checked=false;$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';setVisualSteps('[]');$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'},
@@ -1960,6 +1965,7 @@ async function saveAuto(type){
     const scheduled=/^\d{4}-\d{2}-\d{2}$/.test(date)&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clock)&&Number.isInteger(second)&&second>=0&&second<=59?date+'T'+clock+':'+String(second).padStart(2,'0'):'';
     body={type,name:$('#trName').value.trim(),scheduled_at:scheduled,target:$('#trTarget').value.trim(),
       command:$('#trCommand').value.trim(),click_btn:1,btn_text:$('#trButton').value.trim(),
+      history_first:$('#trHistoryFirst').checked?1:0,
       keywords:$('#trTrigger').value.trim(),reply_text:$('#trReply').value.trim(),success_kw:$('#trSuccess').value.trim(),
       result_timeout:timeout,retries:0};
     if(!body.scheduled_at)return toast('请选择日期、时分，并填写 0–59 秒',1);
@@ -2013,6 +2019,16 @@ async function delAuto(id){
 }
 async function runAuto(id){
   try{await api('/api/autos/'+id+'/run',{method:'POST'});toast('已触发,稍后查看日志')}catch(e){toast(e.message,1)}
+}
+async function testAuto(id){
+  const a=autos.find(x=>x.id===id),c=accountContext();if(!a||a.type!=='scheduled_register'||autoTestBusy.has(id))return;
+  if(!window.confirm('测试会立即真实发送、点击和回复，但不会消耗正式计划。确定测试「'+String(a.name||id)+'」？'))return;
+  autoTestBusy.add(id);renderAutoList('scheduled_register');
+  try{
+    const d=await api('/api/autos/'+id+'/test',{method:'POST',_account:c});if(!isCurrentAccount(c))return;
+    toast(d.ok?'测试流程成功，请查看日志':'测试流程未成功，请查看日志',d.ok?0:1);await loadAutos();
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
+  finally{if(isCurrentAccount(c)){autoTestBusy.delete(id);renderAutoList('scheduled_register')}}
 }
 function renderAllAutoLists(){syncStopAllButton();Object.keys(AUTO_TYPE).forEach(renderAutoList)}
 async function stopAuto(id,c=accountContext()){

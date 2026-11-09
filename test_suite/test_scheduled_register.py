@@ -40,7 +40,7 @@ class ScheduledRegisterTests(unittest.IsolatedAsyncioTestCase):
         return values
 
     async def test_full_flow_runs_in_order_and_logs_success(self):
-        phase, events = "menu", []
+        phase, events = "history", []
 
         async def click():
             nonlocal phase
@@ -48,6 +48,7 @@ class ScheduledRegisterTests(unittest.IsolatedAsyncioTestCase):
             phase = "trigger"
 
         button = SimpleNamespace(text="开始注册", click=AsyncMock(side_effect=click))
+        wrong = SimpleNamespace(text="其他功能", click=AsyncMock())
 
         async def send(_entity, text):
             nonlocal phase
@@ -59,6 +60,8 @@ class ScheduledRegisterTests(unittest.IsolatedAsyncioTestCase):
             return SimpleNamespace(id=103)
 
         async def get_messages(_entity, **_kwargs):
+            if phase == "history":
+                return [message(99, "旧菜单", buttons=[[wrong]])]
             if phase == "menu":
                 return [message(101, "请选择操作", buttons=[[button]])]
             if phase == "trigger":
@@ -71,12 +74,53 @@ class ScheduledRegisterTests(unittest.IsolatedAsyncioTestCase):
                                              get_messages=AsyncMock(side_effect=get_messages))
         self.b["resolve_entity"] = AsyncMock(return_value="entity")
         self.b["notify_event"] = Mock()
-        aid = await self.create(**self.values())
+        aid = await self.create(**self.values(history_first=1))
         ok = await self.b["run_scheduled_register"](self.row(aid))
         self.assertTrue(ok)
         self.assertEqual(events, [("send", "/start"), ("click", "开始注册"), ("send", "TEST-CODE")])
         hit = self.b["conn"].execute("SELECT action,ok,reply FROM hits ORDER BY id DESC").fetchone()
         self.assertEqual(tuple(hit), ("scheduled_register", 1, "注册成功"))
+
+    async def test_history_button_skips_command(self):
+        phase, events = "history", []
+
+        async def click():
+            nonlocal phase
+            events.append(("click", "开始注册"));phase = "trigger"
+
+        button = SimpleNamespace(text="开始注册", click=AsyncMock(side_effect=click))
+
+        async def send(_entity, text):
+            nonlocal phase
+            events.append(("send", text))
+            if text == "/start":
+                raise AssertionError("历史按钮命中后不应发送指令")
+            phase = "success";return SimpleNamespace(id=103)
+
+        async def get_messages(_entity, **_kwargs):
+            if phase == "history": return [message(99, "旧菜单", buttons=[[button]])]
+            if phase == "trigger": return [message(102, "请输入注册码")]
+            if phase == "success": return [message(104, "注册成功")]
+            return []
+
+        self.b["client"] = SimpleNamespace(send_message=AsyncMock(side_effect=send), get_messages=AsyncMock(side_effect=get_messages))
+        self.b["resolve_entity"] = AsyncMock(return_value="entity")
+        aid = await self.create(**self.values(history_first=1))
+        self.assertTrue(await self.b["run_scheduled_register"](self.row(aid)))
+        self.assertEqual(events, [("click", "开始注册"), ("send", "TEST-CODE")])
+        detail = self.b["conn"].execute("SELECT detail FROM hits ORDER BY id DESC").fetchone()[0]
+        self.assertIn('"button_source": "history"', detail)
+
+    async def test_flow_test_does_not_consume_schedule(self):
+        aid = await self.create(**self.values())
+        before = tuple(self.row(aid)[key] for key in ("enabled", "last_attempt", "last_status", "scheduled_at"))
+        self.b["run_scheduled_register"] = AsyncMock(return_value=True)
+        result = await self.b["test_scheduled_auto"](aid)
+        after = tuple(self.row(aid)[key] for key in ("enabled", "last_attempt", "last_status", "scheduled_at"))
+        self.assertEqual(result, {"ok": True, "tested": True})
+        self.assertEqual(after, before)
+        self.b["run_scheduled_register"].assert_awaited_once()
+        self.assertTrue(self.b["run_scheduled_register"].await_args.kwargs["test_only"])
 
     async def test_due_task_executes_once_then_disables(self):
         aid = await self.create(**self.values())
@@ -92,7 +136,7 @@ class ScheduledRegisterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_requires_complete_future_second_precision_configuration(self):
         for changes in ({"scheduled_at": "2026-10-30T09:01"}, {"scheduled_at": "2026-10-30T08:59:59"},
-                        {"btn_text": ""}, {"keywords": ""}, {"reply_text": ""}, {"success_kw": ""}):
+                        {"btn_text": ""}, {"keywords": ""}, {"reply_text": ""}, {"success_kw": ""}, {"history_first": 2}):
             with self.subTest(changes=changes), self.assertRaises(HTTPException):
                 await self.create(**self.values(**changes))
 

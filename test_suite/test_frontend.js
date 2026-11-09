@@ -126,7 +126,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('定时抢注表单提供秒级时间和完整单次流程字段',async()=>{
     const form=html.slice(html.indexOf('id="af-scheduled_register"'),html.indexOf('id="af-grabcodes"'));
-    for(const id of ['trName','trDate','trTime','trSecond','trTarget','trCommand','trButton','trTrigger','trReply','trSuccess','trTimeout'])assert(form.includes('id="'+id+'"'));
+    for(const id of ['trName','trDate','trTime','trSecond','trTarget','trCommand','trButton','trHistoryFirst','trTrigger','trReply','trSuccess','trTimeout'])assert(form.includes('id="'+id+'"'));
     assert(form.match(/<input\b[^>]*id="trDate"[^>]*>/)[0].includes('type="date"'));
     assert(form.match(/<input\b[^>]*id="trTime"[^>]*>/)[0].includes('type="time"'));
     const second=form.match(/<input\b[^>]*id="trSecond"[^>]*>/)[0];for(const attr of ['type="number"','min="0"','max="59"','step="1"'])assert(second.includes(attr));assert(form.includes('执行一次后不会自动重试'));
@@ -135,9 +135,10 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     run("cancelAutoEdit('scheduled_register')");
     const values={trName:'限时注册',trDate:'2026-10-30',trTime:'09:00',trSecond:'1',trTarget:'@dummy_bot',trCommand:'/start',trButton:'开始注册',trTrigger:'请输入注册码',trReply:'TEST-CODE',trSuccess:'注册成功',trTimeout:'45'};
     for(const [id,value] of Object.entries(values))element('#'+id).value=value;
+    element('#trHistoryFirst').checked=true;
     let body;context.api=async(_path,options)=>{body=JSON.parse(options.body);return {}};
     await run("saveAuto('scheduled_register')");
-    assert.deepStrictEqual(JSON.parse(JSON.stringify(body)),{type:'scheduled_register',name:'限时注册',scheduled_at:'2026-10-30T09:00:01',target:'@dummy_bot',command:'/start',click_btn:1,btn_text:'开始注册',keywords:'请输入注册码',reply_text:'TEST-CODE',success_kw:'注册成功',result_timeout:45,retries:0});
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(body)),{type:'scheduled_register',name:'限时注册',scheduled_at:'2026-10-30T09:00:01',target:'@dummy_bot',command:'/start',click_btn:1,btn_text:'开始注册',history_first:1,keywords:'请输入注册码',reply_text:'TEST-CODE',success_kw:'注册成功',result_timeout:45,retries:0});
   });
   await test('签到表单包含两段中文秒数标签、默认值及范围步进',async()=>{
     const form=html.slice(html.indexOf('id="af-signin"'),html.indexOf('id="af-grabcodes"'));
@@ -782,6 +783,11 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     app.switchAccount=id=>{switched=id};app.loadAccounts=async()=>{};app.renderTgCard=async()=>{rendered++};app.api=async(p,o)=>{assert.strictEqual(p,'/api/accounts');assert.strictEqual(JSON.parse(o.body).label,'测试小号');return {id:'new-account'}};
     q('#accountLabel').value='测试小号';await ex("manageAccount('create')");assert.strictEqual(switched,'new-account');assert.strictEqual(rendered,1);assert(q('#accountResult').textContent.includes('请输入手机号'));
     app.switchAccount=oldSwitch;app.loadAccounts=oldLoad;app.renderTgCard=oldRender;
+  });
+  await test('定时抢注测试按钮真实调用测试接口但不调用立即执行',async()=>{
+    ex("selectedAccount='default';accountEpoch++;autos=[{id:77,type:'scheduled_register',name:'测试抢注',enabled:1}];autoTestBusy.clear()");const requests=[];
+    app.window.confirm=()=>true;app.api=async(p,o)=>{requests.push([p,o]);return {ok:true,tested:true}};app.loadAutos=async()=>{};
+    await ex('testAuto(77)');assert.deepStrictEqual(requests.map(x=>x[0]),['/api/autos/77/test']);assert.strictEqual(requests[0][1].method,'POST');assert.strictEqual(ex('autoTestBusy.size'),0);app.window.confirm=()=>false;
   });
   await test('结构化detail及Pydantic数组提取人话，不输出input或对象',async()=>{
     for(const [detail,want] of [[{message:'当前账号任务不存在',ids:[42],input:'mock-secret'},'当前账号任务不存在'],[[{msg:'Field required',input:'mock-secret',loc:['body','name']}],'请补齐必填项'],[[{msg:'Input should be a valid integer',input:'mock-secret'}],'请填写有效的整数']]){

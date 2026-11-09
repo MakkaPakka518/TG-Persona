@@ -31,13 +31,14 @@ MAX_BYTES = 2 * 1024 * 1024
 SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
-    "poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at"
+    "poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first"
 ).split(","))
 INTEGER_LIMITS = {
     "click_btn": (0, 1), "is_chat": (0, 1), "signin_captcha": (0, 1),
     "enabled": (0, 1), "refresh_buttons": (0, 1), "click_times": (1, 20),
     "click_interval": (50, 3000), "retries": (0, 5), "chain_retry": (1, 5),
     "cooldown": (0, 86400), "poll_interval": (0, 90 * 86400), "result_timeout": (1, 300),
+    "history_first": (0, 1),
 }
 # Only effective fields are applied; custom windows/delays are NOT scheduled.
 APPLICABILITY = {
@@ -46,6 +47,7 @@ APPLICABILITY = {
                                "click_times", "click_interval")},
     "result_timeout": {"signin", "scheduled_register"},
     "scheduled_at": {"scheduled_register"},
+    "history_first": {"scheduled_register"},
     "poll_interval": {"keepalive", "grabcodes"},
     "cooldown": {"keepalive", "grabcodes", "redpacket"},
     "retries": {"signin", "custom", "keepalive"}, "chain_retry": {"custom"},
