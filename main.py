@@ -1615,7 +1615,7 @@ async def run_scheduled_register(a, test_only=False):
             "button_source": source, "test_only": bool(test_only), "popup": popup_text,
             "closed_retries": closed_retries, "retry_interval": retry_interval})
     if not test_only:
-        notify_event("success", a["name"], "定时抢注成功：" + target)
+        send_notify("✅ %s（%s）" % (a["name"], get_current_account_label()), "定时抢注成功：" + target)
     log.info("定时抢注成功 任务=%s 目标=%s", a["name"], target)
     return True
 
