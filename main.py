@@ -3702,7 +3702,8 @@ async def get_version(check: int = 0):
     """check=1 时实时向 GitHub 查询最新版本;否则返回缓存"""
     if check:
         try:
-            updater.fetch_latest()
+            # 同步网络请求必须离开事件循环，否则一次慢 DNS/连接会冻结整个面板。
+            await asyncio.get_running_loop().run_in_executor(None, updater.fetch_latest)
         except Exception as e:
             raise HTTPException(502, f"检查更新失败:{e}")
     return updater.snapshot()
