@@ -1313,8 +1313,7 @@ async def on_link_event(event):
                 continue
         elif chat not in watched:
             continue
-        first_bot = links[0]["bot"]
-        matched = [link for link in links if link["bot"] == first_bot]
+        matched = links
         if not matched:
             continue
         runtime = _auto_runtime_state()
@@ -1872,8 +1871,7 @@ async def run_link_register(a, links, test_only=False):
     credential = get_link_credential(a["id"])
     if not credential.get("u") or not credential.get("s"):
         return _task_failure(a, "请先在任务中填写注册用户名和安全码")
-    candidates = [item for item in (links or [])
-                  if item.get("bot") == expected_bot and item.get("payload")]
+    candidates = [item for item in (links or []) if item.get("payload")]
     if not candidates:
         return _task_failure(a, "消息中没有可用的注册链接")
     runtime = _link_runtime_state()
@@ -3695,9 +3693,7 @@ async def _latest_link_probe(a):
             recent = await get_runtime().client.get_messages(ent, limit=1)
             for message in recent or []:
                 links = _message_links(message)
-                if links:
-                    first_bot = links[0]["bot"]
-                    collected.extend(link for link in links if link["bot"] == first_bot)
+                collected.extend(links)
         except Exception:
             continue
     deduped, seen = [], set()
