@@ -32,7 +32,7 @@ SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
     "poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text"
+    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay"
 ).split(","))
 # Credentials are stored per-account in settings, never in task rows/exports.
 INTEGER_LIMITS = {
@@ -41,7 +41,7 @@ INTEGER_LIMITS = {
     "click_interval": (50, 3000), "retries": (0, 5), "chain_retry": (1, 5),
     "cooldown": (0, 86400), "poll_interval": (0, 90 * 86400), "result_timeout": (1, 300),
     "history_first": (0, 1), "link_mode": (0, 1), "link_limit": (2, 4), "link_wait": (2, 15),
-    "success_reply_enabled": (0, 1),
+    "success_reply_enabled": (0, 1), "success_reply_delay": (0, 300),
 }
 # Only effective fields are applied; custom windows/delays are NOT scheduled.
 APPLICABILITY = {
@@ -56,7 +56,7 @@ APPLICABILITY = {
     "retries": {"signin", "custom", "keepalive"}, "chain_retry": {"custom"},
     "link_mode": {"link_register"}, "link_limit": {"link_register"}, "link_wait": {"link_register"},
     "existing_kw": {"link_register"}, "success_reply_enabled": {"link_register"},
-    "success_reply_text": {"link_register"},
+    "success_reply_text": {"link_register"}, "success_reply_delay": {"link_register"},
 }
 RULE_COLUMNS = ("keywords", "regex", "action", "value", "reaction", "groups", "enabled")
 STEP_FIELDS = {

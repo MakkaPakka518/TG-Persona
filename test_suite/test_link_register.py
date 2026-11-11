@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import asyncio
 import json
 import unittest
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from test_backend import load_backend, message
 
@@ -209,7 +209,8 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         self.b["send_notify"].assert_called_once()
 
     async def test_success_can_reply_to_source_group(self):
-        aid = await self.create(success_reply_enabled=1, success_reply_text="拿下")
+        aid = await self.create(success_reply_enabled=1, success_reply_text="拿下",
+                                success_reply_delay=7)
         sends, phase = [], {"v": "card"}
 
         async def send(entity, text):
@@ -232,14 +233,17 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
 
         self.b["client"] = SimpleNamespace(send_message=AsyncMock(side_effect=send),
                                            get_messages=AsyncMock(side_effect=get_messages))
-        ok = await self.b["run_link_register"](
-            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_OK1"}],
-            source_chat=-100123)
+        with patch.object(asyncio, "sleep", new=AsyncMock()) as sleep:
+            ok = await self.b["run_link_register"](
+                self.row(aid), [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_OK1"}],
+                source_chat=-100123)
         self.assertTrue(ok)
+        sleep.assert_awaited_once_with(7)
         self.assertEqual(sends[-1], (-100123, "拿下"))
         detail = json.loads(self.b["conn"].execute(
             "SELECT detail FROM hits ORDER BY id DESC").fetchone()["detail"])
         self.assertEqual(detail["group_reply"], "拿下")
+        self.assertEqual(detail["group_reply_delay"], 7)
 
     async def test_random_mode_sends_only_one_link(self):
         aid = await self.create(link_mode=0)

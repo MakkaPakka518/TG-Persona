@@ -667,6 +667,63 @@ section.act,.fold.open .fold-b{animation:none}
     </div>
 
     <div class="card fold">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>群链接抢注</span><span class="cnt" id="aCntLink">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div class="hint" style="margin-bottom:10px">监听群消息里的 t.me 注册链接，自动发送 /start 参数、点击注册并提交用户名和安全码。</div>
+        <button class="btn addtask" type="button" onclick="openAutoForm('link_register')">＋ 添加群链接抢注</button>
+        <div id="aListLink"></div>
+        <div class="empty" id="aEmptyLink">暂无群链接抢注任务，点上面按钮添加</div>
+        <div class="autof" id="af-link_register"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑群链接抢注</b><button class="ghost" type="button" onclick="closeAutoForm('link_register')">关闭</button></div><form onsubmit="saveAuto('link_register');return false">
+          <label for="lkName">任务名称</label>
+          <input type="text" id="lkName" placeholder="如: 某群链接抢注" required>
+          <label>监控群</label>
+          <div class="hint" style="margin:0 0 8px">不勾 = 全部监听群</div>
+          <div id="lkGroups" class="grp-pick"></div>
+          <div class="hint">机器人从链接自动识别；仅处理 start=服务名-天数-Register_代码，例如 TEST-30-Register_xxx。</div>
+          <label for="lkButton">注册按钮关键词</label>
+          <input type="text" id="lkButton" value="注册" placeholder="如: 注册" required>
+          <label for="lkReady">进入注册状态关键词</label>
+          <input type="text" id="lkReady" value="已进入注册状态" placeholder="如: 已进入注册状态" required>
+          <label for="lkExisting">已有号关键词（选填，整句匹配）</label>
+          <textarea id="lkExisting" rows="2" maxlength="1000" placeholder="如: 很遗憾，您使用的是注册码，无法启用续期功能，请悉知"></textarea>
+          <div class="hint">命中后立即停止本轮，不再尝试下一条注册码。</div>
+          <label for="lkUser">注册用户名</label>
+          <input type="text" id="lkUser" placeholder="如: 少年郎" autocomplete="off">
+          <label for="lkSecret">安全码</label>
+          <input type="password" id="lkSecret" placeholder="留空沿用已保存安全码" autocomplete="new-password">
+          <div class="hint">用户名和安全码单独保存在当前账号配置中，不会出现在任务列表、日志或导出文件里。</div>
+          <label for="lkMode">链接模式</label>
+          <select id="lkMode">
+            <option value="0">随机一条链接</option>
+            <option value="1" selected>串行接力：上一条明确失效再发下一条</option>
+          </select>
+          <div class="flex">
+            <div><label for="lkLimit">最多尝试链接数</label><input type="number" id="lkLimit" value="4" min="2" max="4" step="1" inputmode="numeric"></div>
+            <div><label for="lkWwait">失效判定等待（秒）</label><input type="number" id="lkWwait" value="5" min="2" max="15" step="1" inputmode="numeric"></div>
+          </div>
+          <label for="lkSuccess">成功关键词</label>
+          <input type="text" id="lkSuccess" value="注册成功" placeholder="如: 注册成功,创建成功" required>
+          <label for="lkFail">失败关键词（选填，逗号分隔）</label>
+          <input type="text" id="lkFail" placeholder="如: 注册失败,名额已满">
+          <label class="link-reply-toggle" style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="lkGroupReply" style="width:auto"> 注册成功后回原群发送消息</label>
+          <div id="lkGroupReplyFields" class="hidden">
+            <label for="lkGroupReplyText">群内发送内容</label>
+            <input type="text" id="lkGroupReplyText" maxlength="1000" placeholder="如: 拿下">
+            <label for="lkGroupReplyDelay">延迟发送（秒）</label>
+            <input type="number" id="lkGroupReplyDelay" value="5" min="0" max="300" step="1" inputmode="numeric">
+          </div>
+          <label for="lkTimeout">每步最长等待（秒）</label>
+          <input type="number" id="lkTimeout" value="30" min="1" max="300" step="1" inputmode="numeric" required>
+          <div class="hint">每条链接只发送一次；只有明确提示注册码已被使用才尝试下一条；同一机器人同时只跑一个流程，成功只提交一次账号信息。</div>
+          <div class="flex" style="margin-top:14px">
+            <button class="btn" type="submit">保存</button>
+            <button class="ghost" type="button" onclick="cancelAutoEdit('link_register')" id="lkCancel" style="display:none">取消编辑</button>
+          </div>
+        </form></div></div>
+      </div>
+    </div>
+
+    <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M7 21h10M12 17a5 5 0 0 0 5-5V5a2 2 0 0 0-4 0v6M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7"/></svg>验证码识别</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <div class="flex" style="gap:18px">
@@ -824,61 +881,6 @@ section.act,.fold.open .fold-b{animation:none}
           <div class="flex" style="margin-top:14px">
             <button class="btn" type="submit">保存</button>
             <button class="ghost" type="button" onclick="cancelAutoEdit('grabcodes')" id="gCancel" style="display:none">取消编辑</button>
-          </div>
-        </form></div></div>
-      </div>
-    </div>
-
-    <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>群链接抢注</span><span class="cnt" id="aCntLink">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <div class="hint" style="margin-bottom:10px">监听群消息里的 t.me 注册链接，自动发送 /start 参数、点击注册并提交用户名和安全码。</div>
-        <button class="btn addtask" type="button" onclick="openAutoForm('link_register')">＋ 添加群链接抢注</button>
-        <div id="aListLink"></div>
-        <div class="empty" id="aEmptyLink">暂无群链接抢注任务，点上面按钮添加</div>
-        <div class="autof" id="af-link_register"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑群链接抢注</b><button class="ghost" type="button" onclick="closeAutoForm('link_register')">关闭</button></div><form onsubmit="saveAuto('link_register');return false">
-          <label for="lkName">任务名称</label>
-          <input type="text" id="lkName" placeholder="如: 某群链接抢注" required>
-          <label>监控群</label>
-          <div class="hint" style="margin:0 0 8px">不勾 = 全部监听群</div>
-          <div id="lkGroups" class="grp-pick"></div>
-          <div class="hint">机器人从链接自动识别；仅处理 start=服务名-天数-Register_代码，例如 TEST-30-Register_xxx。</div>
-          <label for="lkButton">注册按钮关键词</label>
-          <input type="text" id="lkButton" value="注册" placeholder="如: 注册" required>
-          <label for="lkReady">进入注册状态关键词</label>
-          <input type="text" id="lkReady" value="已进入注册状态" placeholder="如: 已进入注册状态" required>
-          <label for="lkExisting">已有号关键词（选填，整句匹配）</label>
-          <textarea id="lkExisting" rows="2" maxlength="1000" placeholder="如: 很遗憾，您使用的是注册码，无法启用续期功能，请悉知"></textarea>
-          <div class="hint">命中后立即停止本轮，不再尝试下一条注册码。</div>
-          <label for="lkUser">注册用户名</label>
-          <input type="text" id="lkUser" placeholder="如: 少年郎" autocomplete="off">
-          <label for="lkSecret">安全码</label>
-          <input type="password" id="lkSecret" placeholder="留空沿用已保存安全码" autocomplete="new-password">
-          <div class="hint">用户名和安全码单独保存在当前账号配置中，不会出现在任务列表、日志或导出文件里。</div>
-          <label for="lkMode">链接模式</label>
-          <select id="lkMode">
-            <option value="0">随机一条链接</option>
-            <option value="1" selected>串行接力：上一条明确失效再发下一条</option>
-          </select>
-          <div class="flex">
-            <div><label for="lkLimit">最多尝试链接数</label><input type="number" id="lkLimit" value="4" min="2" max="4" step="1" inputmode="numeric"></div>
-            <div><label for="lkWwait">失效判定等待（秒）</label><input type="number" id="lkWwait" value="5" min="2" max="15" step="1" inputmode="numeric"></div>
-          </div>
-          <label for="lkSuccess">成功关键词</label>
-          <input type="text" id="lkSuccess" value="注册成功" placeholder="如: 注册成功,创建成功" required>
-          <label for="lkFail">失败关键词（选填，逗号分隔）</label>
-          <input type="text" id="lkFail" placeholder="如: 注册失败,名额已满">
-          <label class="link-reply-toggle" style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="lkGroupReply" style="width:auto"> 注册成功后回原群发送消息</label>
-          <div id="lkGroupReplyFields" class="hidden">
-            <label for="lkGroupReplyText">群内发送内容</label>
-            <input type="text" id="lkGroupReplyText" maxlength="1000" placeholder="如: 拿下">
-          </div>
-          <label for="lkTimeout">每步最长等待（秒）</label>
-          <input type="number" id="lkTimeout" value="30" min="1" max="300" step="1" inputmode="numeric" required>
-          <div class="hint">每条链接只发送一次；只有明确提示注册码已被使用才尝试下一条；同一机器人同时只跑一个流程，成功只提交一次账号信息。</div>
-          <div class="flex" style="margin-top:14px">
-            <button class="btn" type="submit">保存</button>
-            <button class="ghost" type="button" onclick="cancelAutoEdit('link_register')" id="lkCancel" style="display:none">取消编辑</button>
           </div>
         </form></div></div>
       </div>
@@ -1784,7 +1786,7 @@ function renderAutoList(type){
 function autoDesc(a){
   if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${a.signin_captcha?' · 验证码':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
   if(a.type==='scheduled_register')return `${esc(a.target)}，${esc(a.command)}，${esc(autoWindow(a))}，按钮 ${esc(a.btn_text)}${a.history_first?'，历史卡片优先':''}${Number(a.poll_interval)>0?'，关闭弹窗每 '+esc(String(a.poll_interval))+' 秒重试':''}，收到 ${esc(a.keywords)} 后回复，成功 ${esc(a.success_kw)}，每步等待 ${esc(String(a.result_timeout??30))}秒`;
-  if(a.type==='link_register')return `群:${esc(a.groups||'全部监听群')} · 自动识别机器人 · 按钮 ${esc(a.btn_text)}${Number(a.link_mode)===0?' · 随机一条':' · 串行最多 '+esc(String(a.link_limit??4))+' 条'} · 失效等待 ${esc(String(a.link_wait??5))}秒 · 成功 ${esc(a.success_kw)}${a.existing_kw?' · 已有号即停止':''}${a.success_reply_enabled?' · 成功后群内发送 '+esc(a.success_reply_text):''}${a.link_credential_set?' · 已保存账号信息':' · 未填写账号信息'}`;
+  if(a.type==='link_register')return `群:${esc(a.groups||'全部监听群')} · 自动识别机器人 · 按钮 ${esc(a.btn_text)}${Number(a.link_mode)===0?' · 随机一条':' · 串行最多 '+esc(String(a.link_limit??4))+' 条'} · 失效等待 ${esc(String(a.link_wait??5))}秒 · 成功 ${esc(a.success_kw)}${a.existing_kw?' · 已有号即停止':''}${a.success_reply_enabled?' · 成功后 '+esc(String(a.success_reply_delay??5))+' 秒群内发送 '+esc(a.success_reply_text):''}${a.link_credential_set?' · 已保存账号信息':' · 未填写账号信息'}`;
   if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}${a.poll_interval>0?' · 轮询'+a.poll_interval+'s@'+esc(a.target):''}`;
   if(a.type==='redpacket')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
   if(a.type==='keepalive'){
@@ -1839,7 +1841,7 @@ function editAutoItem(id){
     $('#lkName').value=a.name;$('#lkButton').value=a.btn_text||'注册';
     $('#lkReady').value=a.keywords||'已进入注册状态';$('#lkUser').value='';$('#lkSecret').value='';
     $('#lkExisting').value=a.existing_kw||'';$('#lkGroupReply').checked=!!a.success_reply_enabled;
-    $('#lkGroupReplyText').value=a.success_reply_text||'';$('#lkGroupReplyFields').classList.toggle('hidden',!$('#lkGroupReply').checked);
+    $('#lkGroupReplyText').value=a.success_reply_text||'';$('#lkGroupReplyDelay').value=a.success_reply_delay??5;$('#lkGroupReplyFields').classList.toggle('hidden',!$('#lkGroupReply').checked);
     $('#lkMode').value=String(Number(a.link_mode)===0?0:1);$('#lkLimit').value=Number(a.link_limit)||4;
     $('#lkWwait').value=Number(a.link_wait)||5;$('#lkSuccess').value=a.success_kw||'注册成功';
     $('#lkFail').value=a.fail_kw||'';$('#lkTimeout').value=a.result_timeout??30;
@@ -1872,7 +1874,7 @@ function cancelAutoEdit(t){
   ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
-    link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='5';$('#lkSuccess').value='注册成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
+    link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='5';$('#lkSuccess').value='注册成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';setVisualSteps('[]');$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'},
     keepalive:()=>{$('#kName').value='';$('#kTarget').value='';$('#kText').value='';$('#kEvery').value=7;$('#kUnit').value='86400';$('#kDel').value=10;$('#kCancel').style.display='none'}})[t]();
@@ -2062,17 +2064,18 @@ async function saveAuto(type){
     if(body.poll_interval&&!body.target)return toast('轮询模式需填写轮询机器人',1);
   }else if(type==='link_register'){
     const mode=Number($('#lkMode').value),limit=Number($('#lkLimit').value),wait=Number($('#lkWwait').value),timeout=Number($('#lkTimeout').value);
-    const groupReply=$('#lkGroupReply').checked,groupReplyText=$('#lkGroupReplyText').value.trim();
+    const groupReply=$('#lkGroupReply').checked,groupReplyText=$('#lkGroupReplyText').value.trim(),groupReplyDelay=Number($('#lkGroupReplyDelay').value);
     body={type,name:$('#lkName').value.trim(),groups:getAutoGroups('link_register'),
       btn_text:$('#lkButton').value.trim(),keywords:$('#lkReady').value.trim(),
       success_kw:$('#lkSuccess').value.trim(),fail_kw:$('#lkFail').value.trim(),
       link_mode:mode,link_limit:limit,link_wait:wait,result_timeout:timeout,retries:0,
       existing_kw:$('#lkExisting').value.trim(),success_reply_enabled:groupReply?1:0,
-      success_reply_text:groupReplyText};
+      success_reply_text:groupReplyText,success_reply_delay:groupReplyDelay};
     if(!body.name||!body.btn_text||!body.keywords||!body.success_kw)return toast('请完整填写按钮、进入注册状态和成功关键词',1);
     if(![0,1].includes(mode)||!Number.isInteger(limit)||limit<2||limit>4||!Number.isInteger(wait)||wait<2||wait>15)return toast('链接模式/数量或失效等待无效',1);
     if(!Number.isInteger(timeout)||timeout<1||timeout>300)return toast('每步最长等待须为 1–300 秒',1);
     if(groupReply&&!groupReplyText)return toast('开启成功群回复后请填写发送内容',1);
+    if(!Number.isInteger(groupReplyDelay)||groupReplyDelay<0||groupReplyDelay>300)return toast('群回复延迟须为 0–300 秒',1);
     const user=$('#lkUser').value.trim(),secret=$('#lkSecret').value;
     if((user&&!secret)||(!user&&secret))return toast('用户名和安全码需同时填写；留空表示沿用已保存值',1);
     if(!wasEditing&&(!user||!secret))return toast('新增任务请填写注册用户名和安全码',1);
@@ -3092,6 +3095,7 @@ function logRow(h){
     add('进入状态',d.ready);
     add('最终回复',d.success||h.reply);
     add('群内发送',d.group_reply);
+    if(d.group_reply)add('群回复延迟',String(d.group_reply_delay??0)+' 秒');
     add('群回复失败',d.group_reply_error);
     add('失败原因',d.error);
   }else if(h.action==='scheduled_register'){

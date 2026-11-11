@@ -192,6 +192,7 @@ def db_init(database=None):
         ("existing_kw", "TEXT DEFAULT ''"),
         ("success_reply_enabled", "INTEGER DEFAULT 0"),
         ("success_reply_text", "TEXT DEFAULT ''"),
+        ("success_reply_delay", "INTEGER DEFAULT 5"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -1981,11 +1982,17 @@ async def run_link_register(a, links, test_only=False, source_chat=None):
                                 "error": "机器人明确回复失败： " + success_text[:120]})
                 _notify_task_failure(a, "链接注册失败：" + success_text[:120])
                 return False
+            if not test_only:
+                send_notify("✅ %s（%s）" % (a["name"], get_current_account_label()),
+                            "群链接抢注成功：" + target)
             group_reply, group_reply_error = "", ""
+            group_reply_delay = max(0, min(300, int(a["success_reply_delay"] or 0)))
             if (not test_only and source_chat is not None and a["success_reply_enabled"]
                     and str(a["success_reply_text"] or "").strip()):
                 group_reply = str(a["success_reply_text"] or "").strip()
                 try:
+                    if group_reply_delay:
+                        await asyncio.sleep(group_reply_delay)
                     await get_runtime().client.send_message(source_chat, group_reply)
                 except Exception as error:
                     group_reply_error = str(error)[:160]
@@ -1996,11 +2003,9 @@ async def run_link_register(a, links, test_only=False, source_chat=None):
                             "attempted": attempted, "payload": payload,
                             "button": str(getattr(button, "text", "") or ""), "popup": popup,
                             "ready": trigger_text, "success": success_text,
-                            "group_reply": group_reply, "group_reply_error": group_reply_error,
+                            "group_reply": group_reply, "group_reply_delay": group_reply_delay,
+                            "group_reply_error": group_reply_error,
                             "test_only": bool(test_only)})
-            if not test_only:
-                send_notify("✅ %s（%s）" % (a["name"], get_current_account_label()),
-                            "群链接抢注成功：" + target)
             log.info("群链接抢注成功 任务=%s 目标=%s", a["name"], target)
             return True
         return _task_failure(a, "本次尝试的注册码均已被使用", "")
@@ -3433,6 +3438,7 @@ class AutoIn(BaseModel):
     existing_kw: str = ""           # link_register: 已有号提示，命中后停止轮发
     success_reply_enabled: int = 0  # link_register: 成功后回来源群发送文本
     success_reply_text: str = ""
+    success_reply_delay: int = 5
 
 
 def _valid_auto(body: AutoIn):
@@ -3504,6 +3510,8 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "成功群回复开关只能为 0 或 1")
         if body.success_reply_enabled and not body.success_reply_text.strip():
             raise HTTPException(400, "开启成功群回复后请填写发送内容")
+        if body.success_reply_delay < 0 or body.success_reply_delay > 300:
+            raise HTTPException(400, "成功群回复延迟须为 0-300 秒")
         if len(body.existing_kw) > 1000 or len(body.success_reply_text) > 1000:
             raise HTTPException(400, "已有号关键词或成功群回复内容过长")
     if body.type == "grabcodes" and not body.reply_text.strip():
@@ -3528,7 +3536,7 @@ def _valid_auto(body: AutoIn):
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
               "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text")
+              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay")
 
 
 def _auto_vals(body: AutoIn, extra=None):
@@ -3543,7 +3551,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.cooldown, body.enabled, body.command_delay, body.button_delay, body.refresh_buttons, body.icon_url.strip(),
         body.result_delay, body.result_timeout, body.scheduled_at.strip(), body.history_first,
         body.link_mode, body.link_limit, body.link_wait, body.existing_kw.strip(),
-        body.success_reply_enabled, body.success_reply_text.strip(),
+        body.success_reply_enabled, body.success_reply_text.strip(), body.success_reply_delay,
     ] + (extra or [])
 
 
