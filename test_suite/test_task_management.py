@@ -174,6 +174,26 @@ class TaskManagementTests(unittest.TestCase):
             self.assertEqual(row[key], self.row(aid)[key])
         self.assertEqual(row['enabled'], 0)
 
+    def test_code_register_export_import_and_single_group_validation(self):
+        aid = self.add(type='code_register', groups='-100123', target='@fixed_bot',
+                       btn_text='注册', keywords='注册状态', success_kw='成功', link_mode=1, link_limit=4)
+        self.dbs['default'].execute('INSERT INTO settings VALUES(?,?)', ('link_cred_' + str(aid), 'PRIVATE-CODE-CREDENTIAL'))
+        self.dbs['default'].commit()
+        exported = self.client.get('/api/tasks/export')
+        self.assertEqual(exported.status_code, 200)
+        self.assertNotIn('PRIVATE-CODE-CREDENTIAL', exported.text)
+        imported = self.imp(exported.json(), account='other', preview=False)
+        self.assertEqual(imported.status_code, 200, imported.text)
+        row = self.row(imported.json()['ids'][0], 'other')
+        self.assertEqual((row['groups'], row['target'], row['link_limit']), ('-100123', '@fixed_bot', 4))
+        before = self.snapshot('other')
+        for groups in ('', '-100123,-100456'):
+            data = exported.json()
+            data['automations'][0]['groups'] = groups
+            result = self.imp(data, account='other', preview=False)
+            self.assertEqual(result.status_code, 400)
+            self.assertEqual(self.snapshot('other'), before)
+
     def test_batch_default_apply_preserves_success(self):
         aid = self.add()
         db = self.dbs["default"]

@@ -48,15 +48,15 @@ APPLICABILITY = {
     **{k: {"signin"} for k in ("win_start", "win_end", "command_delay", "button_delay", "result_delay",
                                "refresh_buttons", "click_btn", "btn_text", "btn_emoji",
                                "click_times", "click_interval")},
-    "result_timeout": {"signin", "scheduled_register", "link_register", "button_register"},
+    "result_timeout": {"signin", "scheduled_register", "link_register", "button_register", "code_register"},
     "scheduled_at": {"scheduled_register"},
     "history_first": {"scheduled_register"},
     "poll_interval": {"keepalive", "grabcodes"},
     "cooldown": {"keepalive", "grabcodes", "redpacket"},
     "retries": {"signin", "custom", "keepalive"}, "chain_retry": {"custom"},
-    "link_mode": {"link_register"}, "link_limit": {"link_register"}, "link_wait": {"link_register"},
-    "existing_kw": {"link_register", "button_register"}, "success_reply_enabled": {"link_register", "button_register"},
-    "success_reply_text": {"link_register", "button_register"}, "success_reply_delay": {"link_register", "button_register"},
+    "link_mode": {"link_register", "code_register"}, "link_limit": {"link_register", "code_register"}, "link_wait": {"link_register", "code_register"},
+    "existing_kw": {"link_register", "button_register", "code_register"}, "success_reply_enabled": {"link_register", "button_register", "code_register"},
+    "success_reply_text": {"link_register", "button_register", "code_register"}, "success_reply_delay": {"link_register", "button_register", "code_register"},
 }
 RULE_COLUMNS = ("keywords", "regex", "action", "value", "reaction", "groups", "enabled")
 STEP_FIELDS = {
@@ -187,7 +187,7 @@ def _check_fields(data, allowed):
             maximum = 262144 if key == "custom_steps" else 16384
             if not isinstance(value, str) or len(value) > maximum:
                 _bad(f"{key} 必须为字符串且不超过 {maximum} 字符")
-            if key == "type" and value not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register"):
+            if key == "type" and value not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register"):
                 _bad("未知任务类型")
             if key == "action" and value not in ("reply", "send"):
                 _bad("任务 action 必须为 reply/send")

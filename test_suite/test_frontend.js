@@ -848,6 +848,33 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert.strictEqual(requests[0][1].success_reply_text,'拿下');assert.strictEqual(requests[0][1].success_reply_delay,0);
     assert.strictEqual(requests[0][1].enabled,1);
   });
+  await test('兑换码抢注只能选一个群，保存固定Bot和现有接力配置',async()=>{
+    const select=html.match(/<select\b[^>]*id="crGroup"[^>]*>/)[0];
+    assert(!select.includes('multiple'));assert(select.includes('required'));
+    ex("selectedAccount='default';accountEpoch++;cancelAutoEdit('code_register')");
+    assert.strictEqual(q('#crGroup').value,'');assert.strictEqual(q('#crMode').value,'1');
+    assert.strictEqual(q('#crWait').value,'3');assert.strictEqual(q('#crExisting').value,'无法启用续期功能');
+    assert.strictEqual(q('#crGroupReply').checked,false);
+    q('#crName').value='兑换码任务';q('#crUser').value='tester';q('#crSecret').value='test-secret';
+    const requests=[];app.api=async(p,o)=>{requests.push([p,JSON.parse(o.body)]);return {ok:true,id:100}};app.loadAutos=async()=>{};
+    await ex("saveAuto('code_register')");assert.strictEqual(requests.length,0);
+    q('#crGroup').value='-100123';q('#crBot').value='@fixed_bot';
+    await ex("saveAuto('code_register')");
+    assert.strictEqual(requests[0][0],'/api/autos');const body=requests[0][1];
+    assert.strictEqual(body.type,'code_register');assert.strictEqual(body.groups,'-100123');assert.strictEqual(body.target,'@fixed_bot');
+    assert.strictEqual(body.link_limit,4);assert.strictEqual(body.link_mode,1);assert.strictEqual(body.link_wait,3);
+    assert.strictEqual(body.enabled,0);assert(!JSON.stringify(body).includes('test-secret'));
+    assert.strictEqual(requests[1][0],'/api/autos/100/link-credential');
+  });
+  await test('兑换码编辑保留单群Bot和零延迟，不回填安全码',async()=>{
+    ex("selectedAccount='default';accountEpoch++;autos=[{id:100,type:'code_register',name:'兑换码',groups:'-100456',target:'@another_bot',btn_text:'注册',keywords:'注册状态',success_kw:'成功',enabled:1,link_credential_set:true,link_mode:0,link_limit:4,link_wait:3,success_reply_enabled:1,success_reply_text:'拿下',success_reply_delay:0}];editAutoItem(100)");
+    assert.strictEqual(q('#crGroup').value,'-100456');assert.strictEqual(q('#crBot').value,'@another_bot');
+    assert.strictEqual(q('#crSecret').value,'');assert.strictEqual(q('#crReplyDelay').value,'0');
+    const requests=[];app.api=async(p,o)=>{requests.push([p,JSON.parse(o.body)]);return {ok:true}};
+    await ex("saveAuto('code_register')");assert.strictEqual(requests.length,1);
+    assert.strictEqual(requests[0][0],'/api/autos/100');assert.strictEqual(requests[0][1].groups,'-100456');
+    assert.strictEqual(requests[0][1].success_reply_delay,0);assert.strictEqual(requests[0][1].enabled,1);
+  });
   await test('结构化detail及Pydantic数组提取人话，不输出input或对象',async()=>{
     for(const [detail,want] of [[{message:'当前账号任务不存在',ids:[42],input:'mock-secret'},'当前账号任务不存在'],[[{msg:'Field required',input:'mock-secret',loc:['body','name']}],'请补齐必填项'],[[{msg:'Input should be a valid integer',input:'mock-secret'}],'请填写有效的整数']]){
       app.fetch=async()=>({ok:false,status:422,json:async()=>({detail})});await assert.rejects(()=>realApi('/api/autos/batch'),e=>e.message.includes(want)&&!e.message.includes('mock-secret')&&!e.message.includes('[object Object]'));

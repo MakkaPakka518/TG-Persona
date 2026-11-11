@@ -1164,6 +1164,15 @@ def _link_bot(target):
     return str(target or "").strip().lstrip("@").lower()
 
 
+def _message_register_codes(message, target):
+    """只提取正文里的完整兑换码，URL 仍交给群链接抢注。"""
+    text = str(getattr(message, "raw_text", "") or "")
+    text = re.sub(r"(?:https?://|tg://|(?:t|telegram)\.me/)\S+", " ", text, flags=re.I)
+    codes = dict.fromkeys(re.findall(r"[A-Za-z0-9_-]+", text))
+    return [{"bot": _link_bot(target), "payload": code}
+            for code in codes if _is_register_payload(code)]
+
+
 def _button_bot_url(url):
     """按钮只提供 Bot 身份；start 参数不替代任务配置的命令。"""
     from urllib.parse import parse_qs, urlsplit
@@ -1335,7 +1344,7 @@ async def on_link_event(event):
     if get_runtime().running["paused"] or not event.is_group or event.out:
         return
     autos = get_account_db().execute(
-        "SELECT * FROM automations WHERE enabled=1 AND type IN ('link_register','button_register')"
+        "SELECT * FROM automations WHERE enabled=1 AND type IN ('link_register','button_register','code_register')"
     ).fetchall()
     if not autos:
         return
@@ -1344,6 +1353,8 @@ async def on_link_event(event):
     chat = str(event.chat_id)
     watched = {r["chat_id"] for r in get_account_db().execute("SELECT chat_id FROM watched_groups").fetchall()}
     for a in autos:
+        if a["type"] == "code_register" and str(a["groups"] or "").strip() != chat:
+            continue
         groups = [g.strip() for g in str(a["groups"] or "").split(",") if g.strip()]
         if groups:
             in_scope = chat in groups
@@ -1363,6 +1374,8 @@ async def on_link_event(event):
         if a["type"] == "button_register":
             bot = _announcement_bot(message, a)
             matched = [{"bot": bot}] if bot else []
+        elif a["type"] == "code_register":
+            matched = _message_register_codes(message, a["target"])
         else:
             matched = links
         if not matched:
@@ -1519,7 +1532,7 @@ def _notify_signin_success(a, detail):
 
 
 def _notify_task_failure(a, message):
-    if a["type"] in ("link_register", "button_register"):
+    if a["type"] in ("link_register", "button_register", "code_register"):
         return  # 群链接抢注只在成功时推送，失败与待确认仅保留日志。
     context = _failure_context.get()
     if context is not None and context["id"] == a["id"]:
@@ -1922,7 +1935,8 @@ async def _await_link_stage(ent, min_id, baseline, invalid_kw, existing_kw, butt
 
 async def run_link_register(a, links, test_only=False, source_chat=None):
     """群链接抢注：逐条 /start，明确失效才发下一条，只完成一次注册。"""
-    expected_bot = str((links or [{}])[0].get("bot") or "").strip().lower()
+    expected_bot = (_link_bot(a["target"]) if a["type"] == "code_register"
+                    else str((links or [{}])[0].get("bot") or "").strip().lower())
     target = "@" + expected_bot if expected_bot else ""
     button_kw = str(a["btn_text"] or "").strip()
     ready_kw = str(a["keywords"] or "").strip()
@@ -1956,7 +1970,7 @@ async def run_link_register(a, links, test_only=False, source_chat=None):
         return _task_unconfirmed(a, "同一机器人的上一个注册流程仍在进行，本条消息已跳过")
     runtime.link_running.add(expected_bot)
     ent = await resolve_entity("@" + expected_bot)
-    if ent is None:
+    if ent is None or (a["type"] == "code_register" and not getattr(ent, "bot", False)):
         runtime.link_running.discard(expected_bot)
         return _task_failure(a, "注册链接中的机器人解析失败")
     attempted, last_text, popup = [], "", ""
@@ -1983,9 +1997,9 @@ async def run_link_register(a, links, test_only=False, source_chat=None):
                 ent, sent.id, baseline, invalid_kw, existing_kw, button_kw, wait, timeout)
             last_text = text or last_text
             if state == "existing":
-                add_hit("link_register", False, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
+                add_hit(a["type"], False, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
                         content=payload, reply=text,
-                        detail={"kind": "link_register", "task": a["name"], "bot": target,
+                        detail={"kind": a["type"], "task": a["name"], "bot": target,
                                 "status": "existing_account", "attempted": attempted,
                                 "payload": payload, "reply": text,
                                 "error": "命中已有号关键词，已停止轮发"})
@@ -3549,7 +3563,7 @@ class AutoIn(BaseModel):
 
 
 def _valid_auto(body: AutoIn):
-    if body.type not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register"):
+    if body.type not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register"):
         raise HTTPException(400, "未知任务类型")
     if not body.name.strip():
         raise HTTPException(400, "请填写任务名称")
@@ -3604,7 +3618,7 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "历史卡片优先模式只能为 0 或 1")
         if body.poll_interval and (body.poll_interval < 1 or body.poll_interval > 300 or not body.fail_kw.strip()):
             raise HTTPException(400, "关闭弹窗重试需填写关键词，间隔应为 1-300 秒")
-    if body.type in ("link_register", "button_register"):
+    if body.type in ("link_register", "button_register", "code_register"):
         if not all(value.strip() for value in (body.btn_text, body.keywords, body.success_kw)):
             raise HTTPException(400, "群链接抢注需填写注册按钮、进入注册状态关键词和成功关键词")
         if body.link_mode not in (0, 1):
@@ -3626,6 +3640,11 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "请填写群开注关键词和群按钮文字")
         if max(len(body.announcement_kw), len(body.announcement_button), len(body.command)) > 1000:
             raise HTTPException(400, "开注关键词、按钮文字或首条指令过长")
+    if body.type == "code_register":
+        if not re.fullmatch(r"-[1-9][0-9]*", body.groups.strip()):
+            raise HTTPException(400, "兑换码抢注必须选择且只能选择一个监听群")
+        if not re.fullmatch(r"@?[A-Za-z0-9_]{4,32}", body.target.strip()):
+            raise HTTPException(400, "请填写该群的 Bot 用户名，如 @example_bot")
     if body.type == "grabcodes" and not body.reply_text.strip():
         raise HTTPException(400, "抢注需要填写动作文本(支持 {code} 占位符)")
     if body.type == "grabcodes" and body.poll_interval:
@@ -3788,7 +3807,7 @@ async def delete_auto(aid: int):
 
 @app.post("/api/autos/{aid}/link-credential")
 async def save_link_credential(aid: int, body: dict):
-    row = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('link_register','button_register')", (aid,)).fetchone()
+    row = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('link_register','button_register','code_register')", (aid,)).fetchone()
     if row is None:
         raise HTTPException(404, "群链接抢注任务不存在")
     user = str((body or {}).get("user") or "")
@@ -3817,7 +3836,7 @@ async def run_auto_now(aid: int):
 
 @app.post("/api/autos/{aid}/test")
 async def test_scheduled_auto(aid: int):
-    a = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('scheduled_register','link_register')", (aid,)).fetchone()
+    a = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('scheduled_register','link_register','code_register')", (aid,)).fetchone()
     if not a:
         raise HTTPException(404, "可测试任务不存在")
     if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
@@ -3825,7 +3844,7 @@ async def test_scheduled_auto(aid: int):
     runtime = _auto_runtime_state()
     if aid in runtime.auto_tasks or aid in runtime.auto_workers:
         raise HTTPException(409, "任务正在执行,请勿重复测试")
-    if a["type"] == "link_register":
+    if a["type"] in ("link_register", "code_register"):
         links = await _latest_link_probe(a)
         if not links:
             raise HTTPException(400, "所选群最近一条消息里没有可用的注册链接")
@@ -3857,7 +3876,8 @@ async def _latest_link_probe(a):
                 continue
             recent = await get_runtime().client.get_messages(ent, limit=1)
             for message in recent or []:
-                links = _message_links(message)
+                links = (_message_register_codes(message, a["target"]) if a["type"] == "code_register"
+                         else _message_links(message))
                 collected.extend(links)
         except Exception:
             continue
@@ -4011,7 +4031,7 @@ async def resolve_anomaly(aid: int, body: dict):
         db.commit()
         _maybe_notify_global_signin_summary()
         return {"ok": True, "action": action}
-    if row["type"] in ("scheduled_register", "link_register", "button_register"):
+    if row["type"] in ("scheduled_register", "link_register", "button_register", "code_register"):
         raise HTTPException(400, "该任务由触发条件执行，请确认配置后重新启用")
     if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         raise HTTPException(409, "TG 尚未登录")
@@ -4259,7 +4279,7 @@ async def get_logs(n: int = 60, kind: str = "", q: str = ""):
     kind = (kind or "").strip()
     if kind == "reply":
         where, params = "action IN ('reply','react','both')", []
-    elif kind in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register"):
+    elif kind in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register"):
         where, params = "action=?", [kind]
     else:
         where, params = "1=1", []
@@ -4284,7 +4304,7 @@ async def get_logs(n: int = 60, kind: str = "", q: str = ""):
     if q.strip():
         return {"hits": out, "counts": {}}
     counts = {"reply": 0, "signin": 0, "scheduled_register": 0, "grabcodes": 0, "redpacket": 0, "custom": 0,
-              "keepalive": 0, "link_register": 0, "button_register": 0}
+              "keepalive": 0, "link_register": 0, "button_register": 0, "code_register": 0}
     for r in get_account_db().execute("SELECT action, COUNT(*) c FROM hits GROUP BY action").fetchall():
         k = "reply" if r["action"] in ("reply", "react", "both") else r["action"]
         if k in counts:
