@@ -433,6 +433,7 @@ html[data-theme="light"] .switch{background:#cbd6c5}
   .form-actions,.actrow{gap:7px}.form-actions button,.actrow button{padding-inline:6px}.auto-actions button{font-size:11px}.status-pill{padding:5px 7px}.id-card{gap:10px}.avatar.lg{width:48px;height:48px}.id-name{font-size:16px}
   .toast{top:66px}.autof-card{padding:14px}.autof-head{top:-14px;margin:-14px -14px 12px;padding:12px 14px 10px}
   #af-scheduled_register input:not([type=checkbox]),#af-scheduled_register textarea,#af-scheduled_register button,.timed-history-toggle{min-height:44px}
+  #af-link_register input:not([type=checkbox]),#af-link_register textarea,#af-link_register button,#af-link_register select{min-height:44px}
   #aListTimed .auto-actions button{min-height:44px}
   #foldTg input,#foldTg select,#foldTg button{min-height:44px}
 }
@@ -829,6 +830,54 @@ section.act,.fold.open .fold-b{animation:none}
     </div>
 
     <div class="card fold">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>群链接抢注</span><span class="cnt" id="aCntLink">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div class="hint" style="margin-bottom:10px">监听群消息里的 t.me 注册链接，自动发送 /start 参数、点击注册并提交用户名和安全码。</div>
+        <button class="btn addtask" type="button" onclick="openAutoForm('link_register')">＋ 添加群链接抢注</button>
+        <div id="aListLink"></div>
+        <div class="empty" id="aEmptyLink">暂无群链接抢注任务，点上面按钮添加</div>
+        <div class="autof" id="af-link_register"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑群链接抢注</b><button class="ghost" type="button" onclick="closeAutoForm('link_register')">关闭</button></div><form onsubmit="saveAuto('link_register');return false">
+          <label for="lkName">任务名称</label>
+          <input type="text" id="lkName" placeholder="如: 某群链接抢注" required>
+          <label>监控群</label>
+          <div class="hint" style="margin:0 0 8px">不勾 = 全部监听群</div>
+          <div id="lkGroups" class="grp-pick"></div>
+          <label for="lkTarget">目标机器人（@username）</label>
+          <input type="text" id="lkTarget" placeholder="如: @testkky_makka_bot" required>
+          <label for="lkButton">注册按钮关键词</label>
+          <input type="text" id="lkButton" value="注册" placeholder="如: 注册" required>
+          <label for="lkReady">进入注册状态关键词</label>
+          <input type="text" id="lkReady" value="已进入注册状态" placeholder="如: 已进入注册状态" required>
+          <label for="lkUser">注册用户名</label>
+          <input type="text" id="lkUser" placeholder="如: 少年郎" autocomplete="off">
+          <label for="lkSecret">安全码</label>
+          <input type="password" id="lkSecret" placeholder="留空沿用已保存安全码" autocomplete="new-password">
+          <div class="hint">用户名和安全码单独保存在当前账号配置中，不会出现在任务列表、日志或导出文件里。</div>
+          <label for="lkMode">链接模式</label>
+          <select id="lkMode">
+            <option value="0">随机一条链接</option>
+            <option value="1" selected>串行接力：上一条明确失效再发下一条</option>
+          </select>
+          <div class="flex">
+            <div><label for="lkLimit">最多尝试链接数</label><input type="number" id="lkLimit" value="4" min="2" max="4" step="1" inputmode="numeric"></div>
+            <div><label for="lkWwait">失效判定等待（秒）</label><input type="number" id="lkWwait" value="5" min="2" max="15" step="1" inputmode="numeric"></div>
+          </div>
+          <label for="lkSuccess">成功关键词</label>
+          <input type="text" id="lkSuccess" value="注册成功" placeholder="如: 注册成功,创建成功" required>
+          <label for="lkFail">失败关键词（选填，逗号分隔）</label>
+          <input type="text" id="lkFail" placeholder="如: 注册失败,名额已满">
+          <label for="lkTimeout">每步最长等待（秒）</label>
+          <input type="number" id="lkTimeout" value="30" min="1" max="300" step="1" inputmode="numeric" required>
+          <div class="hint">每条链接只发送一次；只有明确提示注册码已被使用才尝试下一条；同一机器人同时只跑一个流程，成功只提交一次账号信息。</div>
+          <div class="flex" style="margin-top:14px">
+            <button class="btn" type="submit">保存</button>
+            <button class="ghost" type="button" onclick="cancelAutoEdit('link_register')" id="lkCancel" style="display:none">取消编辑</button>
+          </div>
+        </form></div></div>
+      </div>
+    </div>
+
+    <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>自定义任务</span><span class="cnt" id="aCntCustom">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <button class="btn addtask" type="button" onclick="openAutoForm('custom')">＋ 添加自定义任务</button>
@@ -999,6 +1048,7 @@ section.act,.fold.open .fold-b{animation:none}
       <button data-k="anomaly" onclick="pickLogKind('anomaly')">异常</button>
       <button data-k="signin" onclick="pickLogKind('signin')">签到</button>
       <button data-k="scheduled_register" onclick="pickLogKind('scheduled_register')">定时抢注</button>
+      <button data-k="link_register" onclick="pickLogKind('link_register')">链接抢注</button>
       <button data-k="grabcodes" onclick="pickLogKind('grabcodes')">抢注</button>
       <button data-k="redpacket" onclick="pickLogKind('redpacket')">红包</button>
       <button data-k="custom" onclick="pickLogKind('custom')">自定义</button>
@@ -1680,9 +1730,9 @@ async function applyBatch(){
   finally{if(isCurrentAccount(p.c)){batchBusy=false;$('#batchPreviewBtn').disabled=false;$('#batchApplyBtn').disabled=true}}
 }
 
-const AUTO_TYPE={signin:'签到',scheduled_register:'定时抢注',grabcodes:'抢注',redpacket:'抢红包',custom:'自定义',keepalive:'群聊'};
+const AUTO_TYPE={signin:'签到',scheduled_register:'定时抢注',grabcodes:'抢注',redpacket:'抢红包',custom:'自定义',keepalive:'群聊',link_register:'群链接抢注'};
 const ACTIONS={signin:'reply',grabcodes:'reply',redpacket:'reply'};
-const AUTO_MAP={signin:['Sign','签到'],scheduled_register:['Timed','定时抢注'],grabcodes:['Grab','抢注'],redpacket:['Pack','抢红包'],custom:['Custom','自定义'],keepalive:['Keep','保号']};
+const AUTO_MAP={signin:['Sign','签到'],scheduled_register:['Timed','定时抢注'],grabcodes:['Grab','抢注'],redpacket:['Pack','抢红包'],custom:['Custom','自定义'],keepalive:['Keep','保号'],link_register:['Link','链接']};
 
 async function loadAutos(){
   const c=accountContext();
@@ -1708,7 +1758,7 @@ function renderAutoList(type){
       </div>
 
       ${open?`<div class="auto-details"><div class="s">${autoDesc(a)}</div><div class="s">归属当前账号：${esc(label)}（${esc(c.id)}）</div><div class="s">有效窗口：${esc(autoWindow(a))}</div><pre class="auto-result">${esc(autoLastResult(a))}</pre>${assistantBlock(a)}</div>`:''}
-      <div class="auto-actions">${a.type==='scheduled_register'?action('test',autoTestBusy.has(a.id)?'测试中…':'测试流程',autoTestBusy.has(a.id)?'disabled':''):''}${action('toggle',a.enabled?'停用':'启用')}${action('edit','编辑')}${action('duplicate','复制')}${action('delete','删除')}</div>
+      <div class="auto-actions">${['scheduled_register','link_register'].includes(a.type)?action('test',autoTestBusy.has(a.id)?'测试中…':'测试流程',autoTestBusy.has(a.id)?'disabled':''):''}${action('toggle',a.enabled?'停用':'启用')}${action('edit','编辑')}${action('duplicate','复制')}${action('delete','删除')}</div>
     </div>`;
   }).join('');
   for(const holder of box.querySelectorAll('[data-task-icon]')){const a=list.find(x=>x.id===Number(holder.dataset.taskIcon));if(a)holder.appendChild(makeTaskIcon(a.name,a.icon_url))}
@@ -1727,6 +1777,7 @@ function renderAutoList(type){
 function autoDesc(a){
   if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${a.signin_captcha?' · 验证码':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
   if(a.type==='scheduled_register')return `${esc(a.target)}，${esc(a.command)}，${esc(autoWindow(a))}，按钮 ${esc(a.btn_text)}${a.history_first?'，历史卡片优先':''}${Number(a.poll_interval)>0?'，关闭弹窗每 '+esc(String(a.poll_interval))+' 秒重试':''}，收到 ${esc(a.keywords)} 后回复，成功 ${esc(a.success_kw)}，每步等待 ${esc(String(a.result_timeout??30))}秒`;
+  if(a.type==='link_register')return `群:${esc(a.groups||'全部监听群')} · ${esc(a.target)} · 按钮 ${esc(a.btn_text)}${Number(a.link_mode)===0?' · 随机一条':' · 串行最多 '+esc(String(a.link_limit??4))+' 条'} · 失效等待 ${esc(String(a.link_wait??5))}秒 · 成功 ${esc(a.success_kw)}${a.link_credential_set?' · 已保存账号信息':' · 未填写账号信息'}`;
   if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}${a.poll_interval>0?' · 轮询'+a.poll_interval+'s@'+esc(a.target):''}`;
   if(a.type==='redpacket')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
   if(a.type==='keepalive'){
@@ -1777,6 +1828,13 @@ function editAutoItem(id){
     $('#trClosedRetry').checked=Number(a.poll_interval)>0;$('#trClosedKeywords').value=a.fail_kw||'自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value=Number(a.poll_interval)>0?a.poll_interval:5;$('#trClosedRetryFields').classList.toggle('hidden',!$('#trClosedRetry').checked);
     $('#trReply').value=a.reply_text||'';$('#trSuccess').value=a.success_kw||'';$('#trTimeout').value=a.result_timeout??30;
     $('#trCancel').style.display='inline-block';
+  }else if(t==='link_register'){
+    $('#lkName').value=a.name;$('#lkTarget').value=a.target||'';$('#lkButton').value=a.btn_text||'注册';
+    $('#lkReady').value=a.keywords||'已进入注册状态';$('#lkUser').value='';$('#lkSecret').value='';
+    $('#lkMode').value=String(Number(a.link_mode)===0?0:1);$('#lkLimit').value=Number(a.link_limit)||4;
+    $('#lkWwait').value=Number(a.link_wait)||5;$('#lkSuccess').value=a.success_kw||'注册成功';
+    $('#lkFail').value=a.fail_kw||'';$('#lkTimeout').value=a.result_timeout??30;
+    setAutoGroups('link_register',a.groups);$('#lkCancel').style.display='inline-block';
   }else if(t==='grabcodes'){
     $('#gName').value=a.name;setAutoGroups('grabcodes',a.groups);$('#gKeywords').value=a.keywords;
     $('#gText').value=a.reply_text;$('#gCd').value=a.cooldown;
@@ -1796,7 +1854,7 @@ function editAutoItem(id){
     $('#pCd').value=a.cooldown;$('#pCancel').style.display='inline-block';
   }
   openAutoForm(editAuto.type);
-  const first={signin:'#sName',scheduled_register:'#trName',grabcodes:'#gName',custom:'#cName',redpacket:'#pName',keepalive:'#kName'}[editAuto.type];
+  const first={signin:'#sName',scheduled_register:'#trName',grabcodes:'#gName',custom:'#cName',redpacket:'#pName',keepalive:'#kName',link_register:'#lkName'}[editAuto.type];
   const box=document.querySelector('#af-'+editAuto.type+' .autof-card');if(box)box.scrollIntoView({block:'start'});
   toast('编辑中,改完点保存');
 }
@@ -1805,6 +1863,7 @@ function cancelAutoEdit(t){
   ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
+    link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkTarget').value='';$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='5';$('#lkSuccess').value='注册成功';$('#lkFail').value='';$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';setVisualSteps('[]');$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'},
     keepalive:()=>{$('#kName').value='';$('#kTarget').value='';$('#kText').value='';$('#kEvery').value=7;$('#kUnit').value='86400';$('#kDel').value=10;$('#kCancel').style.display='none'}})[t]();
@@ -1901,10 +1960,11 @@ function applyStepTemplate(){
   if($('#cSteps').value.trim()&&$('#cSteps').value.trim()!=='[]'&&!window.confirm('使用模板会替换现有步骤。确定替换？'))return;
   visualSteps=JSON.parse(JSON.stringify(STEP_TEMPLATES[key]));syncStepJSON();renderStepCards();
 }
-const autoGroupSel={grabcodes:new Set(),redpacket:new Set()};
-for(const [id,type] of [['gGroups','grabcodes'],['pGroups','redpacket']])$('#'+id).addEventListener('click',e=>{const b=e.target.closest('[data-auto-group]');if(b&&$('#'+id).contains(b))toggleAutoGroup(type,b.dataset.autoGroup)});
+const autoGroupSel={grabcodes:new Set(),redpacket:new Set(),link_register:new Set()};
+const AUTO_GROUP_BOX={grabcodes:'gGroups',redpacket:'pGroups',link_register:'lkGroups'};
+for(const [id,type] of [['gGroups','grabcodes'],['pGroups','redpacket'],['lkGroups','link_register']])$('#'+id).addEventListener('click',e=>{const b=e.target.closest('[data-auto-group]');if(b&&$('#'+id).contains(b))toggleAutoGroup(type,b.dataset.autoGroup)});
 function renderAutoGroups(type){
-  const box=document.getElementById(type==='grabcodes'?'gGroups':'pGroups');
+  const box=document.getElementById(AUTO_GROUP_BOX[type]);
   if(!box)return;
   const sel=autoGroupSel[type];
   if(!watchedGroups.length){box.innerHTML='<div class="empty" style="padding:6px">还没有监听群,先去「群组」页添加</div>';return}
@@ -1946,7 +2006,7 @@ function closeAutoForm(type){
 async function saveAuto(type){
   const c=editAutoAccount||accountContext(),wasEditing=!!editAuto;
   if(!isCurrentAccount(c))return toast('账号已切换，请重新打开任务再保存',1);
-  let body,url='/api/autos';
+  let body,url='/api/autos',linkCredential=null;
   if(type==='signin'){
     body={type,name:$('#sName').value.trim(),target:$('#sTarget').value.trim(),command:$('#sCmd').value.trim(),icon_url:$('#sIconUrl').value.trim(),
       is_chat:$('#sIsChat').checked?1:0,
@@ -1991,6 +2051,20 @@ async function saveAuto(type){
       target:$('#gBot').value.trim(),command:$('#gProbe').value.trim()||'/start',poll_interval:+$('#gPoll').value||0};
     if(!body.name||!body.reply_text)return toast('请填写名称和动作文本',1);
     if(body.poll_interval&&!body.target)return toast('轮询模式需填写轮询机器人',1);
+  }else if(type==='link_register'){
+    const mode=Number($('#lkMode').value),limit=Number($('#lkLimit').value),wait=Number($('#lkWwait').value),timeout=Number($('#lkTimeout').value);
+    body={type,name:$('#lkName').value.trim(),target:$('#lkTarget').value.trim(),groups:getAutoGroups('link_register'),
+      btn_text:$('#lkButton').value.trim(),keywords:$('#lkReady').value.trim(),
+      success_kw:$('#lkSuccess').value.trim(),fail_kw:$('#lkFail').value.trim(),
+      link_mode:mode,link_limit:limit,link_wait:wait,result_timeout:timeout,retries:0};
+    if(!body.name||!body.target||!body.btn_text||!body.keywords||!body.success_kw)return toast('请完整填写目标、按钮、进入注册状态和成功关键词',1);
+    if(!/^@?[A-Za-z0-9_]{4,32}$/.test(body.target))return toast('目标机器人须为 @username',1);
+    if(![0,1].includes(mode)||!Number.isInteger(limit)||limit<2||limit>4||!Number.isInteger(wait)||wait<2||wait>15)return toast('链接模式/数量或失效等待无效',1);
+    if(!Number.isInteger(timeout)||timeout<1||timeout>300)return toast('每步最长等待须为 1–300 秒',1);
+    const user=$('#lkUser').value.trim(),secret=$('#lkSecret').value;
+    if((user&&!secret)||(!user&&secret))return toast('用户名和安全码需同时填写；留空表示沿用已保存值',1);
+    if(!wasEditing&&(!user||!secret))return toast('新增任务请填写注册用户名和安全码',1);
+    if(user&&secret)linkCredential={user,secret};
   }else if(type==='custom'){
     let steps;
     try{steps=parseSteps($('#cSteps').value)}catch(e){return toast(e.message,1)}
@@ -2016,8 +2090,14 @@ async function saveAuto(type){
   }
   if(editAuto){url='/api/autos/'+editAuto.id;body=Object.assign(body,{enabled:editAuto.enabled})}
   try{
-    await api(url,{method:wasEditing?'PUT':'POST',body:JSON.stringify(body),_account:c});
+    const saved=await api(url,{method:wasEditing?'PUT':'POST',body:JSON.stringify(body),_account:c});
     if(!isCurrentAccount(c))return;
+    const savedId=wasEditing?editAuto.id:(saved&&saved.id);
+    if(linkCredential&&savedId){
+      try{await api('/api/autos/'+savedId+'/link-credential',{method:'POST',body:JSON.stringify(linkCredential),_account:c})}
+      catch(e){if(isCurrentAccount(c))toast('任务已保存，但账号信息保存失败：'+e.message,1);return loadAutos()}
+      if(!isCurrentAccount(c))return;
+    }
     closeAutoForm(type);toast(wasEditing?'已更新':'已新增');editAuto=null;loadAutos();
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
@@ -2036,14 +2116,14 @@ async function runAuto(id){
   try{await api('/api/autos/'+id+'/run',{method:'POST'});toast('已触发,稍后查看日志')}catch(e){toast(e.message,1)}
 }
 async function testAuto(id){
-  const a=autos.find(x=>x.id===id),c=accountContext();if(!a||a.type!=='scheduled_register'||autoTestBusy.has(id))return;
-  if(!window.confirm('测试会立即真实发送、点击和回复，但不会消耗正式计划。确定测试「'+String(a.name||id)+'」？'))return;
-  autoTestBusy.add(id);renderAutoList('scheduled_register');
+  const a=autos.find(x=>x.id===id),c=accountContext();if(!a||!['scheduled_register','link_register'].includes(a.type)||autoTestBusy.has(id))return;
+  if(!window.confirm('测试会立即真实发送、点击和提交配置，但不会消耗正式计划。确定测试「'+String(a.name||id)+'」？'))return;
+  autoTestBusy.add(id);renderAutoList(a.type);
   try{
     const d=await api('/api/autos/'+id+'/test',{method:'POST',_account:c});if(!isCurrentAccount(c))return;
     toast(d.ok?'测试流程成功，请查看日志':'测试流程未成功，请查看日志',d.ok?0:1);await loadAutos();
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
-  finally{if(isCurrentAccount(c)){autoTestBusy.delete(id);renderAutoList('scheduled_register')}}
+  finally{if(isCurrentAccount(c)){autoTestBusy.delete(id);renderAutoList(a.type)}}
 }
 function renderAllAutoLists(){syncStopAllButton();Object.keys(AUTO_TYPE).forEach(renderAutoList)}
 async function stopAuto(id,c=accountContext()){
@@ -2894,7 +2974,7 @@ async function delRule(id){if(!confirm('删除规则 #'+id+'?'))return;try{await
 
 // ---------- 日志 ----------
 let logKind='reply';
-const LOG_KINDS={reply:'回复',anomaly:'异常',signin:'签到',scheduled_register:'定时抢注',grabcodes:'抢注',redpacket:'红包',custom:'自定义',keepalive:'群聊'};
+const LOG_KINDS={reply:'回复',anomaly:'异常',signin:'签到',scheduled_register:'定时抢注',link_register:'链接抢注',grabcodes:'抢注',redpacket:'红包',custom:'自定义',keepalive:'群聊'};
 function pickLogKind(k){
   if(k!==logKind)resetLogOpenState();
   logKind=k;
@@ -2965,6 +3045,7 @@ function logRow(h){
   let title='';
   if(h.action==='signin') title=(d.task||'签到')+(d.bot?(' · '+d.bot):'');
   else if(h.action==='scheduled_register') title=(d.task||'定时抢注')+(d.bot?('（'+d.bot+'）'):'');
+  else if(h.action==='link_register') title=(d.task||'链接抢注')+(d.bot?('（'+d.bot+'）'):'');
   else if(h.action==='custom') title=(d.task||'自定义任务');
   else if(h.action==='keepalive') title=(d.task||'群聊发言')+(d.group?(' · '+d.group):'');
   else if(h.action==='grabcodes'||h.action==='redpacket') title=(d.task||LOG_KINDS[h.action]||h.action)+(d.group?(' · '+d.group):'');
@@ -2986,6 +3067,17 @@ function logRow(h){
     if(d.refresh_buttons!=null)add('连点模式',Number(d.refresh_buttons)===0?'复用同一按钮':'刷新按钮状态');
     add('积分',d.points);
     if(!pending)add('失败原因',d.error);
+  }else if(h.action==='link_register'){
+    add('时间',new Date(h.ts*1000).toLocaleString('zh-CN'));
+    add('目标',d.bot||h.chat_id);
+    add('状态',pending?'待确认':h.ok===false?'失败':'成功');
+    add('已尝试',Array.isArray(d.attempted)?d.attempted.join(' → '):d.payload);
+    add('使用注册码',d.payload);
+    add('注册按钮',d.button);
+    add('弹窗',d.popup);
+    add('进入状态',d.ready);
+    add('最终回复',d.success||h.reply);
+    add('失败原因',d.error);
   }else if(h.action==='scheduled_register'){
     add('计划时间',String(d.scheduled_at||'').replace('T',' '));
     const source=d.button_source||'';
@@ -3015,7 +3107,7 @@ function logRow(h){
     add('规则',d.rule);
     add('指令',d.probe);
   }
-  if(pending){add('待确认原因',d.reason||d.error||'等待最终回复超时，结果仍未知');if(h.action==='signin')add('后续','本日不自动重发，请先核对机器人实际结果。');if(h.action==='scheduled_register')add('后续',d.test_only?'测试未改变正式计划，请核对机器人实际结果。':'一次性任务已停用，请核对机器人实际结果。')}
+  if(pending){add('待确认原因',d.reason||d.error||'等待最终回复超时，结果仍未知');if(h.action==='signin')add('后续','本日不自动重发，请先核对机器人实际结果。');if(h.action==='scheduled_register')add('后续',d.test_only?'测试未改变正式计划，请核对机器人实际结果。':'一次性任务已停用，请核对机器人实际结果。');if(h.action==='link_register')add('后续','链接抢注已停止，不会自动重发，请核对机器人实际结果。')}
   const logId=logStableId(h),open=logOpenIds.has(logId)?' open':'';
   return '<div class="logitem'+open+'" data-log-id="'+esc(logId)+'">'+
     '<div class="logrow"><span class="st '+ok+'">'+(pending?'待确认':ok==='ok'?'成功':(ok==='no'?'失败':'记录'))+'</span>'+

@@ -796,6 +796,27 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     app.window.confirm=()=>true;app.api=async(p,o)=>{requests.push([p,o]);return {ok:true,tested:true}};app.loadAutos=async()=>{};
     await ex('testAuto(77)');assert.deepStrictEqual(requests.map(x=>x[0]),['/api/autos/77/test']);assert.strictEqual(requests[0][1].method,'POST');assert.strictEqual(ex('autoTestBusy.size'),0);app.window.confirm=()=>false;
   });
+  await test('群链接抢注表单与凭据分离保存，任务体不含安全码',async()=>{
+    const form=html.slice(html.indexOf('id="af-link_register"'),html.indexOf('id="af-custom"'));
+    for(const id of ['lkName','lkGroups','lkTarget','lkButton','lkReady','lkUser','lkSecret','lkMode','lkLimit','lkWwait','lkSuccess','lkFail','lkTimeout'])assert(form.includes('id="'+id+'"'));
+    assert(form.includes('type="password"')&&form.includes('串行接力')&&form.includes('随机一条'));
+    ex("selectedAccount='default';accountEpoch++;editAuto=null;editAutoAccount=null;cancelAutoEdit('link_register')");
+    q('#lkName').value='链接抢注';q('#lkTarget').value='@testkky_makka_bot';q('#lkButton').value='注册';
+    q('#lkReady').value='已进入注册状态';q('#lkSuccess').value='注册成功';q('#lkUser').value='测试用户';q('#lkSecret').value='测试安全码';
+    q('#lkMode').value='1';q('#lkLimit').value='3';q('#lkWwait').value='6';q('#lkTimeout').value='30';
+    const requests=[];app.api=async(p,o)=>{requests.push([p,o]);return p==='/api/autos'?{ok:true,id:88}:{ok:true}};app.loadAutos=async()=>{};
+    await ex("saveAuto('link_register')");
+    assert.deepStrictEqual(requests.map(x=>x[0]),['/api/autos','/api/autos/88/link-credential']);
+    const body=JSON.parse(requests[0][1].body);
+    assert(!('lkUser' in body)&&!('link_secret' in body)&&!JSON.stringify(body).includes('测试安全码'));
+    assert.deepStrictEqual(body,{type:'link_register',name:'链接抢注',target:'@testkky_makka_bot',groups:'',btn_text:'注册',keywords:'已进入注册状态',success_kw:'注册成功',fail_kw:'',link_mode:1,link_limit:3,link_wait:6,result_timeout:30,retries:0});
+    assert.deepStrictEqual(JSON.parse(requests[1][1].body),{user:'测试用户',secret:'测试安全码'});
+  });
+  await test('群链接抢注测试按钮调用测试接口',async()=>{
+    ex("selectedAccount='default';accountEpoch++;autos=[{id:88,type:'link_register',name:'链接抢注',enabled:1}];autoTestBusy.clear()");const requests=[];
+    app.window.confirm=()=>true;app.api=async(p,o)=>{requests.push([p,o]);return {ok:true,tested:true}};app.loadAutos=async()=>{};
+    await ex('testAuto(88)');assert.deepStrictEqual(requests.map(x=>x[0]),['/api/autos/88/test']);assert.strictEqual(ex('autoTestBusy.size'),0);app.window.confirm=()=>false;
+  });
   await test('结构化detail及Pydantic数组提取人话，不输出input或对象',async()=>{
     for(const [detail,want] of [[{message:'当前账号任务不存在',ids:[42],input:'mock-secret'},'当前账号任务不存在'],[[{msg:'Field required',input:'mock-secret',loc:['body','name']}],'请补齐必填项'],[[{msg:'Input should be a valid integer',input:'mock-secret'}],'请填写有效的整数']]){
       app.fetch=async()=>({ok:false,status:422,json:async()=>({detail})});await assert.rejects(()=>realApi('/api/autos/batch'),e=>e.message.includes(want)&&!e.message.includes('mock-secret')&&!e.message.includes('[object Object]'));
