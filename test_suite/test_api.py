@@ -25,7 +25,7 @@ def probe():
     from fastapi.testclient import TestClient
     with tempfile.TemporaryDirectory(prefix='tg-api-test-') as tmp:
         base = Path(tmp)
-        for name in ('main.py', 'updater.py', 'VERSION', 'account_runtime.py', 'task_management.py', 'icon_library.py', 'ai_assistant.py'):
+        for name in ('main.py', 'updater.py', 'VERSION', 'account_runtime.py', 'task_management.py', 'icon_library.py', 'ai_assistant.py', 'data_migration.py'):
             (base / name).write_bytes((ROOT / name).read_bytes())
         (base / 'web').mkdir()
         (base / 'web/index.html').write_bytes((ROOT / 'web/index.html').read_bytes())
@@ -122,6 +122,12 @@ def probe():
             check(https_client.post('/api/backups/cleanup',json={'mode':'all','keep':True}).status_code==422, '清理保留数拒绝布尔值')
         with patch.object(main.updater,'cleanup_backups',side_effect=RuntimeError('更新正在运行')):
             check(https_client.post('/api/backups/cleanup',json={'mode':'all'}).status_code==409, '更新冲突时服务器拒绝清理')
+        migration=https_client.post('/api/migration/export',json={'panel_password':'Another-test-password-456','backup_password':'offline-backup-password'})
+        check(migration.status_code==200 and migration.content.startswith(b'TGPMIGRATION1\0'),'真实路由可导出加密整机迁移包')
+        import base64 as _b64
+        headers={'X-Panel-Password-B64':_b64.b64encode(b'Another-test-password-456').decode(),'X-Backup-Password-B64':_b64.b64encode(b'offline-backup-password').decode()}
+        preview=https_client.put('/api/migration/import',headers=headers,content=migration.content)
+        check(preview.status_code==200 and preview.json()['preview']['accounts']>=1,'真实路由可解密校验整机迁移包')
         new_task={'name':'delay-fixture','target':'@dummy','command':'/start','enabled':0,'command_delay':0,'button_delay':3.5,'refresh_buttons':0}
         delayed=https_client.post('/api/autos',json=new_task)
         check(delayed.status_code==200, '两段延迟任务创建可用')

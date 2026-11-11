@@ -192,6 +192,7 @@ html[data-theme="light"] .grp-pick .gp.on{color:#15803d}
 .ai-provider-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}#foldAiProviders button,#aiTestCard button,#sCaptchaProviders .gp,#aiTestProviders .gp{min-height:44px}
 #waterAiCard{min-width:0;overflow:hidden}#waterAiCard .fold-b,#waterAiCard .water-ai-time,#waterAiCard .water-ai-time>div{min-width:0;max-width:100%}
 #waterAiCard input:not([type=checkbox]),#waterAiCard textarea{width:100%;min-width:0;max-width:100%;box-sizing:border-box}.water-ai-time{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#migrationCard{min-width:0;overflow:hidden}#migrationCard input,#migrationCard button{min-height:44px;max-width:100%}
 .switch.on::after{transform:translateX(18px)}
 .switch.acc.on{background:var(--acc)}
 
@@ -1249,6 +1250,21 @@ section.act,.fold.open .fold-b{animation:none}
         <div id="aiTestResult" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
       </div>
     </div>
+    <div class="card fold" id="migrationCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14M4 3h16v4"/></svg>整机迁移</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div class="hint">迁移包包含全部账号数据库、Telegram Session、任务、规则、设置、凭据、头像和图标库配置；不包含代码、venv、历史更新备份或系统 nginx 配置。</div>
+        <label for="migrationPanelPassword">当前面板密码</label><input type="password" id="migrationPanelPassword" autocomplete="current-password">
+        <label for="migrationBackupPassword">迁移包密码（至少 8 位，丢失无法恢复）</label><input type="password" id="migrationBackupPassword" autocomplete="new-password">
+        <label for="migrationBackupPasswordConfirm">再次输入迁移包密码（仅导出时需要）</label><input type="password" id="migrationBackupPasswordConfirm" autocomplete="new-password">
+        <div class="flex" style="margin-top:12px"><button class="btn" type="button" id="migrationExport" onclick="exportMachineBackup()">导出加密迁移包</button></div>
+        <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
+        <label for="migrationFile">导入迁移包（.tgp，最大 512MB）</label><input type="file" id="migrationFile" accept=".tgp,application/octet-stream">
+        <div class="flex" style="margin-top:12px"><button class="ghost" type="button" id="migrationPreview" onclick="previewMachineBackup()">上传并校验</button><button class="danger" type="button" id="migrationApply" disabled onclick="applyMachineBackup()">覆盖现机并重启</button></div>
+        <div class="hint" id="migrationResult" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
+        <div class="hint">导入会完整替换现机数据。请先停止旧 VPS，避免同一 Telegram Session 同时在线导致失效。</div>
+      </div>
+    </div>
     <div class="card fold" id="foldTg">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>Telegram 账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
@@ -1277,7 +1293,7 @@ section.act,.fold.open .fold-b{animation:none}
       </div>
     </div>
     <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">共享图标库</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m5 17 4-4 3 3 2-2 5 3"/></svg>共享图标库</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <div class="hint">图标库配置跨账号、跨设备共享。默认 TFEL：https://emby-icon.vercel.app/TFEL-Emby.json。内置库可禁用，不可删除。仅点击按钮时加载或刷新，不定时拉取。</div>
         <div class="flex" style="gap:8px;flex-wrap:wrap;margin-top:10px"><button class="ghost" type="button" id="iconLibrariesLoad" onclick="loadIconLibraries()">加载图标库</button><button class="ghost" type="button" id="iconLibrariesRefresh" onclick="refreshIcons()">刷新全部图标</button></div>
@@ -1396,7 +1412,7 @@ let selectedAccount='default', accountEpoch=0;
 try{selectedAccount=localStorage.getItem('tgp_selected_id')||'default'}catch(e){}
 function accountContext(){return {id:selectedAccount,epoch:accountEpoch}}
 function isCurrentAccount(c){return c.id===selectedAccount&&c.epoch===accountEpoch}
-function accountScoped(path){return !/^\/api\/(?:panel(?:\/|$)|accounts(?:\/|$)|backups(?:\/|$)|icon-libraries(?:\/|$|\?)|icons(?:\/|$|\?)|version(?:\?|$)|update(?:\/|$|\?))/.test(path)}
+function accountScoped(path){return !/^\/api\/(?:panel(?:\/|$)|accounts(?:\/|$)|backups(?:\/|$)|migration(?:\/|$)|icon-libraries(?:\/|$|\?)|icons(?:\/|$|\?)|version(?:\?|$)|update(?:\/|$|\?))/.test(path)}
 function staleAccountError(){const e=new Error('');e.staleAccount=true;return e}
 function apiErrorMessage(data,status){
   for(const value of [data?.error,data?.detail,data?.message]){
@@ -1587,6 +1603,28 @@ async function cleanupBackups(mode){
     await fetchBackups();
   }catch(e){backupsCleanupAllowed=false;$('#backupsResult').textContent='备份清理或列表刷新失败：'+e.message;toast(e.message,1)}
   finally{backupsBusy=false;syncBackupButtons()}
+}
+
+let migrationBusy=false,migrationStage=null;
+function migrationPasswords(){return {panel:$('#migrationPanelPassword').value,backup:$('#migrationBackupPassword').value}}
+function migrationPasswordHeader(value){return btoa(unescape(encodeURIComponent(value)))}
+function syncMigrationButtons(){$('#migrationExport').disabled=migrationBusy;$('#migrationPreview').disabled=migrationBusy;$('#migrationApply').disabled=migrationBusy||!migrationStage}
+async function migrationResponse(response){const data=await response.json().catch(()=>({}));if(response.status===401){showLoginGate();throw new Error('未登录面板')}if(!response.ok)throw new Error(apiErrorMessage(data,response.status));return data}
+async function exportMachineBackup(){
+  if(migrationBusy)return;const pw=migrationPasswords();if(!pw.panel||pw.backup.length<8)return toast('请填写当前面板密码和至少 8 位迁移包密码',1);
+  if(pw.backup!==$('#migrationBackupPasswordConfirm').value)return toast('两次输入的迁移包密码不一致',1);
+  migrationBusy=true;syncMigrationButtons();$('#migrationResult').textContent='正在生成一致性快照并加密…';
+  try{const response=await fetch('/api/migration/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({panel_password:pw.panel,backup_password:pw.backup})});if(!response.ok){await migrationResponse(response);return}const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='tg-persona-migration-'+new Date().toISOString().slice(0,10)+'.tgp';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);$('#migrationResult').textContent='迁移包已导出。请妥善保存文件和密码。'}catch(e){$('#migrationResult').textContent='导出失败：'+e.message;toast(e.message,1)}finally{migrationBusy=false;syncMigrationButtons()}
+}
+async function previewMachineBackup(){
+  if(migrationBusy)return;const file=$('#migrationFile').files?.[0],pw=migrationPasswords();if(!file)return toast('请选择 .tgp 迁移包',1);if(file.size<=0||file.size>512*1024*1024)return toast('迁移包不能为空且不能超过 512MB',1);if(!pw.panel||pw.backup.length<8)return toast('请填写当前面板密码和迁移包密码',1);
+  migrationBusy=true;migrationStage=null;syncMigrationButtons();$('#migrationResult').textContent='正在上传、解密并校验全部数据…';
+  try{const response=await fetch('/api/migration/import',{method:'PUT',headers:{'X-Panel-Password-B64':migrationPasswordHeader(pw.panel),'X-Backup-Password-B64':migrationPasswordHeader(pw.backup)},body:file});const data=await migrationResponse(response),p=data.preview||{};migrationStage=String(p.id||'');$('#migrationResult').textContent=`校验通过：${p.accounts??'?'} 个账号，${p.files??'?'} 个文件，占用 ${backupBytes(p.bytes)}，来源版本 ${p.source_version||'未知'}。\n尚未覆盖现机数据。`;}catch(e){migrationStage=null;$('#migrationResult').textContent='导入校验失败：'+e.message;toast(e.message,1)}finally{migrationBusy=false;syncMigrationButtons()}
+}
+async function applyMachineBackup(){
+  if(migrationBusy||!migrationStage)return;const pw=migrationPasswords();if(!window.confirm('将完整覆盖当前 VPS 的所有面板数据、账号和 Session，确定继续？'))return;if(!window.confirm('再次确认：恢复后需使用迁移来源面板密码登录，并先停止旧 VPS。'))return;
+  migrationBusy=true;syncMigrationButtons();$('#migrationResult').textContent='正在安排原子恢复与重启…';
+  try{const data=await api('/api/migration/import/apply',{method:'POST',body:JSON.stringify({id:migrationStage,panel_password:pw.panel})});if(!data.restarting)throw new Error('服务器未进入重启阶段');migrationStage=null;$('#migrationResult').textContent='服务正在恢复并重启，请稍候…';let tries=0;const timer=setInterval(async()=>{tries++;try{const response=await fetch('/health',{cache:'no-store'});if(response.ok){clearInterval(timer);location.reload()}}catch(e){}if(tries>90){clearInterval(timer);$('#migrationResult').textContent='重启等待超时，请检查服务状态；旧数据会在启动失败时自动回滚。'}},2000)}catch(e){$('#migrationResult').textContent='恢复启动失败：'+e.message;toast(e.message,1);migrationBusy=false;syncMigrationButtons()}
 }
 function renderBrandVersion(s){
   const current=String(s&&s.current||'--').replace(/^v/i,'');

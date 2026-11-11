@@ -23,6 +23,7 @@ from typing import Optional
 import math
 import struct
 import zlib
+import uuid
 import json
 import logging
 import random
@@ -34,6 +35,8 @@ import time
 import os
 import hashlib
 import hmac
+import shutil
+import subprocess
 from datetime import datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo      # Python 3.9+
@@ -54,13 +57,16 @@ from telethon.tl.types import ReactionEmoji
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
 import updater
+import data_migration
 from account_runtime import (AccountError, AccountRegistry, account_locked,
                              get_runtime, open_database, secure_files, use_runtime)
 
 BASE = Path(__file__).resolve().parent
+_MIGRATION_BOOT = data_migration.prepare_startup_restore(BASE)
 DATA = BASE / "data"
 DATA.mkdir(mode=0o700, exist_ok=True)
 DB_PATH = DATA / "config.db"
@@ -3358,6 +3364,8 @@ async def lifespan(app):
 
     try:
         await asyncio.gather(*(restore(runtime) for runtime in account_registry.accounts.values()))
+        data_migration.finish_startup_restore(BASE)
+        _cleanup_migration_stages(startup=True)
         yield
     finally:
         await account_registry.shutdown()
@@ -3382,7 +3390,7 @@ async def panel_auth(request: Request, call_next):
         if not session_ok(request.cookies.get("panel_token", "")):
             return JSONResponse({"error": "未登录面板"}, status_code=401)
         # These namespaces never select a Telegram profile, regardless of header.
-        global_route = (path.startswith(("/api/panel/", "/api/backups", "/api/accounts", "/api/icons", "/api/icon-libraries"))
+        global_route = (path.startswith(("/api/panel/", "/api/backups", "/api/accounts", "/api/icons", "/api/icon-libraries", "/api/migration"))
                         or path in ("/api/version", "/api/update", "/api/ai/test", "/api/captcha/test"))
         if global_route:
             with use_runtime(account_registry.accounts["default"]):
@@ -4823,6 +4831,119 @@ async def cleanup_backup_files(body: BackupCleanupInput):
         raise HTTPException(400, str(error)) from None
     except RuntimeError as error:
         raise HTTPException(409, str(error)) from None
+
+
+_migration_stages = {}
+_migration_lock = asyncio.Lock()
+
+
+def _cleanup_migration_stages(startup=False):
+    now = time.time()
+    for restore_id, stage in list(_migration_stages.items()):
+        if now - stage["created"] > 1800:
+            shutil.rmtree(stage["work"], ignore_errors=True)
+            _migration_stages.pop(restore_id, None)
+    active = {Path(stage["work"]) for stage in _migration_stages.values()}
+    for work in BASE.glob(".migration-stage-*"):
+        if work not in active:
+            shutil.rmtree(work, ignore_errors=True)
+    if startup:
+        for work in BASE.glob(".migration-export-*"):
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def _migration_busy():
+    return updater.STATE.get("running") or any(runtime.auto_tasks or runtime.auto_workers or runtime.auto_queued
+                                                for runtime in account_registry.accounts.values())
+
+
+@app.post("/api/migration/export")
+async def export_machine_backup(body: dict):
+    panel_password = str((body or {}).get("panel_password") or "")
+    backup_password = str((body or {}).get("backup_password") or "")
+    if not verify_password(panel_password):
+        raise HTTPException(403, "当前面板密码错误")
+    if _migration_busy() or _migration_lock.locked():
+        raise HTTPException(409, "有任务或系统更新正在运行，请停止后再导出")
+    async with _migration_lock:
+        account_ids = [account_id for account_id in account_registry.accounts if account_id != "default"]
+        version = updater.current_version()
+        try:
+            package, work = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: data_migration.create_package(BASE, DATA, account_ids, version, backup_password))
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+    return FileResponse(package, filename=package.name, media_type="application/octet-stream",
+                        headers={"Cache-Control": "no-store"},
+                        background=BackgroundTask(lambda: shutil.rmtree(work, ignore_errors=True)))
+
+
+@app.put("/api/migration/import")
+async def import_machine_backup(request: Request):
+    def header_password(name):
+        try:
+            return base64.b64decode(request.headers.get(name, ""), validate=True).decode("utf-8")
+        except Exception:
+            return ""
+    panel_password = header_password("x-panel-password-b64")
+    backup_password = header_password("x-backup-password-b64")
+    if not verify_password(panel_password):
+        raise HTTPException(403, "当前面板密码错误")
+    if _migration_busy() or _migration_lock.locked():
+        raise HTTPException(409, "有任务或系统更新正在运行，请停止后再导入")
+    _cleanup_migration_stages()
+    upload_dir = BASE / (".migration-upload-" + uuid.uuid4().hex)
+    upload_dir.mkdir(mode=0o700)
+    upload = upload_dir / "backup.tgp"
+    size = 0
+    try:
+        with open(upload, "xb") as handle:
+            os.chmod(upload, 0o600)
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > data_migration.MAX_PACKAGE:
+                    raise HTTPException(413, "迁移备份最大 512MB")
+                handle.write(chunk)
+        async with _migration_lock:
+            try:
+                restore_id, preview, work = await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: data_migration.stage_package(BASE, upload, backup_password, updater.current_version()))
+            except ValueError as error:
+                raise HTTPException(400, str(error)) from None
+        for stage in _migration_stages.values():
+            shutil.rmtree(stage["work"], ignore_errors=True)
+        _migration_stages.clear()
+        _migration_stages[restore_id] = {"work": work, "preview": preview, "created": time.time()}
+        return {"ok": True, "preview": preview}
+    finally:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+
+
+def _restart_for_migration(restore_id):
+    subprocess.Popen([shutil.which("systemd-run"), "--unit=tg-persona-migration-" + restore_id[:12],
+                      "--collect", "--property=Type=oneshot", shutil.which("systemctl"), "restart", updater.SERVICE],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+@app.post("/api/migration/import/apply")
+async def apply_machine_backup(body: dict):
+    restore_id = str((body or {}).get("id") or "")
+    panel_password = str((body or {}).get("panel_password") or "")
+    if not verify_password(panel_password):
+        raise HTTPException(403, "当前面板密码错误")
+    stage = _migration_stages.pop(restore_id, None)
+    if stage is None:
+        raise HTTPException(404, "迁移预览已失效，请重新上传")
+    if _migration_busy() or _migration_lock.locked() or not shutil.which("systemctl") or not shutil.which("systemd-run"):
+        _migration_stages[restore_id] = stage
+        raise HTTPException(409, "有任务正在运行，或当前部署不支持自动重启")
+    try:
+        data_migration.arm_restore(BASE, restore_id, stage["work"])
+    except RuntimeError as error:
+        _migration_stages[restore_id] = stage
+        raise HTTPException(409, str(error)) from None
+    return JSONResponse({"ok": True, "restarting": True}, status_code=202,
+                        background=BackgroundTask(_restart_for_migration, restore_id))
 
 
 @app.post("/api/update")

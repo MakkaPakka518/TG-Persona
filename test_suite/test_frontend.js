@@ -969,6 +969,14 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     const row=q('#iconLibrariesList').children[0];assert(row.children[0].textContent.includes(malicious));assert.strictEqual(row.children[1].textContent,malicious);assert(q('#iconLibraryErrors').textContent.includes(malicious+'：'+malicious));assert.strictEqual(q('#iconPickerErrors').textContent,q('#iconLibraryErrors').textContent);
     for(const b of row.children[2].children)assert(!b.onclick);
   });
+  await test('共享图标库标题有统一SVG，整机迁移上传先预览后才能恢复',async()=>{
+    const iconCard=html.slice(html.indexOf('>共享图标库<')-200,html.indexOf('>共享图标库<')+100);assert(iconCard.includes('<svg viewBox="0 0 24 24">'));
+    for(const id of ['migrationCard','migrationPanelPassword','migrationBackupPassword','migrationBackupPasswordConfirm','migrationExport','migrationFile','migrationPreview','migrationApply','migrationResult'])assert(html.includes('id="'+id+'"'));
+    q('#migrationPanelPassword').value='panel-password';q('#migrationBackupPassword').value='backup-password';q('#migrationFile').files=[{size:1024,name:'backup.tgp'}];let request;
+    app.fetch=async(p,o)=>{request=[p,o];return {ok:true,status:200,json:async()=>({ok:true,preview:{id:'a'.repeat(32),accounts:2,files:5,bytes:2048,source_version:'1.16.1'}})}};
+    await ex('previewMachineBackup()');assert.strictEqual(request[0],'/api/migration/import');assert.strictEqual(request[1].method,'PUT');assert.strictEqual(request[1].body.name,'backup.tgp');assert(!q('#migrationApply').disabled);assert(q('#migrationResult').textContent.includes('2 个账号'));
+    app.window.confirm=()=>false;let applied=0;app.api=async()=>{applied++;return {}};await ex('applyMachineBackup()');assert.strictEqual(applied,0);
+  });
   await test('共享图标库新增参数持久化，仅名称URL启用字段且安全库URL校验',async()=>{
     let requests=[];app.api=async(p,o)=>{requests.push([p,o]);return p==='/api/icon-libraries'&&!o?{libraries:[{id:'external',name:'共享',url:'https://dummy.invalid/icons.json',enabled:true,builtin:false}]}:{ok:true,library:{id:'external'}}};
     q('#iconLibraryName').value=' ';q('#iconLibraryUrl').value='https://dummy.invalid/icons.json';await ex('addIconLibrary()');assert.strictEqual(requests[0][0],'/api/icon-libraries');assert.strictEqual(requests[0][1].method,'POST');assert.deepStrictEqual(JSON.parse(requests[0][1].body),{name:'',url:'https://dummy.invalid/icons.json',enabled:true});assert.strictEqual(requests[1][0],'/api/icon-libraries');assert.strictEqual(ex('iconsLoaded'),false);

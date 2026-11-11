@@ -1,4 +1,7 @@
 data/
+.migration-*
+.data-pre-restore-*
+.data-failed-*
 venv/
 .venv/
 .env
