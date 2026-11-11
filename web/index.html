@@ -190,6 +190,8 @@ html[data-theme="light"] .grp-pick .gp.on{color:#15803d}
 .ai-provider-head{display:flex;align-items:flex-start;gap:10px}.ai-provider-note{font-weight:600;flex:1;min-width:0;overflow-wrap:anywhere}
 .ai-provider-meta{font-size:12px;color:var(--dim);line-height:1.55;overflow-wrap:anywhere}.ai-token-usage{font-variant-numeric:tabular-nums}
 .ai-provider-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}#foldAiProviders button,#aiTestCard button,#sCaptchaProviders .gp,#aiTestProviders .gp{min-height:44px}
+#waterAiCard{min-width:0;overflow:hidden}#waterAiCard .fold-b,#waterAiCard .water-ai-time,#waterAiCard .water-ai-time>div{min-width:0;max-width:100%}
+#waterAiCard input:not([type=checkbox]),#waterAiCard textarea{width:100%;min-width:0;max-width:100%;box-sizing:border-box}.water-ai-time{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .switch.on::after{transform:translateX(18px)}
 .switch.acc.on{background:var(--acc)}
 
@@ -445,6 +447,7 @@ html[data-theme="light"] .switch{background:#cbd6c5}
   #af-link_register input:not([type=checkbox]),#af-link_register textarea,#af-link_register button,#af-link_register select,.link-reply-toggle{min-height:44px}
   #aListTimed .auto-actions button{min-height:44px}
   #foldTg input,#foldTg select,#foldTg button{min-height:44px}
+  .water-ai-time{grid-template-columns:minmax(0,1fr)}
 }
 @media(max-width:340px){
   header{padding-inline:6px}.logo{font-size:11px;letter-spacing:.03em}.logo .dot{display:none}#accountTop{max-width:78px!important}.icon{width:34px;height:34px}#btnPanelOut{padding-inline:6px}
@@ -855,11 +858,11 @@ section.act,.fold.open .fold-b{animation:none}
     </div>
 
     <div class="card fold" id="waterAiCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">AI 水群</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6"/></svg>AI 水群</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="waterAiEnabled" style="width:auto"> 开启时间段 AI 水群（默认关闭）</label>
         <label>生效群</label><div id="waterAiGroups" class="grp-pick"></div>
-        <div class="flex"><div><label for="waterAiStart">开始</label><input type="time" id="waterAiStart" value="09:00"></div><div><label for="waterAiEnd">结束</label><input type="time" id="waterAiEnd" value="22:00"></div></div>
+        <div class="water-ai-time"><div><label for="waterAiStart">开始</label><input type="time" id="waterAiStart" value="09:00"></div><div><label for="waterAiEnd">结束</label><input type="time" id="waterAiEnd" value="22:00"></div></div>
         <label for="waterAiPrompt">人格提示词</label><textarea id="waterAiPrompt" maxlength="1000" rows="4">你是群聊中的普通成员。结合最近聊天自然回复一句简短中文，不要解释身份，不要使用链接、命令、@提及或 Markdown，不要连续刷屏。</textarea>
         <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
         <div class="hint">收到所选群的新消息后，结合最近聊天生成一句短回复；同群至少间隔 60 秒。群消息会发送给所选 AI API，可能产生费用。</div>

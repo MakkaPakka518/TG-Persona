@@ -1183,6 +1183,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('时间段 AI 水群默认关闭，无 API 不能开启并保存独立人格',async()=>{
     assert(html.includes('id="waterAiCard"')&&html.includes('id="waterAiGroups"')&&html.includes('id="waterAiPrompt"'));
+    const card=html.slice(html.indexOf('id="waterAiCard"'),html.indexOf('id="aCntSign"'));assert(card.includes('<svg viewBox="0 0 24 24">')&&card.includes('class="water-ai-time"'));
     ex('aiProviders=[]');q('#waterAiEnabled').checked=true;q('#waterAiEnabled').listeners.change.call(q('#waterAiEnabled'));assert.strictEqual(q('#waterAiEnabled').checked,false);
     ex("aiProviders=[{id:'0123456789abcdef',enabled:true}];waterAIGroupSel=new Set(['-1001'])");q('#waterAiEnabled').checked=true;q('#waterAiStart').value='09:00';q('#waterAiEnd').value='22:00';q('#waterAiPrompt').value='常驻人格';q('#sTaskConcurrency').value='2';let body;
     app.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true}};app.loadSettings=()=>{};await ex('saveSettings()');assert.strictEqual(body.water_ai_enabled,'1');assert.strictEqual(body.water_ai_groups,'-1001');assert.strictEqual(body.water_ai_prompt,'常驻人格');
