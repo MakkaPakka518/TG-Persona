@@ -67,7 +67,7 @@ def load_backend():
     safe_assignments = {'SESSION_TTL', 'CAPTCHA_TTL', 'AUTH_CACHE_MAX', 'CAPTCHA_CACHE_MAX',
                         'RL_WINDOW', 'RL_MAX', 'RL_BLOCK', 'CAPTCHA_AFTER', '_CAPTCHA_FONT', 'MAX_TEST_IMAGE',
                         '_AUTO_COLS', 'RETRY_BASE', 'GLOBAL_SETTING_KEYS', 'SETTING_KEYS', 'DEFAULTS', '_TZ_FALLBACK', '_failure_context',
-                        'DEFAULT_SIGNIN_IMAGE_PROMPT', 'DEFAULT_AI_FLOCK_PROMPT'}
+                        'DEFAULT_SIGNIN_IMAGE_PROMPT', 'DEFAULT_AI_FLOCK_PROMPT', 'DEFAULT_REGISTRATION_AI_FLOCK_PROMPT'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):

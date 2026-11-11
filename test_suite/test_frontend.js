@@ -51,6 +51,7 @@ run(js.split('\n').find(line=>line.startsWith('const $=')));
 run(js.split('\n').find(line=>line.startsWith('const esc=')));
 run(js.split('\n').find(line=>line.startsWith('const DEFAULT_SIGNIN_IMAGE_PROMPT=')));
 run(js.split('\n').find(line=>line.startsWith('const DEFAULT_AI_FLOCK_PROMPT=')));
+run(js.split('\n').find(line=>line.startsWith('const DEFAULT_REGISTRATION_AI_FLOCK_PROMPT=')));
 run(slice('// ---------- AI API 池 ----------','// ---------- 状态 ----------'));
 run(slice('// ---------- 账号请求范围 ----------','async function api('));
 run(slice('// ---------- 安全图标与共享图标库 ----------','let autos=[], editAuto=null, editAutoAccount=null;'));
@@ -820,7 +821,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(!form.includes('id="lkTarget"'));assert(form.includes('start=服务名-天数-Register_代码'));
     assert(form.includes('type="password"')&&form.includes('串行接力')&&form.includes('随机一条'));
     ex("selectedAccount='default';accountEpoch++;editAuto=null;editAutoAccount=null;cancelAutoEdit('link_register')");
-    assert.strictEqual(q('#lkAiFlock').checked,false);assert.strictEqual(q('#lkAiFlockMinutes').value,'5');assert.strictEqual(q('#lkAiFlockPrompt').value,ex('DEFAULT_AI_FLOCK_PROMPT'));
+    assert.strictEqual(q('#lkAiFlock').checked,false);assert.strictEqual(q('#lkAiFlockMinutes').value,'5');assert.strictEqual(q('#lkAiFlockPrompt').value,ex('DEFAULT_REGISTRATION_AI_FLOCK_PROMPT'));assert(ex('DEFAULT_REGISTRATION_AI_FLOCK_PROMPT').includes('NO_REPLY'));assert.strictEqual((html.match(/只输出聊天内容或NO_REPLY。<\/textarea>/g)||[]).length,3);
     app.providerFixture=[{id:'0123456789abcdef',note:'AI',enabled:true}];ex('aiProviders=providerFixture');q('#lkAiFlock').checked=true;q('#lkAiFlockPrompt').value='注册成功人格';
     q('#lkName').value='链接抢注';q('#lkButton').value='注册';
     q('#lkReady').value='已进入注册状态';q('#lkExisting').value='已有号';q('#lkSuccess').value='注册成功';q('#lkUser').value='测试用户';q('#lkSecret').value='测试安全码';
