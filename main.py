@@ -192,12 +192,12 @@ def db_init(database=None):
         ("history_first", "INTEGER DEFAULT 0"),
         ("link_mode", "INTEGER DEFAULT 1"),
         ("link_limit", "INTEGER DEFAULT 4"),
-        ("link_wait", "INTEGER DEFAULT 5"),
+        ("link_wait", "INTEGER DEFAULT 3"),
         ("existing_kw", "TEXT DEFAULT ''"),
         ("success_reply_enabled", "INTEGER DEFAULT 0"),
         ("success_reply_text", "TEXT DEFAULT ''"),
         ("success_reply_delay", "INTEGER DEFAULT 5"),
-        ("announcement_kw", "TEXT DEFAULT ''"),
+        ("announcement_kw", "TEXT DEFAULT '定时注册'"),
         ("announcement_button", "TEXT DEFAULT '点击注册'"),
     ):
         try:
@@ -3539,12 +3539,12 @@ class AutoIn(BaseModel):
     history_first: int = 0          # scheduled_register: click latest matching button before command
     link_mode: int = 1              # link_register: 0=随机一条 1=串行接力
     link_limit: int = 4             # link_register: 最多尝试链接数 2-4
-    link_wait: int = 5              # link_register: 失效判定等待秒数 2-15
+    link_wait: int = 3              # link_register: 失效判定等待秒数 2-15
     existing_kw: str = ""           # link_register: 已有号提示，命中后停止轮发
     success_reply_enabled: int = 0  # link_register: 成功后回来源群发送文本
     success_reply_text: str = ""
     success_reply_delay: int = 5
-    announcement_kw: str = ""
+    announcement_kw: str = "定时注册"
     announcement_button: str = "点击注册"
 
 

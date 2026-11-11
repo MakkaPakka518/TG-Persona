@@ -819,18 +819,22 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     app.window.confirm=()=>true;app.api=async(p,o)=>{requests.push([p,o]);return {ok:true,tested:true}};app.loadAutos=async()=>{};
     await ex('testAuto(88)');assert.deepStrictEqual(requests.map(x=>x[0]),['/api/autos/88/test']);assert.strictEqual(ex('autoTestBusy.size'),0);app.window.confirm=()=>false;
   });
-  await test('群按钮开注保存独立触发条件，默认关闭群回复并使用 /start',async()=>{
+  await test('群按钮开注使用实测模板保存触发条件和成功群回复',async()=>{
     const form=html.slice(html.indexOf('id="af-button_register"'),html.indexOf('id="af-link_register"'));
     assert(form.includes('brAnnouncement')&&form.includes('brAnnouncementButton'));
     assert(!form.includes('history_first')&&!form.includes('关闭弹窗重试'));
     ex("selectedAccount='default';accountEpoch++;cancelAutoEdit('button_register')");
-    assert.strictEqual(q('#brGroupReply').checked,false);assert.strictEqual(q('#brCommand').value,'/start');
-    q('#brName').value='Bot 公告';q('#brAnnouncement').value='已开启定时注册';q('#brUser').value='tester';q('#brSecret').value='offline-secret';
+    assert.strictEqual(q('#brGroupReply').checked,true);assert.strictEqual(q('#brCommand').value,'/start');
+    assert.strictEqual(q('#brAnnouncement').value,'定时注册');assert.strictEqual(q('#brButton').value,'创建');
+    assert.strictEqual(q('#brReady').value,'注册状态');assert.strictEqual(q('#brSuccess').value,'成功');
+    assert.strictEqual(q('#brReplyText').value,'拿下！');assert.strictEqual(q('#brReplyDelay').value,'5');
+    q('#brName').value='Bot 公告';q('#brUser').value='tester';q('#brSecret').value='offline-secret';
     const requests=[];app.api=async(p,o)=>{requests.push([p,JSON.parse(o.body)]);return {ok:true,id:99}};app.loadAutos=async()=>{};
     await ex("saveAuto('button_register')");
     assert.strictEqual(requests[0][0],'/api/autos');assert.strictEqual(requests[0][1].type,'button_register');
     assert.strictEqual(requests[0][1].command,'/start');assert.strictEqual(requests[0][1].announcement_button,'点击注册');
-    assert.strictEqual(requests[0][1].success_reply_enabled,0);assert.strictEqual(requests[0][1].enabled,0);
+    assert.strictEqual(requests[0][1].success_reply_enabled,1);assert.strictEqual(requests[0][1].success_reply_text,'拿下！');
+    assert.strictEqual(requests[0][1].enabled,0);
     assert(!JSON.stringify(requests[0]).includes('offline-secret'));
     assert.strictEqual(requests[1][0],'/api/autos/99/link-credential');
   });

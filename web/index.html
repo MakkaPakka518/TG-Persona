@@ -678,21 +678,21 @@ section.act,.fold.open .fold-b{animation:none}
         <div class="autof" id="af-button_register"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑群按钮开注</b><button class="ghost" type="button" onclick="closeAutoForm('button_register')">关闭</button></div><form onsubmit="saveAuto('button_register');return false">
           <label for="brName">任务名称</label><input type="text" id="brName" required placeholder="如：群公告开注">
           <label>监听群</label><div class="hint">不勾选则使用全部监听群，包括 Bot 发布的公告</div><div id="brGroups" class="grp-pick"></div>
-          <label for="brAnnouncement">群开注关键词（逗号分隔）</label><input type="text" id="brAnnouncement" maxlength="1000" required placeholder="如：已开启定时注册">
+          <label for="brAnnouncement">群开注关键词（逗号分隔）</label><input type="text" id="brAnnouncement" maxlength="1000" value="定时注册" required>
           <label for="brAnnouncementButton">群 URL 按钮文字（逗号分隔）</label><input type="text" id="brAnnouncementButton" maxlength="1000" value="点击注册" required>
           <label for="brCommand">私聊首条指令</label><input type="text" id="brCommand" maxlength="1000" value="/start" placeholder="/start">
           <div class="hint">从按钮链接自动识别机器人，忽略链接的 start 参数，发送上方指令。</div>
-          <label for="brButton">Bot 注册按钮关键词</label><input type="text" id="brButton" value="注册" required>
-          <label for="brReady">进入注册状态关键词</label><input type="text" id="brReady" value="已进入注册状态" required>
+          <label for="brButton">Bot 注册按钮关键词</label><input type="text" id="brButton" value="创建" required>
+          <label for="brReady">进入注册状态关键词</label><input type="text" id="brReady" value="注册状态" required>
           <label for="brExisting">已有号关键词（选填，整句匹配）</label><textarea id="brExisting" rows="2" maxlength="1000"></textarea>
           <label for="brUser">注册用户名</label><input type="text" id="brUser" autocomplete="off" placeholder="编辑时留空沿用">
           <label for="brSecret">安全码</label><input id="brSecret" type="password" autocomplete="new-password" placeholder="编辑时留空沿用">
-          <label for="brSuccess">成功关键词（逗号分隔）</label><input type="text" id="brSuccess" value="注册成功" required>
+          <label for="brSuccess">成功关键词（逗号分隔）</label><input type="text" id="brSuccess" value="成功" required>
           <label for="brFail">失败关键词（逗号分隔）</label><input type="text" id="brFail" placeholder="如：注册失败,注册已关闭">
           <label for="brTimeout">每步最长等待（秒）</label><input id="brTimeout" type="number" value="30" min="1" max="300" step="1" inputmode="numeric" required>
-          <label class="button-reply-toggle"><input type="checkbox" id="brGroupReply" onchange="document.getElementById('brGroupReplyFields').classList.toggle('hidden',!this.checked)"> 注册成功后回原群发送消息</label>
-          <div id="brGroupReplyFields" class="hidden">
-            <label for="brReplyText">群内发送内容</label><input type="text" id="brReplyText" maxlength="1000" placeholder="如：拿下">
+          <label class="button-reply-toggle"><input type="checkbox" id="brGroupReply" checked onchange="document.getElementById('brGroupReplyFields').classList.toggle('hidden',!this.checked)"> 注册成功后回原群发送消息</label>
+          <div id="brGroupReplyFields">
+            <label for="brReplyText">群内发送内容</label><input type="text" id="brReplyText" maxlength="1000" value="拿下！">
             <label for="brReplyDelay">延迟发送（秒）</label><input id="brReplyDelay" type="number" value="5" min="0" max="300" step="1" inputmode="numeric">
           </div>
           <div class="hint">长期监听，只有注册成功才推送通知。新任务保存后请手动启用。</div>
@@ -720,7 +720,7 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="lkReady">进入注册状态关键词</label>
           <input type="text" id="lkReady" value="已进入注册状态" placeholder="如: 已进入注册状态" required>
           <label for="lkExisting">已有号关键词（选填，整句匹配）</label>
-          <textarea id="lkExisting" rows="2" maxlength="1000" placeholder="如: 很遗憾，您使用的是注册码，无法启用续期功能，请悉知"></textarea>
+          <textarea id="lkExisting" rows="2" maxlength="1000">无法启用续期功能</textarea>
           <div class="hint">命中后立即停止本轮，不再尝试下一条注册码。</div>
           <label for="lkUser">注册用户名</label>
           <input type="text" id="lkUser" placeholder="如: 少年郎" autocomplete="off">
@@ -734,10 +734,10 @@ section.act,.fold.open .fold-b{animation:none}
           </select>
           <div class="flex">
             <div><label for="lkLimit">最多尝试链接数</label><input type="number" id="lkLimit" value="4" min="2" max="4" step="1" inputmode="numeric"></div>
-            <div><label for="lkWwait">失效判定等待（秒）</label><input type="number" id="lkWwait" value="5" min="2" max="15" step="1" inputmode="numeric"></div>
+            <div><label for="lkWwait">失效判定等待（秒）</label><input type="number" id="lkWwait" value="3" min="2" max="15" step="1" inputmode="numeric"></div>
           </div>
           <label for="lkSuccess">成功关键词</label>
-          <input type="text" id="lkSuccess" value="注册成功" placeholder="如: 注册成功,创建成功" required>
+          <input type="text" id="lkSuccess" value="成功" placeholder="如: 成功,创建成功" required>
           <label for="lkFail">失败关键词（选填，逗号分隔）</label>
           <input type="text" id="lkFail" placeholder="如: 注册失败,名额已满">
           <label class="link-reply-toggle" style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="lkGroupReply" style="width:auto"> 注册成功后回原群发送消息</label>
@@ -1880,14 +1880,14 @@ function editAutoItem(id){
     $('#lkExisting').value=a.existing_kw||'';$('#lkGroupReply').checked=!!a.success_reply_enabled;
     $('#lkGroupReplyText').value=a.success_reply_text||'';$('#lkGroupReplyDelay').value=a.success_reply_delay??5;$('#lkGroupReplyFields').classList.toggle('hidden',!$('#lkGroupReply').checked);
     $('#lkMode').value=String(Number(a.link_mode)===0?0:1);$('#lkLimit').value=Number(a.link_limit)||4;
-    $('#lkWwait').value=Number(a.link_wait)||5;$('#lkSuccess').value=a.success_kw||'注册成功';
+    $('#lkWwait').value=Number(a.link_wait)||3;$('#lkSuccess').value=a.success_kw||'成功';
     $('#lkFail').value=a.fail_kw||'';$('#lkTimeout').value=a.result_timeout??30;
     setAutoGroups('link_register',a.groups);$('#lkCancel').style.display='inline-block';
   }else if(t==='button_register'){
     $('#brName').value=a.name;setAutoGroups('button_register',a.groups);
     $('#brAnnouncement').value=a.announcement_kw||'';$('#brAnnouncementButton').value=a.announcement_button||'点击注册';$('#brCommand').value=a.command||'/start';
-    $('#brButton').value=a.btn_text||'注册';$('#brReady').value=a.keywords||'已进入注册状态';$('#brExisting').value=a.existing_kw||'';
-    $('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value=a.success_kw||'注册成功';$('#brFail').value=a.fail_kw||'';$('#brTimeout').value=a.result_timeout??30;
+    $('#brButton').value=a.btn_text||'创建';$('#brReady').value=a.keywords||'注册状态';$('#brExisting').value=a.existing_kw||'';
+    $('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value=a.success_kw||'成功';$('#brFail').value=a.fail_kw||'';$('#brTimeout').value=a.result_timeout??30;
     $('#brGroupReply').checked=!!a.success_reply_enabled;$('#brReplyText').value=a.success_reply_text||'';$('#brReplyDelay').value=a.success_reply_delay??5;
     $('#brGroupReplyFields').classList.toggle('hidden',!$('#brGroupReply').checked);$('#brCancel').style.display='inline-block';
   }else if(t==='grabcodes'){
@@ -1918,9 +1918,9 @@ function cancelAutoEdit(t){
   ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
-    link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='5';$('#lkSuccess').value='注册成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
+    link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';setVisualSteps('[]');$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cCancel').style.display='none'},
-    button_register:()=>{$('#brName').value='';setAutoGroups('button_register','');$('#brAnnouncement').value='';$('#brAnnouncementButton').value='点击注册';$('#brCommand').value='/start';$('#brButton').value='注册';$('#brReady').value='已进入注册状态';$('#brExisting').value='';$('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value='注册成功';$('#brFail').value='';$('#brTimeout').value=30;$('#brGroupReply').checked=false;$('#brReplyText').value='';$('#brReplyDelay').value=5;$('#brGroupReplyFields').classList.add('hidden');$('#brCancel').style.display='none'},
+    button_register:()=>{$('#brName').value='';setAutoGroups('button_register','');$('#brAnnouncement').value='定时注册';$('#brAnnouncementButton').value='点击注册';$('#brCommand').value='/start';$('#brButton').value='创建';$('#brReady').value='注册状态';$('#brExisting').value='';$('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value='成功';$('#brFail').value='';$('#brTimeout').value=30;$('#brGroupReply').checked=true;$('#brReplyText').value='拿下！';$('#brReplyDelay').value=5;$('#brGroupReplyFields').classList.remove('hidden');$('#brCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'},
     keepalive:()=>{$('#kName').value='';$('#kTarget').value='';$('#kText').value='';$('#kEvery').value=7;$('#kUnit').value='86400';$('#kDel').value=10;$('#kCancel').style.display='none'}})[t]();
 }
