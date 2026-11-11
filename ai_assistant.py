@@ -214,7 +214,14 @@ def build_ai_assistant_router(get_db, model_type, validate, values, columns, ai_
         logs = db.execute('SELECT ts,ok,content,reply,detail FROM hits WHERE rule_id=? ORDER BY id DESC LIMIT ?',
                           (-body.id,body.lines)).fetchall()
         shared_cfg = {key: get_shared_setting('ai_'+key,'') for key in ('base','key','model')}
+        shared_cfg['_use_all'] = True
         secrets = [shared_cfg['key']]
+        try:
+            providers = json.loads(get_shared_setting('ai_providers','') or '[]')
+        except (TypeError,ValueError):
+            providers = []
+        if isinstance(providers,list):
+            secrets.extend(provider.get('key','') for provider in providers if isinstance(provider,dict))
         for key in ('api_hash','notify_bt','panel_pw_hash'):
             secret = get_shared_setting(key,'')
             if secret:

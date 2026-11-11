@@ -186,6 +186,10 @@ h2{display:none}
   border-radius:999px;font-size:12.5px;color:var(--sub);cursor:pointer;background:var(--panel2);user-select:none}
 .grp-pick .gp.on{border-color:#22c55e;color:#16a34a;background:rgba(34,197,94,.12)}
 html[data-theme="light"] .grp-pick .gp.on{color:#15803d}
+.ai-provider-row{padding:12px 0;border-bottom:1px solid var(--hair)}.ai-provider-row:last-child{border-bottom:0}
+.ai-provider-head{display:flex;align-items:flex-start;gap:10px}.ai-provider-note{font-weight:600;flex:1;min-width:0;overflow-wrap:anywhere}
+.ai-provider-meta{font-size:12px;color:var(--dim);line-height:1.55;overflow-wrap:anywhere}.ai-token-usage{font-variant-numeric:tabular-nums}
+.ai-provider-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}#foldAiProviders button,#sCaptchaProviders .gp{min-height:44px}
 .switch.on::after{transform:translateX(18px)}
 .switch.acc.on{background:var(--acc)}
 
@@ -578,7 +582,7 @@ section.act,.fold.open .fold-b{animation:none}
       <div class="fold-b">
         <label for="aiDraftText">告诉我你想做什么</label>
         <textarea id="aiDraftText" rows="4" maxlength="2000" placeholder="每天 08:00–09:00 给 @xxxbot 发 /start，等 2 秒点签到按钮，点完再等 3 秒，成功回复包含签到成功。" oninput="invalidateAIDraft()"></textarea>
-        <div class="hint">使用已保存的 AI 配置；也可使用验证码识别卡片中当前填写的配置。描述会发送给所配置的 AI，可能产生费用，请勿填写密码、密钥或登录码。只生成配置，不会发 Telegram 消息。</div>
+        <div class="hint">使用设置中已启用的 AI API，按列表轮询并在失败时自动切换。描述会发送给 AI，可能产生费用，请勿填写密码、密钥或登录码。只生成配置，不会发 Telegram 消息。</div>
         <button type="button" class="btn" id="aiDraftBtn" onclick="generateAIDraft()">生成预览</button>
         <pre class="hint" id="aiDraftResult" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre>
         <div class="flex" style="gap:8px;flex-wrap:wrap">
@@ -799,18 +803,7 @@ section.act,.fold.open .fold-b{animation:none}
           <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sAiOn" style="width:auto"> 启用 AI 识别</label>
           <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sOcrOn" style="width:auto"> 启用本地 OCR</label>
         </div>
-        <label style="margin-top:12px">AI API 地址(OpenAI 兼容,如 https://api.openai.com/v1)</label>
-        <input type="text" id="sAiBase" placeholder="https://api.openai.com/v1">
-        <label>AI API Key</label>
-        <input type="password" id="sAiKey" placeholder="sk-..." autocomplete="new-password">
-        <label>AI 模型名</label>
-        <input type="text" id="sAiModel" placeholder="gpt-4o-mini">
-        <div class="flex" style="gap:10px;flex-wrap:wrap;margin-top:14px">
-          <button class="btn" type="button" onclick="saveSettings()">保存设置</button>
-          <button class="ghost" type="button" id="aiTestBtn" onclick="testAIConnection()">测试 AI 连接</button>
-        </div>
-        <div class="hint">测试使用当前填写值，无需先保存；Key 留空沿用已保存值。连接测试不受识别开关限制，要求 AI 只回复“测试成功”，可能产生 API 费用。</div>
-        <div id="aiTestResult" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
+        <button class="btn" type="button" style="margin-top:12px" onclick="saveSettings()">保存识别开关</button>
         <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--hair)">
           <label for="captchaTestFile">上传验证码图片（PNG / JPG / WebP，最大 2MB）</label>
           <input type="file" id="captchaTestFile" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" onchange="previewCaptchaFile()" style="max-width:100%">
@@ -821,7 +814,7 @@ section.act,.fold.open .fold-b{animation:none}
           <div class="hint">选择图片只在本地预览；点击识别才上传。按上方开关选择通道，AI 优先，失败后可回退本地 OCR。</div>
           <div id="captchaTestResult" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
         </div>
-        <div class="hint">两个开关独立可选:都开启时 AI 优先,识别失败自动兜底本地 OCR;只开一个则只走该通道;全关时验证码步骤会提示未启用。AI 需填 API 地址 + Key + 模型</div>
+        <div class="hint">两个开关独立可选：AI 会使用设置中已启用的 API 池，失败后继续尝试下一条；本地 OCR 可作为最后兜底。</div>
       </div>
     </div>
 
@@ -892,6 +885,11 @@ section.act,.fold.open .fold-b{animation:none}
             <div class="hint">刷新模式每次连点重新获取最新按钮；复用模式始终点击同一按钮，不在连点中重新获取消息。</div>
           </div>
           <label style="display:flex;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="sCap" style="width:auto"> 点签到后出现图片验证码,自动识别并回复</label>
+          <div id="sCaptchaProviderWrap" class="hidden">
+            <label>验证码 AI API（可多选）</label>
+            <div id="sCaptchaProviders" class="grp-pick"></div>
+            <div class="hint">不选择表示使用设置中全部已启用 API；多选后按所选列表轮询，失败自动切换。</div>
+          </div>
           <div class="flex">
             <div><label for="sResultDelay">结果判断前延迟（秒）</label><input type="number" id="sResultDelay" value="0" min="0" max="120" step="0.1" required></div>
             <div><label for="sResultTimeout">等待最终回复上限（秒）</label><input type="number" id="sResultTimeout" value="30" min="1" max="300" step="1" required></div>
@@ -1168,6 +1166,23 @@ section.act,.fold.open .fold-b{animation:none}
         <div class="hint" id="backupsResult" aria-live="polite" style="margin-top:8px"></div>
       </div>
     </div>
+    <div class="card fold" id="foldAiProviders">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3a4 4 0 0 0-4 4v1a4 4 0 0 0-3 6v1a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4v-1a4 4 0 0 0-3-6V7a4 4 0 0 0-4-4zM9 12h6M12 9v6"/></svg>AI API</span><span class="cnt" id="aiProvidersCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div class="hint">验证码识别、说人话建任务、AI 排障及后续 AI 功能共用。启用多条时按列表轮询，失败自动切换下一条。</div>
+        <div id="aiProvidersList"></div>
+        <button class="btn" type="button" id="aiProviderAdd" style="margin-top:10px" onclick="openAIProviderForm()">添加 AI API</button>
+        <div id="aiProviderForm" class="hidden">
+          <label for="aiProviderNote">备注</label><input type="text" id="aiProviderNote" maxlength="80" placeholder="如：主线路、GLM 备用">
+          <label for="aiProviderBase">API 地址（OpenAI 兼容）</label><input type="url" id="aiProviderBase" maxlength="2048" placeholder="https://api.openai.com/v1">
+          <label for="aiProviderKey">API Key</label><input type="password" id="aiProviderKey" maxlength="4096" autocomplete="new-password" placeholder="sk-...">
+          <label for="aiProviderModel">模型</label><input type="text" id="aiProviderModel" maxlength="256" placeholder="gpt-4o-mini">
+          <label class="check"><input type="checkbox" id="aiProviderEnabled" checked> 启用</label>
+          <div class="flex" style="margin-top:12px"><button class="btn" type="button" id="aiProviderSave" onclick="saveAIProvider()">保存</button><button class="ghost" type="button" onclick="closeAIProviderForm()">取消</button></div>
+        </div>
+        <div id="aiTestResult" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
+      </div>
+    </div>
     <div class="card fold" id="foldTg">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>Telegram 账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
@@ -1379,6 +1394,7 @@ function resetAccountCaches(){
   editingRule=null;editAuto=null;editAutoAccount=null;ruleEditAccount=null;tgPhase='idle';window._prevLoggedIn=null;if(typeof resetAIAssistant==='function')resetAIAssistant();
   logQ='';logKind='reply';resetLogOpenState();anomalySeq++;anomalies=[];anomalyBusyIds.clear();clearTimeout(logQtimer);$('#logQ').value='';$('#gSearch').value='';
   batchBusy=false;exportBusy=false;$('#configExportAll').disabled=false;
+  closeAIProviderForm();
   for(const id of ['gAll','gWatched','rList','logList','tgCard'])$('#'+id).replaceChildren();
   for(const id of ['ovName','ovUser','ovGroups','ovRules','ovHits','gCnt'])$('#'+id).textContent='--';
   $('#ovNoTg').style.display='flex';$('#dotHead').classList.remove('on');$('#ovStatus').textContent='未登录';$('#hPause').textContent='未登录';$('#swPause').classList.remove('on');
@@ -1387,8 +1403,8 @@ function resetAccountCaches(){
   Object.keys(AUTO_TYPE).forEach(t=>{closeAutoForm(t);renderAutoList(t)});closeRuleForm();
     const reset=$('#batchTz');reset.textContent='签到窗口使用当前账号设置的时区（加载中…）';$('#sTz').replaceChildren();$('#tzNow').textContent='';
   invalidateBatchPreview();cancelConfigImport();resetAccountTests();
-  for(const id of ['sAiBase','sAiKey','sAiModel','sBark','sBt','sBc','sFlPool'])$('#'+id).value='';
-  $('#sAiKey').placeholder='sk-...';$('#sTaskConcurrency').value='2';
+  for(const id of ['sBark','sBt','sBc','sFlPool'])$('#'+id).value='';
+  $('#sTaskConcurrency').value='2';signinAIProviderSel.clear();renderSigninAIProviders();
   syncAutoSelection();
 }
 function switchAccount(id){
@@ -1896,7 +1912,7 @@ function editAutoItem(id){
     $('#sClicks').value=a.click_times||1;
     $('#sClickGap').value=a.click_interval||300;
     $('#sRefreshButtons').value=String(a.refresh_buttons??1);
-    $('#sCap').checked=!!a.signin_captcha;
+    $('#sCap').checked=!!a.signin_captcha;signinAIProviderSel=new Set(String(a.ai_provider_ids||'').split(',').filter(Boolean));renderSigninAIProviders();syncSigninCaptchaProviders();
     $('#sKw').value=a.success_kw||'';
     $('#sFw').value=a.fail_kw||'';
     $('#sPts').value=a.points_pat||'';
@@ -1958,7 +1974,7 @@ function editAutoItem(id){
 }
 function cancelAutoEdit(t){
   editAuto=null;editAutoAccount=null;if(typeof assistantFormDraft!=='undefined')assistantFormDraft=null;
-  ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
+  ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninCaptchaProviders();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
@@ -2128,6 +2144,7 @@ async function saveAuto(type){
       success_kw:$('#sKw').value.trim(),fail_kw:$('#sFw').value.trim(),
       points_pat:$('#sPts').value.trim(),retries:$('#sRetries').value.trim()===''?2:Number($('#sRetries').value),
       signin_captcha:$('#sCap').checked?1:0};
+    if(signinAIProviderSel.size)body.ai_provider_ids=[...signinAIProviderSel].join(',');
     if(body.icon_url&&!safeHttpUrl(body.icon_url))return toast('图标仅支持安全的 HTTP / HTTPS URL',1);
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
     for(const delay of [body.command_delay,body.button_delay,body.result_delay]){
@@ -2242,6 +2259,7 @@ async function toggleAuto(id){
   try{await api('/api/autos/'+id+'/toggle',{method:'POST'});loadAutos()}catch(e){toast(e.message,1)}
 }
 $('#sClickBtn').addEventListener('change',function(){$('#sBtnWrap').classList.toggle('hidden',!this.checked)});
+$('#sCap').addEventListener('change',syncSigninCaptchaProviders);
 function toggleClosedRetryFields(){$('#trClosedRetryFields').classList.toggle('hidden',!$('#trClosedRetry').checked)}
 $('#trClosedRetry').addEventListener('change',toggleClosedRetryFields);
 function toggleLinkReplyFields(){$('#lkGroupReplyFields').classList.toggle('hidden',!$('#lkGroupReply').checked)}
@@ -2686,6 +2704,59 @@ async function toggleTheme(){
   try{await api('/api/settings',{method:'POST',body:JSON.stringify({theme:cur})})}catch(e){}
 }
 
+// ---------- AI API 池 ----------
+let aiProviders=[],editingAIProviderId=null,aiProvidersSeq=0,signinAIProviderSel=new Set();
+function formatTokenCount(value){return Number(value||0).toLocaleString('zh-CN')}
+function renderAIProviders(){
+  $('#aiProvidersCount').textContent=aiProviders.length;
+  $('#aiProvidersList').innerHTML=aiProviders.length?aiProviders.map(p=>`<div class="ai-provider-row" data-ai-id="${p.id}">
+    <div class="ai-provider-head"><div class="ai-provider-note">${esc(p.note)}</div><span class="tag ${p.enabled?'ok':'off'}">${p.enabled?'已启用':'已停用'}</span></div>
+    <div class="ai-provider-meta">${esc(p.model)}<br>${esc(p.base)}</div>
+    <div class="ai-provider-meta ai-token-usage">输入 ${formatTokenCount(p.input_tokens)}　输出 ${formatTokenCount(p.output_tokens)} Token</div>
+    <div class="ai-provider-actions"><button class="ghost" data-ai-action="test">测试</button><button class="ghost" data-ai-action="edit">编辑</button><button class="ghost" data-ai-action="toggle">${p.enabled?'停用':'启用'}</button><button class="danger" data-ai-action="delete">删除</button></div>
+  </div>`).join(''):'<div class="empty">尚未添加 AI API</div>';
+  renderSigninAIProviders();
+}
+function renderSigninAIProviders(){
+  const box=$('#sCaptchaProviders');if(!box)return;
+  const enabled=aiProviders.filter(p=>p.enabled);
+  box.innerHTML=enabled.length?enabled.map(p=>`<button type="button" class="gp ${signinAIProviderSel.has(p.id)?'on':''}" data-signin-ai="${p.id}">${esc(p.note)}</button>`).join(''):'<div class="empty" style="padding:6px">请先到设置启用 AI API</div>';
+}
+function syncSigninCaptchaProviders(){$('#sCaptchaProviderWrap').classList.toggle('hidden',!$('#sCap').checked)}
+async function loadAIProviders(){
+  const seq=++aiProvidersSeq;
+  try{const d=await api('/api/ai/providers');if(seq!==aiProvidersSeq)return;aiProviders=Array.isArray(d.providers)?d.providers:[];renderAIProviders()}
+  catch(e){if(seq===aiProvidersSeq)$('#aiTestResult').textContent='AI API 加载失败：'+e.message}
+}
+function openAIProviderForm(id=null){
+  editingAIProviderId=id;const p=aiProviders.find(x=>x.id===id);
+  $('#aiProviderNote').value=p?.note||'';$('#aiProviderBase').value=p?.base||'';$('#aiProviderKey').value='';
+  $('#aiProviderKey').placeholder=p?.key_present?'已保存，留空不修改':'sk-...';$('#aiProviderModel').value=p?.model||'';$('#aiProviderEnabled').checked=p?.enabled??true;
+  $('#aiProviderForm').classList.remove('hidden');$('#aiProviderNote').focus();$('#aiProviderForm').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function closeAIProviderForm(){editingAIProviderId=null;$('#aiProviderForm').classList.add('hidden');$('#aiProviderKey').value=''}
+async function saveAIProvider(){
+  const body={note:$('#aiProviderNote').value.trim(),base:$('#aiProviderBase').value.trim(),key:$('#aiProviderKey').value.trim(),model:$('#aiProviderModel').value.trim(),enabled:$('#aiProviderEnabled').checked};
+  if(!body.note||!body.base||!body.model||(!editingAIProviderId&&!body.key))return toast('请填写备注、地址、Key 和模型',1);
+  try{await api('/api/ai/providers'+(editingAIProviderId?'/'+editingAIProviderId:''),{method:editingAIProviderId?'PUT':'POST',body:JSON.stringify(body)});closeAIProviderForm();$('#aiTestResult').textContent='AI API 已保存';await loadAIProviders()}
+  catch(e){$('#aiTestResult').textContent='保存失败：'+e.message;toast(e.message,1)}
+}
+async function mutateAIProvider(id,action){
+  const p=aiProviders.find(x=>x.id===id);if(!p)return;
+  if(action==='edit')return openAIProviderForm(id);
+  if(action==='delete'&&!window.confirm('删除 AI API「'+p.note+'」？'))return;
+  $('#aiTestResult').textContent=action==='test'?'正在测试「'+p.note+'」…':'';
+  try{
+    if(action==='test'){
+      const d=await api('/api/ai/providers/'+id+'/test',{method:'POST'});$('#aiTestResult').textContent=(d.ok?'连接测试成功':'连接测试失败')+'\n实际回复：'+(d.reply||'（空回复）')+'\n耗时：'+testElapsed(d.elapsed_ms)+(d.ok?'':'\n原因：'+(d.error||'未知'));
+    }else if(action==='toggle')await api('/api/ai/providers/'+id,{method:'PUT',body:JSON.stringify({note:p.note,base:p.base,key:'',model:p.model,enabled:!p.enabled})});
+    else await api('/api/ai/providers/'+id,{method:'DELETE'});
+    if(action!=='test')await loadAIProviders();else await loadAIProviders();
+  }catch(e){$('#aiTestResult').textContent='操作失败：'+e.message;toast(e.message,1)}
+}
+$('#aiProvidersList').addEventListener('click',e=>{const b=e.target.closest('[data-ai-action]'),row=e.target.closest('[data-ai-id]');if(b&&row)mutateAIProvider(row.dataset.aiId,b.dataset.aiAction)});
+$('#sCaptchaProviders').addEventListener('click',e=>{const b=e.target.closest('[data-signin-ai]');if(!b)return;const id=b.dataset.signinAi;signinAIProviderSel.has(id)?signinAIProviderSel.delete(id):signinAIProviderSel.add(id);renderSigninAIProviders()});
+
 // ---------- 状态 ----------
 async function loadState(){
   const c=accountContext();
@@ -2745,22 +2816,17 @@ async function loadSettings(){
     $('#sNof').checked=s.notify_on_fail==='1';
     $('#sAiOn').checked=s.ai_enabled==='1';
     $('#sOcrOn').checked=s.ocr_enabled!=='0';
-    $('#sAiBase').value=s.ai_base||'';
-    $('#sAiKey').value='';
-    $('#sAiKey').placeholder=s.ai_key_present===true?'已保存，留空不修改':'sk-...';
-    $('#sAiModel').value=s.ai_model||'';
     $('#sFl').checked=s.flock_enabled==='1';
     $('#sFlCnt').value=s.flock_count||5;
     $('#sFlMin').value=s.flock_minutes||5;
     $('#sFlPool').value=s.flock_pool||'';
     if(s.theme && !localStorage.getItem('tgp_theme'))applyTheme(s.theme);  // 本机优先,其它设备首次访问才用后端主题
-    loadTz();loadSessions();
+    loadTz();loadSessions();loadAIProviders();
   }catch(e){}
 }
 async function saveSettings(){
-  const concurrency=String($('#sTaskConcurrency').value||'2'),c=accountContext(),key=$('#sAiKey').value.trim();
+  const concurrency=String($('#sTaskConcurrency').value||'2'),c=accountContext();
   if(!/^[1-5]$/.test(concurrency))return toast('每账号任务并发上限须为 1–5',1);
-  const keyWasPresent=$('#sAiKey').placeholder==='已保存，留空不修改';
   try{
     await api('/api/settings',{method:'POST',body:JSON.stringify({
       cooldown:+$('#sCooldown').value,
@@ -2775,9 +2841,6 @@ async function saveSettings(){
       notify_on_fail:$('#sNof').checked?'1':'0',
       ai_enabled:$('#sAiOn').checked?'1':'0',
       ocr_enabled:$('#sOcrOn').checked?'1':'0',
-      ai_base:$('#sAiBase').value.trim(),
-      ai_key:key,
-      ai_model:$('#sAiModel').value.trim(),
       flock_enabled:$('#sFl').checked?'1':'0',
       flock_count:$('#sFlCnt').value||5,
       flock_minutes:$('#sFlMin').value||5,
@@ -2785,40 +2848,22 @@ async function saveSettings(){
       theme:document.documentElement.dataset.theme||'dark'
     }),_account:c});
     if(!isCurrentAccount(c))return;
-    $('#sAiKey').value='';$('#sAiKey').placeholder=(key||keyWasPresent)?'已保存，留空不修改':'sk-...';
     toast('设置已保存');loadSettings();
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 // ---------- AI 与验证码测试 ----------
 function currentAIConfig(){
   return {
-    ai_base:$('#sAiBase').value.trim(),ai_key:$('#sAiKey').value.trim(),
-    ai_model:$('#sAiModel').value.trim(),
     ai_enabled:$('#sAiOn').checked?'1':'0',ocr_enabled:$('#sOcrOn').checked?'1':'0'
   };
 }
 function testElapsed(ms){return typeof ms==='number'&&Number.isFinite(ms)&&ms>=0?ms+' ms':'未知'}
-async function testAIConnection(){
-  const c=accountContext(),btn=$('#aiTestBtn'),result=$('#aiTestResult');
-  if(btn.disabled)return;
-  btn.disabled=true;result.textContent='正在测试 AI 连接…';
-  try{
-    const d=await api('/api/ai/test',{method:'POST',body:JSON.stringify(currentAIConfig()),_account:c});
-    if(!isCurrentAccount(c))return;
-    const reply=typeof d.reply==='string'?d.reply:'';
-    const success=d.ok===true&&reply.trim()==='测试成功';
-    result.textContent=(success?'连接测试成功':'连接测试失败')+
-      '\n实际回复：'+(reply||'（空回复）')+'\n耗时：'+testElapsed(d.elapsed_ms)+
-      (success?'':'\n原因：'+(d.error||'AI 未按约定只回复“测试成功”'));
-  }catch(e){if(isCurrentAccount(c)){result.textContent='连接测试失败：'+e.message;toast(e.message,1)}}
-  finally{if(isCurrentAccount(c))btn.disabled=false}
-}
 let captchaTestImage='',captchaTestVersion=0,captchaTestReader=null,captchaTestBusy=false;
 function resetAccountTests(){
   captchaTestVersion++;captchaTestImage='';captchaTestBusy=false;
   if(captchaTestReader){const reader=captchaTestReader;captchaTestReader=null;try{reader.abort()}catch(e){}}
   $('#captchaTestFile').value='';$('#captchaTestPreview').removeAttribute('src');$('#captchaTestPreview').style.display='none';
-  $('#aiTestResult').textContent='';$('#captchaTestResult').textContent='';$('#aiTestBtn').disabled=false;$('#captchaTestBtn').disabled=true;
+  $('#captchaTestResult').textContent='';$('#captchaTestBtn').disabled=true;
 }
 function previewCaptchaFile(){
   const version=++captchaTestVersion,result=$('#captchaTestResult'),preview=$('#captchaTestPreview'),btn=$('#captchaTestBtn');

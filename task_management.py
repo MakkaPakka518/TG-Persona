@@ -32,7 +32,7 @@ SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
     "poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button"
+    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids"
 ).split(","))
 # Credentials are stored per-account in settings, never in task rows/exports.
 INTEGER_LIMITS = {
@@ -57,6 +57,7 @@ APPLICABILITY = {
     "link_mode": {"link_register", "code_register"}, "link_limit": {"link_register", "code_register"}, "link_wait": {"link_register", "code_register"},
     "existing_kw": {"link_register", "button_register", "code_register"}, "success_reply_enabled": {"link_register", "button_register", "code_register"},
     "success_reply_text": {"link_register", "button_register", "code_register"}, "success_reply_delay": {"link_register", "button_register", "code_register"},
+    "ai_provider_ids": {"signin"},
 }
 RULE_COLUMNS = ("keywords", "regex", "action", "value", "reaction", "groups", "enabled")
 STEP_FIELDS = {

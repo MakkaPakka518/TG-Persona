@@ -36,7 +36,7 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
             if outer.phase=='prompt': return [photo_message(102,'请输入验证码（测试消息）',2),photo_message(101,'欢迎使用测试机器人',1)]
             if outer.phase=='result': return [message(104,outer.answer_result),photo_message(102,'请输入验证码（测试消息）',2)]
             return []
-        async def recognize(data,*args):
+        async def recognize(data,*args,**kwargs):
             outer.events.append(('recognize',None));return 'FIXTURECODE'
         self.b['client']=SimpleNamespace(send_message=AsyncMock(side_effect=send),get_messages=AsyncMock(side_effect=get),download_media=AsyncMock(return_value=b'fake-image-no-real-captcha'))
         self.b['resolve_entity']=AsyncMock(return_value='entity')
@@ -81,6 +81,13 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.run_flow(aid)
         self.assertEqual([s for kind,s in self.events if kind=='sleep'][:2],[0.0,0.0])
         self.assertEqual(self.row(aid)['last_status'],'success')
+
+    async def test_selected_ai_providers_reach_captcha_recognition(self):
+        selected='0123456789abcdef,fedcba9876543210'
+        aid=await self.create(ai_provider_ids=selected)
+        await self.run_flow(aid)
+        self.assertEqual(self.row(aid)['ai_provider_ids'],selected)
+        self.assertEqual(self.b['recognize_image_text'].call_args.kwargs['provider_ids'],selected)
 
     async def test_fixed_mode_does_not_fetch_between_clicks(self):
         aid=await self.create(click_times=3,refresh_buttons=0)

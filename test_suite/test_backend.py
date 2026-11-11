@@ -21,6 +21,7 @@ import re
 import secrets
 import sqlite3
 import struct
+import threading
 import time
 from types import SimpleNamespace
 from typing import Optional
@@ -80,7 +81,8 @@ def load_backend():
                  HTTPException=HTTPException, JSONResponse=Response, os=SimpleNamespace(environ={}),
                  log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=Exception,
                  AuthKeyUnregisteredError=Unauthorized), ZoneInfo=None,
-                 _captcha=OrderedDict(), _login_fail=OrderedDict(), _auth_gc_at=0.0,
+                  _captcha=OrderedDict(), _login_fail=OrderedDict(), _auth_gc_at=0.0,
+                  _ai_cfg={}, _ai_rr={}, _ai_usage_guard=threading.Lock(),
                  TRUSTED_PROXIES=(), _auto_running={}, signin_plans={}, poll_last={}, auto_last_ts={},
                  _session_alerted=False, tg_state={'phase': 'ready', 'me': {'id': 1}, 'err': None},
                  _running={'paused': True}, client=SimpleNamespace(), notify_event=Mock(), send_notify=Mock())

@@ -14,8 +14,6 @@ class MockFileReader{
 }
 const sampleImage='data:image/png;base64,YWJjZA==';
 function configureAI(ai=true,ocr=true,key='dummy-test-key'){
-  element('#sAiBase').value=' https://dummy.invalid/v1 ';
-  element('#sAiKey').value=key;element('#sAiModel').value=' dummy-model ';
   element('#sAiOn').checked=ai;element('#sOcrOn').checked=ocr;
 }
 function selectImage(file={type:'image/png',size:128},image=sampleImage){
@@ -25,7 +23,7 @@ function selectImage(file={type:'image/png',size:128},image=sampleImage){
 function element(id){
   if(!elements.has(id)){
     const classes=new Set();
-    const el={innerHTML:'',textContent:'',children:[],style:{},dataset:{},disabled:false,src:'',listeners:{},attributes:{},querySelector(){return null},querySelectorAll(){return []},getAttribute(k){return this.attributes[k]??null},setAttribute(k,v){this.attributes[k]=String(v)},click(){this.clicked=true},remove(){this.removed=true},classList:{add(...v){v.forEach(k=>classes.add(k))},remove(...v){v.forEach(k=>classes.delete(k))},contains(k){return classes.has(k)},toggle(k,force){const add=force===undefined?!classes.has(k):force;add?classes.add(k):classes.delete(k);return add}},scrollIntoView(){},addEventListener(t,fn){this.listeners[t]=fn},contains(){return true},removeAttribute(k){delete this[k]},appendChild(node){this.children.push(node);return node},replaceChildren(...nodes){this.children=nodes;this.textContent=''}};
+    const el={innerHTML:'',textContent:'',children:[],style:{},dataset:{},disabled:false,src:'',listeners:{},attributes:{},querySelector(){return null},querySelectorAll(){return []},getAttribute(k){return this.attributes[k]??null},setAttribute(k,v){this.attributes[k]=String(v)},click(){this.clicked=true},focus(){this.focused=true},remove(){this.removed=true},classList:{add(...v){v.forEach(k=>classes.add(k))},remove(...v){v.forEach(k=>classes.delete(k))},contains(k){return classes.has(k)},toggle(k,force){const add=force===undefined?!classes.has(k):force;add?classes.add(k):classes.delete(k);return add}},scrollIntoView(){},addEventListener(t,fn){this.listeners[t]=fn},contains(){return true},removeAttribute(k){delete this[k]},appendChild(node){this.children.push(node);return node},replaceChildren(...nodes){this.children=nodes;this.textContent=''}};
     let value='';Object.defineProperty(el,'value',{get(){return value},set(v){value=String(v)}});
     elements.set(id,el);
   }
@@ -51,6 +49,7 @@ function run(s){return vm.runInContext(s,context)}
 function slice(start,end){const a=js.indexOf(start),b=js.indexOf(end,a+start.length);assert(a>=0&&b>a,start);return js.slice(a,b)}
 run(js.split('\n').find(line=>line.startsWith('const $=')));
 run(js.split('\n').find(line=>line.startsWith('const esc=')));
+run(slice('// ---------- AI API 池 ----------','// ---------- 状态 ----------'));
 run(slice('// ---------- 账号请求范围 ----------','async function api('));
 run(slice('// ---------- 安全图标与共享图标库 ----------','let autos=[], editAuto=null, editAutoAccount=null;'));
 run(slice('// ---------- 可视化步骤编辑器 ----------','const autoGroupSel='));
@@ -184,6 +183,17 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     prepareSignin({'#sCommandDelay':'0','#sButtonDelay':'0'});let body;
     context.api=async(p,o)=>{body=JSON.parse(o.body);return {}};await run("saveAuto('signin')");
     assert.strictEqual(body.command_delay,0);assert.strictEqual(body.button_delay,0);
+  });
+  await test('签到验证码可多选 AI API 并在编辑时完整回填',async()=>{
+    const first='0123456789abcdef',second='fedcba9876543210';
+    context.providerFixture=[{id:first,note:'主线路',enabled:true},{id:second,note:'备用线路',enabled:true},{id:'aaaaaaaaaaaaaaaa',note:'停用线路',enabled:false}];
+    run('aiProviders=providerFixture;renderSigninAIProviders()');prepareSignin();element('#sCap').checked=true;
+    assert(!element('#sCaptchaProviders').innerHTML.includes('停用线路'));
+    for(const id of [first,second])element('#sCaptchaProviders').listeners.click({target:{closest:()=>({dataset:{signinAi:id}})}});
+    let body;context.api=async(_p,o)=>{body=JSON.parse(o.body);return {}};await run("saveAuto('signin')");
+    assert.strictEqual(body.ai_provider_ids,first+','+second);
+    editSignin({ai_provider_ids:second});assert.strictEqual(run("[...signinAIProviderSel].join(',')"),second);
+    assert(element('#sCaptchaProviders').innerHTML.includes('备用线路'));
   });
   await test('编辑 PUT 保存独立延迟和边界值且保持启用状态',async()=>{
     for(const [command_delay,button_delay] of [[0,120],[120,0],[0.1,3.7]]){
@@ -453,45 +463,32 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     await assert.rejects(()=>run('loadUpd(true)'),/mock network error/);
     assert.strictEqual(element('#updCheck').disabled,false);
   });
-  await test('新增入口位于识别卡片且密钥为密码输入',async()=>{
-    assert(/<input type="password" id="sAiKey"/.test(html));
-    for(const id of ['aiTestBtn','aiTestResult','captchaTestFile','captchaTestPreview','captchaTestLength','captchaTestBtn','captchaTestResult']){
-      assert(html.indexOf('id="'+id+'"')>html.indexOf('id="sAiModel"'));
-      assert(html.indexOf('id="'+id+'"')<html.indexOf('id="aCntSign"'));
-    }
+  await test('AI API 已移到设置，验证码卡片不再包含密钥表单',async()=>{
+    const captcha=html.slice(html.indexOf('>验证码识别<'),html.indexOf('id="aCntSign"'));
+    const settings=html.slice(html.indexOf('<section id="tab-settings">'),html.indexOf('</section>',html.indexOf('<section id="tab-settings">')));
+    for(const id of ['aiProvidersList','aiProviderAdd','aiProviderNote','aiProviderBase','aiProviderKey','aiProviderModel'])assert(settings.includes('id="'+id+'"'));
+    assert(settings.includes('type="password" id="aiProviderKey"'));
+    assert(!captcha.includes('AI API Key')&&!captcha.includes('aiProviderKey'));
   });
-  await test('AI 测试使用未保存填写值、空 Key 且不受开关阻止',async()=>{
-    configureAI(false,false,' ');let request;
-    context.api=async(p,o)=>{request=[p,o];return {ok:true,reply:'测试成功',elapsed_ms:27}};
-    await run('testAIConnection()');
-    assert.strictEqual(request[0],'/api/ai/test');assert.strictEqual(request[1].method,'POST');
-    assert.deepStrictEqual(JSON.parse(request[1].body),{ai_base:'https://dummy.invalid/v1',ai_key:'',ai_model:'dummy-model',ai_enabled:'0',ocr_enabled:'0'});
-    assert(element('#aiTestResult').textContent.includes('连接测试成功'));
-    assert(element('#aiTestResult').textContent.includes('实际回复：测试成功'));
-    assert(element('#aiTestResult').textContent.includes('27 ms'));assert(!element('#aiTestBtn').disabled);
+  await test('AI API 列表安全显示备注、状态和输入输出 Token',async()=>{
+    context.providerFixture=[{id:'0123456789abcdef',note:'主线路<img>',base:'https://dummy.invalid/v1',model:'dummy',enabled:true,key_present:true,input_tokens:1234,output_tokens:56}];
+    run('aiProviders=providerFixture;renderAIProviders()');const out=element('#aiProvidersList').innerHTML;
+    assert(out.includes('主线路&lt;img&gt;')&&out.includes('输入 1,234')&&out.includes('输出 56'));
+    assert(!out.includes('<img>')&&!out.includes('dummy-provider-secret'));
   });
-  await test('AI 失败展示原因与非约定回复且只作为文本',async()=>{
-    const reply='<img src=x onerror=alert(1)>';
-    context.api=async()=>({ok:false,reply,error:'非约定回复 <script>',elapsed_ms:9});
-    await run('testAIConnection()');const out=element('#aiTestResult').textContent;
-    assert(out.includes(reply)&&out.includes('非约定回复 <script>')&&out.includes('连接测试失败'));
-    assert(!element('#aiTestBtn').disabled);
+  await test('新增和编辑 AI API 支持备注且空 Key 沿用',async()=>{
+    run('openAIProviderForm()');element('#aiProviderNote').value='主线路';element('#aiProviderBase').value='https://dummy.invalid/v1';element('#aiProviderKey').value='new-key';element('#aiProviderModel').value='dummy';
+    const requests=[];context.api=async(p,o)=>{requests.push([p,o]);return {ok:true,provider:{id:'0123456789abcdef'}}};context.loadAIProviders=async()=>{};
+    await run('saveAIProvider()');assert.strictEqual(requests[0][0],'/api/ai/providers');assert.strictEqual(JSON.parse(requests[0][1].body).note,'主线路');
+    context.providerFixture=[{id:'0123456789abcdef',note:'主线路',base:'https://dummy.invalid/v1',model:'dummy',enabled:true,key_present:true,input_tokens:0,output_tokens:0}];run("aiProviders=providerFixture;openAIProviderForm('0123456789abcdef')");
+    assert.strictEqual(element('#aiProviderKey').value,'');assert(element('#aiProviderKey').placeholder.includes('留空不修改'));
   });
-  await test('AI 返回未知或空结果不会冒充成功',async()=>{
-    for(const data of [{ok:true,reply:'other'},{ok:false,reply:'测试成功'},{},{ok:true,reply:42}]){
-      context.api=async()=>data;await run('testAIConnection()');
-      assert(element('#aiTestResult').textContent.includes('连接测试失败'));
-      assert(element('#aiTestResult').textContent.includes('原因：'));
-      assert(!element('#aiTestBtn').disabled);
-    }
-  });
-  await test('AI 忙时只发一次请求且异常后恢复按钮',async()=>{
-    let reject,sent=0;context.api=()=>{sent++;return new Promise((_,r)=>{reject=r})};
-    const pending=run('testAIConnection()');assert(element('#aiTestBtn').disabled);
-    await run('testAIConnection()');assert.strictEqual(sent,1);reject(new Error('mock unavailable'));
-    await pending;assert(!element('#aiTestBtn').disabled);
-    assert(element('#aiTestResult').textContent.includes('mock unavailable'));
-    assert.deepStrictEqual(calls.at(-1),['toast','mock unavailable',1]);
+  await test('单条 AI API 测试展示实际回复、耗时和错误',async()=>{
+    context.providerFixture=[{id:'0123456789abcdef',note:'主线路',base:'https://dummy.invalid/v1',model:'dummy',enabled:true}];run('aiProviders=providerFixture');
+    context.api=async()=>({ok:true,reply:'测试成功',elapsed_ms:27});context.loadAIProviders=async()=>{};
+    await run("mutateAIProvider('0123456789abcdef','test')");assert(element('#aiTestResult').textContent.includes('连接测试成功')&&element('#aiTestResult').textContent.includes('27 ms'));
+    context.api=async()=>({ok:false,reply:'<img>',error:'失败 <script>',elapsed_ms:9});await run("mutateAIProvider('0123456789abcdef','test')");
+    assert(element('#aiTestResult').textContent.includes('<img>')&&element('#aiTestResult').textContent.includes('失败 <script>'));
   });
   await test('选择图片仅本地预览、清理结果且无上传',async()=>{
     let sent=0;context.api=async()=>{sent++;return {}};
@@ -553,7 +550,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     for(const length of ['', '0', '16']){
       element('#captchaTestLength').value=length;await run('testCaptchaRecognition()');
       assert.strictEqual(request[0],'/api/captcha/test');assert.strictEqual(request[1].method,'POST');
-      assert.deepStrictEqual(JSON.parse(request[1].body),{image:sampleImage,length:Number(length),ai_base:'https://dummy.invalid/v1',ai_key:'',ai_model:'dummy-model',ai_enabled:'0',ocr_enabled:'1'});
+      assert.deepStrictEqual(JSON.parse(request[1].body),{image:sampleImage,length:Number(length),ai_enabled:'0',ocr_enabled:'1'});
       const out=element('#captchaTestResult').textContent;
       assert(out.includes('识别成功')&&out.includes('aB42')&&out.includes('本地 OCR')&&out.includes('48 ms'));
       assert(!element('#captchaTestBtn').disabled);
@@ -611,12 +608,10 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     let gated=0;
     const apiContext=vm.createContext({fetch:async()=>({status:400,ok:false,json:async()=>({error:'mock HTTP 参数错误'})}),showLoginGate(){gated++}});
     vm.runInContext(slice('// ---------- 账号请求范围 ----------','const esc='),apiContext);
-    context.api=apiContext.api;await run('testAIConnection()');
-    assert(element('#aiTestResult').textContent.includes('mock HTTP 参数错误'));assert(!element('#aiTestBtn').disabled);
-    selectImage();await run('testCaptchaRecognition()');
+    context.api=apiContext.api;selectImage();await run('testCaptchaRecognition()');
     assert(element('#captchaTestResult').textContent.includes('mock HTTP 参数错误'));assert(!element('#captchaTestBtn').disabled);
-    apiContext.fetch=async()=>({status:401});await run('testAIConnection()');assert.strictEqual(gated,1);
-    assert(element('#aiTestResult').textContent.includes('未登录面板'));assert(!element('#aiTestBtn').disabled);
+    apiContext.fetch=async()=>({status:401});selectImage();await run('testCaptchaRecognition()');assert.strictEqual(gated,1);
+    assert(element('#captchaTestResult').textContent.includes('未登录面板'));
   });
   await test('签到日志显示来源和失败原因且不执行服务端文本',async()=>{
     context.LOG_KINDS={signin:'签到'};context.fmt=()=>'';
@@ -763,8 +758,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('缓存清理含任务群规则日志勾选表单和凭证，不在localStorage保存秘密',async()=>{
     ex("autos=[{id:42,type:'custom'}];allGroups=[{chat_id:1}];allRules=[{id:42}];watchedGroups=[{chat_id:1}];selectedAutoIds=new Set([42]);editAuto={id:42};editingRule=42;tgPhase='ready';state={tg:{me:{name:'旧client'}},logged_in:true};logQ='old';ruleGroupSel.add('1');autoGroupSel.grabcodes.add('1')");
-    q('#logList').innerHTML='旧日志';q('#sAiKey').value='mock-secret';q('#tgCard').innerHTML='旧手机号';ex('resetAccountCaches()');
-    for(const name of ['autos','allGroups','allRules','watchedGroups'])assert.strictEqual(ex(name+'.length'),0);assert.strictEqual(ex('selectedAutoIds.size'),0);assert.strictEqual(ex('editAuto'),null);assert.strictEqual(ex('editingRule'),null);assert.strictEqual(ex('state.logged_in'),false);assert.strictEqual(q('#sAiKey').value,'');assert.strictEqual(q('#cSteps').value,'[]');assert.strictEqual(ex('logQ'),'');assert.strictEqual(q('#autoSelectedCount').textContent,'已选 0 项');
+    q('#logList').innerHTML='旧日志';q('#aiProviderKey').value='mock-secret';q('#aiProviderForm').classList.remove('hidden');q('#tgCard').innerHTML='旧手机号';ex('resetAccountCaches()');
+    for(const name of ['autos','allGroups','allRules','watchedGroups'])assert.strictEqual(ex(name+'.length'),0);assert.strictEqual(ex('selectedAutoIds.size'),0);assert.strictEqual(ex('editAuto'),null);assert.strictEqual(ex('editingRule'),null);assert.strictEqual(ex('state.logged_in'),false);assert.strictEqual(q('#aiProviderKey').value,'');assert(q('#aiProviderForm').classList.contains('hidden'));assert.strictEqual(q('#cSteps').value,'[]');assert.strictEqual(ex('logQ'),'');assert.strictEqual(q('#autoSelectedCount').textContent,'已选 0 项');
     const loaders=['loadState','loadSettings','loadAutos','loadRules','loadRuleGroups','loadDialogs','loadLogs','renderTgCard'];for(const name of loaders)app[name]=()=>{};
     ex("switchAccount('account-new')");assert.strictEqual(store.get('tgp_selected_id'),'account-new');assert(![...store.keys()].some(k=>/key|phone|session/.test(k)));
   });
@@ -976,8 +971,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(/id="signinGlobalFields" class="hidden"/.test(html));assert(html.includes('所有任务及失败重试轮完成后只推送一条汇总'));const button=q('global-toggle');app.globalButton=button;ex('toggleSigninGlobalFields(globalButton)');assert.strictEqual(button.getAttribute('aria-expanded'),'true');ex('toggleSigninGlobalFields(globalButton)');assert.strictEqual(button.getAttribute('aria-expanded'),'false');
   });
   await test('统一设置独立POST只保存三个keys，不连带AI或其他设置',async()=>{
-    ex("selectedAccount='default';accountEpoch++;signinGlobalDirty=true;signinGlobalBusy=false");q('#signinGlobalEnabled').checked=true;q('#signinGlobalStart').value='00:05';q('#signinGlobalEnd').value='00:41';q('#sAiKey').value='mock-unsaved-key';q('#sAiBase').value='mock-unsaved-base';let requests=[];
-    app.api=async(p,o)=>{requests.push([p,o]);return {ok:true}};app.loadAutos=async()=>{};await ex('saveSigninGlobal()');assert.strictEqual(requests.length,1);assert.strictEqual(requests[0][0],'/api/settings');assert.strictEqual(requests[0][1].method,'POST');assert.deepStrictEqual(JSON.parse(requests[0][1].body),{signin_global_enabled:'1',signin_global_start:'00:05',signin_global_end:'00:41'});assert.strictEqual(q('#sAiKey').value,'mock-unsaved-key');assert.strictEqual(q('#sAiBase').value,'mock-unsaved-base');assert.strictEqual(ex('signinGlobal.enabled'),true);assert(!q('#signinGlobalSave').disabled);
+    ex("selectedAccount='default';accountEpoch++;signinGlobalDirty=true;signinGlobalBusy=false");q('#signinGlobalEnabled').checked=true;q('#signinGlobalStart').value='00:05';q('#signinGlobalEnd').value='00:41';q('#aiProviderKey').value='mock-unsaved-key';q('#aiProviderBase').value='mock-unsaved-base';let requests=[];
+    app.api=async(p,o)=>{requests.push([p,o]);return {ok:true}};app.loadAutos=async()=>{};await ex('saveSigninGlobal()');assert.strictEqual(requests.length,1);assert.strictEqual(requests[0][0],'/api/settings');assert.strictEqual(requests[0][1].method,'POST');assert.deepStrictEqual(JSON.parse(requests[0][1].body),{signin_global_enabled:'1',signin_global_start:'00:05',signin_global_end:'00:41'});assert.strictEqual(q('#aiProviderKey').value,'mock-unsaved-key');assert.strictEqual(q('#aiProviderBase').value,'mock-unsaved-base');assert.strictEqual(ex('signinGlobal.enabled'),true);assert(!q('#signinGlobalSave').disabled);
   });
   await test('统一设置修改及远端变更均清旧批量预览且提示单任务暂不生效',async()=>{
     ex('batchPreview={old:true};batchSeq=100;markSigninGlobalDirty()');assert.strictEqual(ex('batchPreview'),null);assert(q('#batchApplyBtn').disabled);assert.strictEqual(ex('batchSeq'),101);
@@ -1154,20 +1149,12 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     for(let i=1;i<=5;i++)assert(control[1].includes('value="'+i+'"'));assert(html.includes('按任务列表顺序，每批两个；整轮结束再排失败重试'));
   });
   await test('设置并发按账号载入保存且迟到响应不覆盖新账号',async()=>{
-    app.loadTz=app.loadSessions=()=>{};ex("selectedAccount='settings-a';accountEpoch++");let resolves=[];app.api=()=>new Promise(r=>resolves.push(r));
+    app.loadTz=app.loadSessions=app.loadAIProviders=()=>{};ex("selectedAccount='settings-a';accountEpoch++");let resolves=[];app.api=()=>new Promise(r=>resolves.push(r));
     const old=ex('loadSettings()');ex("selectedAccount='settings-b';accountEpoch++");const fresh=ex('loadSettings()');
-    resolves[1]({task_concurrency:'5',ai_key_present:false});await fresh;assert.strictEqual(q('#sTaskConcurrency').value,'5');
-    resolves[0]({task_concurrency:'1',ai_key_present:true});await old;assert.strictEqual(q('#sTaskConcurrency').value,'5');
-    q('#sTaskConcurrency').value='4';q('#sAiKey').value='';let posted;app.api=async(p,o)=>{if(o?.method==='POST'){posted=[p,o];return {ok:true}}return {task_concurrency:'4',ai_key_present:false}};
-    await ex('saveSettings()');assert.strictEqual(posted[0],'/api/settings');assert.strictEqual(posted[1]._account.id,'settings-b');assert.strictEqual(JSON.parse(posted[1].body).task_concurrency,'4');assert.strictEqual(JSON.parse(posted[1].body).ai_key,'');
-  });
-  await test('AI Key 永不回填，保存后清空并只更新存在提示',async()=>{
-    ex("selectedAccount='default';accountEpoch++");app.loadTz=app.loadSessions=()=>{};
-    app.api=async()=>({task_concurrency:'2',ai_key:'<img src=x onerror=bad()>',ai_key_present:true});await ex('loadSettings()');
-    assert.strictEqual(q('#sAiKey').value,'');assert.strictEqual(q('#sAiKey').placeholder,'已保存，留空不修改');assert(!q('#sAiKey').innerHTML.includes('img'));
-    q('#sAiKey').value='mock-new-key';let body;app.api=async(p,o)=>{if(o?.method==='POST'){body=JSON.parse(o.body);return {ok:true}}return {task_concurrency:'2',ai_key:'malicious-returned-key',ai_key_present:true}};
-    await ex('saveSettings()');assert.strictEqual(body.ai_key,'mock-new-key');assert.strictEqual(q('#sAiKey').value,'');assert.strictEqual(q('#sAiKey').placeholder,'已保存，留空不修改');
-    assert(![...store.values()].join('|').includes('mock-new-key'));
+    resolves[1]({task_concurrency:'5'});await fresh;assert.strictEqual(q('#sTaskConcurrency').value,'5');
+    resolves[0]({task_concurrency:'1'});await old;assert.strictEqual(q('#sTaskConcurrency').value,'5');
+    q('#sTaskConcurrency').value='4';let posted;app.api=async(p,o)=>{if(o?.method==='POST'){posted=[p,o];return {ok:true}}return {task_concurrency:'4'}};
+    await ex('saveSettings()');assert.strictEqual(posted[0],'/api/settings');assert.strictEqual(posted[1]._account.id,'settings-b');assert.strictEqual(JSON.parse(posted[1].body).task_concurrency,'4');assert(!('ai_key' in JSON.parse(posted[1].body)));
   });
   await test('运行与排队任务显示停止取消按钮并正确启用停止全部',async()=>{
     app.runTask={id:701,type:'signin',name:'运行任务',target:'@dummy',command:'/sign',enabled:1,running:true,queued:false};app.queueTask={id:702,type:'signin',name:'排队任务',target:'@dummy',command:'/sign',enabled:1,running:false,queued:true};

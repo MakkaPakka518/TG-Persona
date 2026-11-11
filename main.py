@@ -199,6 +199,7 @@ def db_init(database=None):
         ("success_reply_delay", "INTEGER DEFAULT 5"),
         ("announcement_kw", "TEXT DEFAULT '定时注册'"),
         ("announcement_button", "TEXT DEFAULT '点击注册'"),
+        ("ai_provider_ids", "TEXT DEFAULT ''"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -390,6 +391,8 @@ def cache_snapshot():
 # OCR and AI config are deliberately shared once per process.
 _ocr = None                # ddddocr 实例(惰性加载)
 _ai_cfg = {}               # AI 验证码配置缓存
+_ai_rr = {}                # provider id tuple -> next round-robin index
+_ai_usage_guard = threading.Lock()
 
 def send_notify(title, text=""):
     """失败/成功通知:Bark + TG Bot(可配置),后台异步发送不阻塞主流程"""
@@ -446,11 +449,89 @@ def notify_event(kind, name, detail=""):
 
 
 def load_ai_cfg():
-    _ai_cfg.update({
-        "base": str(get_setting("ai_base", "") or "").strip(),
-        "key": str(get_setting("ai_key", "") or "").strip(),
-        "model": str(get_setting("ai_model", "") or "").strip(),
-    })
+    providers = _ai_provider_configs()
+    _ai_cfg.clear()
+    _ai_cfg.update(providers[0] if providers else {})
+
+
+def _legacy_ai_config():
+    return {"base": str(get_setting("ai_base", "") or "").strip(),
+            "key": str(get_setting("ai_key", "") or "").strip(),
+            "model": str(get_setting("ai_model", "") or "").strip()}
+
+
+def _ai_provider_rows(migrate=True):
+    try:
+        rows = json.loads(get_setting("ai_providers", "") or "[]")
+    except (TypeError, ValueError):
+        rows = []
+    if not isinstance(rows, list):
+        rows = []
+    clean = []
+    for row in rows[:20]:
+        if not isinstance(row, dict):
+            continue
+        item = {"id": str(row.get("id") or ""), "note": str(row.get("note") or "").strip(),
+                "base": str(row.get("base") or "").strip(), "key": str(row.get("key") or "").strip(),
+                "model": str(row.get("model") or "").strip(), "enabled": bool(row.get("enabled", True)),
+                "input_tokens": max(0, int(row.get("input_tokens") or 0)),
+                "output_tokens": max(0, int(row.get("output_tokens") or 0))}
+        if re.fullmatch(r"[a-f0-9]{16}", item["id"]) and item["base"] and item["key"] and item["model"]:
+            clean.append(item)
+    if not clean and migrate and get_setting("ai_providers_migrated", "0") != "1":
+        legacy = _legacy_ai_config()
+        if all(legacy.values()):
+            clean = [{"id": secrets.token_hex(8), "note": "原有配置", **legacy, "enabled": True,
+                      "input_tokens": 0, "output_tokens": 0}]
+            set_setting("ai_providers", json.dumps(clean, ensure_ascii=False))
+        set_setting("ai_providers_migrated", "1")
+    return clean
+
+
+def _save_ai_providers(rows):
+    set_setting("ai_providers", json.dumps(rows, ensure_ascii=False))
+    set_setting("ai_providers_migrated", "1")
+    load_ai_cfg()
+
+
+def _ai_provider_configs():
+    return [{"id": row["id"], "note": row["note"], "base": row["base"],
+             "key": row["key"], "model": row["model"]}
+            for row in _ai_provider_rows() if row["enabled"]]
+
+
+def _record_ai_usage(provider_id, usage):
+    if not re.fullmatch(r"[a-f0-9]{16}", str(provider_id or "")) or not isinstance(usage, dict):
+        return
+    try:
+        input_tokens = max(0, int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0))
+        output_tokens = max(0, int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0))
+    except (TypeError, ValueError):
+        return
+    if not input_tokens and not output_tokens:
+        return
+    with _ai_usage_guard:
+        rows = _ai_provider_rows(migrate=False)
+        for row in rows:
+            if row["id"] == provider_id:
+                row["input_tokens"] += input_tokens
+                row["output_tokens"] += output_tokens
+                _save_ai_providers(rows)
+                return
+
+
+def _ordered_ai_providers(provider_ids=None):
+    providers = _ai_provider_configs()
+    selected = [part.strip() for part in str(provider_ids or "").split(",") if part.strip()]
+    if selected:
+        allowed = set(selected)
+        providers = [cfg for cfg in providers if cfg["id"] in allowed]
+    if not providers:
+        return []
+    key = tuple(cfg["id"] for cfg in providers)
+    start = _ai_rr.get(key, 0) % len(providers)
+    _ai_rr[key] = start + 1
+    return providers[start:] + providers[:start]
 
 
 _ocr_guard = threading.Lock()
@@ -560,7 +641,22 @@ async def _call_ai(cfg, content, max_tokens=512, assistant_mode=False):
             if finish == "content_filter":
                 raise RuntimeError("AI 服务未提供正文（响应被内容过滤），请调整描述")
             raise RuntimeError("AI 返回空正文；接口已响应，但没有可用答案，请重试或检查模型配置")
+        _record_ai_usage(cfg.get("id"), data.get("usage"))
         return reply
+
+
+async def _call_ai_any(content, max_tokens=512, assistant_mode=False, provider_ids=None):
+    providers = _ordered_ai_providers(provider_ids)
+    if not providers:
+        raise ValueError("请先在设置中添加并启用 AI API")
+    failures = []
+    for cfg in providers:
+        try:
+            return await _call_ai(cfg, content, max_tokens, assistant_mode)
+        except Exception as error:
+            failures.append((cfg.get("note") or cfg.get("model") or "未备注",
+                             _safe_ai_error(error, cfg.get("key", ""))))
+    raise RuntimeError("所有已启用 AI API 均失败：" + "；".join(note + "：" + message for note, message in failures))
 
 
 def _classify_local_image(image_bytes):
@@ -572,13 +668,11 @@ def _classify_local_image(image_bytes):
         return _ocr.classification(image_bytes)
 
 
-async def _recognize_image_result(image_bytes, length=0, cfg=None, ai_on=None, ocr_on=None):
+async def _recognize_image_result(image_bytes, length=0, cfg=None, ai_on=None, ocr_on=None, provider_ids=None):
     """自动任务与面板测试共用识别链，测试只覆盖配置快照，不修改已保存设置。"""
     started = time.perf_counter()
     if cfg is None:
-        cfg = {"base": str(get_setting("ai_base", "") or "").strip(),
-               "key": str(get_setting("ai_key", "") or "").strip(),
-               "model": str(get_setting("ai_model", "") or "gpt-4o-mini").strip()}
+        cfg = {}
     ai_on = get_setting("ai_enabled", "0") == "1" if ai_on is None else ai_on
     ocr_on = get_setting("ocr_enabled", "1") == "1" if ocr_on is None else ocr_on
     errors = []
@@ -593,14 +687,21 @@ async def _recognize_image_result(image_bytes, length=0, cfg=None, ai_on=None, o
             raise ValueError("识别字符数与期望长度不一致（期望 " + str(length) + " 位）")
         return text
     if ai_on:
-        try:
-            content = [{"type": "text", "text": "识别图片中的验证码文字，只输出字符本身，不要解释" + ("，长度应为" + str(length) if length else "")},
-                       {"type": "image_url", "image_url": {"url": "data:" + _image_mime(image_bytes) + ";base64," + base64.b64encode(image_bytes).decode("ascii")}}]
-            return result(clean(await _call_ai(cfg, content)), "ai")
-        except Exception as error:
-            message = _safe_ai_error(error, cfg.get("key", ""))
-            errors.append({"channel": "ai", "message": message})
-            log.warning("AI 识别失败: %s", message)
+        content = [{"type": "text", "text": "识别图片中的验证码文字，只输出字符本身，不要解释" + ("，长度应为" + str(length) if length else "")},
+                   {"type": "image_url", "image_url": {"url": "data:" + _image_mime(image_bytes) + ";base64," + base64.b64encode(image_bytes).decode("ascii")}}]
+        providers = (_ordered_ai_providers(provider_ids) if cfg.get("_use_all")
+                     else [cfg] if cfg.get("base") or cfg.get("key") or cfg.get("model")
+                     else _ordered_ai_providers(provider_ids))
+        if not providers:
+            errors.append({"channel": "ai", "message": "请先在设置中添加并启用 AI API"})
+        for provider in providers:
+            try:
+                return result(clean(await _call_ai(provider, content)), "ai")
+            except Exception as error:
+                message = _safe_ai_error(error, provider.get("key", ""))
+                note = provider.get("note") or provider.get("model") or "未备注"
+                errors.append({"channel": "ai", "provider": note, "message": message})
+                log.warning("AI 识别失败（%s）: %s", note, message)
     if ocr_on:
         try:
             loop = asyncio.get_running_loop()
@@ -615,8 +716,8 @@ async def _recognize_image_result(image_bytes, length=0, cfg=None, ai_on=None, o
     return result()
 
 
-async def recognize_image_text(image_bytes, length=0):
-    return (await _recognize_image_result(image_bytes, length))["text"]
+async def recognize_image_text(image_bytes, length=0, provider_ids=None):
+    return (await _recognize_image_result(image_bytes, length, provider_ids=provider_ids))["text"]
 
 
 # ---------------- 面板鉴权:密码哈希 / 会话令牌 / 限速 / 验证码 ----------------
@@ -1734,7 +1835,7 @@ async def run_signin(a):
         cap_m, img = await _await_signin_captcha(ent, 25, min_id=captcha_min_id, baseline=captcha_baseline)
         if not img:
             return _task_failure(a, "本轮未收到带验证提示的新图片；已忽略欢迎图和旧图，未提交识别结果", cmd)
-        cap_ans = await recognize_image_text(img)
+        cap_ans = await recognize_image_text(img, provider_ids=a["ai_provider_ids"])
         if not cap_ans:
             return _task_failure(a, "验证码识别为空(检查 AI/本地 OCR 开关)", cmd)
         try:
@@ -2141,31 +2242,15 @@ async def run_button_register(a, bot, source_chat):
 
 async def _select_btn_ai(btns, hint):
     """AI 从按钮列表中选择应点击的按钮,返回按钮对象;AI 未开启或无配置返回 None"""
-    if not _ai_cfg:
-        load_ai_cfg()
-    if get_setting("ai_enabled", "0") != "1" or not (_ai_cfg.get("base") and _ai_cfg.get("key")):
+    if get_setting("ai_enabled", "0") != "1":
         return None
     flat = [b.text for row in btns for b in row]
     if not flat:
         return None
     try:
-        if httpx is None:
-            raise RuntimeError("httpx 未安装")
-        async with httpx.AsyncClient(timeout=30) as c:
-            r = await c.post(
-                (_ai_cfg["base"].rstrip("/")) + "/chat/completions",
-                headers={"Authorization": f"Bearer {_ai_cfg['key']}"},
-                json={
-                    "model": _ai_cfg.get("model") or "gpt-4o-mini",
-                    "messages": [{"role": "user", "content": (
-                        f"以下是一个 Telegram 内联键盘的按钮: {flat}\n"
-                        f"根据提示「{hint}」选择应点击的那个按钮,只输出按钮上的原文,不要任何解释"
-                    )}],
-                    "max_tokens": 30,
-                },
-            )
-            d = r.json()
-            ans = (d["choices"][0]["message"]["content"] or "").strip()
+        ans = await _call_ai_any(
+            f"以下是一个 Telegram 内联键盘的按钮: {flat}\n根据提示「{hint}」选择应点击的那个按钮,只输出按钮上的原文,不要任何解释",
+            max_tokens=30)
         ans = ans.strip().strip('"').strip("'")
         for row in btns:
             for b in row:
@@ -3560,6 +3645,7 @@ class AutoIn(BaseModel):
     success_reply_delay: int = 5
     announcement_kw: str = "定时注册"
     announcement_button: str = "点击注册"
+    ai_provider_ids: str = ""        # signin: 逗号分隔 provider id；空=全部启用
 
 
 def _valid_auto(body: AutoIn):
@@ -3595,6 +3681,9 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "命令后和按钮后延迟需为 0-120 秒")
         if body.refresh_buttons not in (0, 1):
             raise HTTPException(400, "按钮刷新模式只能为 0 或 1")
+        ids = [part.strip() for part in body.ai_provider_ids.split(",") if part.strip()]
+        if len(ids) != len(set(ids)) or any(not re.fullmatch(r"[a-f0-9]{16}", part) for part in ids):
+            raise HTTPException(400, "签到任务的 AI API 选择无效")
     if body.type == "keepalive":
         if not body.target.strip():
             raise HTTPException(400, "保号任务需要填写群(@用户名 或群ID)")
@@ -3667,7 +3756,7 @@ def _valid_auto(body: AutoIn):
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
               "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button")
+              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids")
 
 
 def _auto_vals(body: AutoIn, extra=None):
@@ -3684,7 +3773,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.result_delay, body.result_timeout, body.scheduled_at.strip(), body.history_first,
         body.link_mode, body.link_limit, body.link_wait, body.existing_kw.strip(),
         body.success_reply_enabled, body.success_reply_text.strip(), body.success_reply_delay,
-        body.announcement_kw.strip(), body.announcement_button.strip(),
+        body.announcement_kw.strip(), body.announcement_button.strip(), body.ai_provider_ids.strip(),
     ] + (extra or [])
 
 
@@ -4141,6 +4230,94 @@ async def update_settings(body: dict):
     return {"ok": True}
 
 
+class AIProviderInput(BaseModel):
+    note: str = Field(..., min_length=1, max_length=80)
+    base: str = Field(..., min_length=1, max_length=2048)
+    key: str = Field("", max_length=4096)
+    model: str = Field(..., min_length=1, max_length=256)
+    enabled: bool = True
+
+
+def _public_ai_provider(row):
+    return {"id": row["id"], "note": row["note"], "base": row["base"],
+            "model": row["model"], "enabled": row["enabled"], "key_present": bool(row["key"]),
+            "input_tokens": row["input_tokens"], "output_tokens": row["output_tokens"]}
+
+
+def _validated_ai_provider(body, previous=None):
+    item = {"id": previous["id"] if previous else secrets.token_hex(8),
+            "note": body.note.strip(), "base": body.base.strip(),
+            "key": body.key.strip() or (previous["key"] if previous else ""),
+            "model": body.model.strip(), "enabled": bool(body.enabled),
+            "input_tokens": previous["input_tokens"] if previous else 0,
+            "output_tokens": previous["output_tokens"] if previous else 0}
+    if not item["key"]:
+        raise HTTPException(400, "请填写 AI API Key")
+    try:
+        _ai_endpoint(item["base"])
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from None
+    return item
+
+
+@app.get("/api/ai/providers")
+async def list_ai_providers():
+    rows = _ai_provider_rows()
+    return {"providers": [_public_ai_provider(row) for row in rows],
+            "enabled_count": sum(row["enabled"] for row in rows)}
+
+
+@app.post("/api/ai/providers")
+async def create_ai_provider(body: AIProviderInput):
+    rows = _ai_provider_rows()
+    if len(rows) >= 20:
+        raise HTTPException(409, "最多添加 20 条 AI API")
+    item = _validated_ai_provider(body)
+    rows.append(item)
+    _save_ai_providers(rows)
+    return {"ok": True, "provider": _public_ai_provider(item)}
+
+
+@app.put("/api/ai/providers/{provider_id}")
+async def update_ai_provider(provider_id: str, body: AIProviderInput):
+    rows = _ai_provider_rows()
+    index = next((i for i, row in enumerate(rows) if row["id"] == provider_id), -1)
+    if index < 0:
+        raise HTTPException(404, "AI API 不存在")
+    rows[index] = _validated_ai_provider(body, rows[index])
+    _save_ai_providers(rows)
+    return {"ok": True, "provider": _public_ai_provider(rows[index])}
+
+
+@app.delete("/api/ai/providers/{provider_id}")
+async def delete_ai_provider(provider_id: str):
+    rows = _ai_provider_rows()
+    kept = [row for row in rows if row["id"] != provider_id]
+    if len(kept) == len(rows):
+        raise HTTPException(404, "AI API 不存在")
+    _save_ai_providers(kept)
+    return {"ok": True}
+
+
+@app.post("/api/ai/providers/{provider_id}/test")
+async def test_saved_ai_provider(provider_id: str):
+    if _ai_test_lock.locked():
+        raise HTTPException(409, "已有识别或 AI 测试正在执行，请稍后重试")
+    row = next((row for row in _ai_provider_rows() if row["id"] == provider_id), None)
+    if row is None:
+        raise HTTPException(404, "AI API 不存在")
+    started = time.perf_counter()
+    async with _ai_test_lock:
+        try:
+            reply = await _call_ai(row, "这是连接测试。请只回复四个字：测试成功。不要解释，不要添加其它文字。")
+            ok = reply.strip() == "测试成功"
+            return {"ok": ok, "reply": reply, "error": "" if ok else "AI 未按要求只回复“测试成功”",
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+        except Exception as error:
+            return {"ok": False, "reply": "", "error": _safe_ai_error(error, row["key"]),
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+
+
 class AITestSettings(BaseModel):
     ai_base: Optional[str] = Field(None, max_length=2048)
     ai_key: Optional[str] = Field(None, max_length=4096)
@@ -4155,6 +4332,11 @@ class CaptchaTestInput(AITestSettings):
 
 
 def _test_ai_settings(body):
+    supplied = any(getattr(body, "ai_" + name) is not None for name in ("base", "key", "model"))
+    if not supplied:
+        providers = _ai_provider_configs()
+        cfg = dict(providers[0], _use_all=True) if providers else {"_use_all": True}
+        return cfg, (get_setting("ai_enabled", "0") == "1" if body.ai_enabled is None else body.ai_enabled), (get_setting("ocr_enabled", "1") == "1" if body.ocr_enabled is None else body.ocr_enabled)
     cfg = {}
     for name in ("base", "key", "model"):
         supplied = getattr(body, "ai_" + name)
@@ -4174,7 +4356,8 @@ async def test_ai_connection(body: AITestSettings):
     started = time.perf_counter()
     async with _ai_test_lock:
         try:
-            reply = await _call_ai(cfg, "这是连接测试。请只回复四个字：测试成功。不要解释，不要添加其它文字。")
+            reply = (await _call_ai_any("这是连接测试。请只回复四个字：测试成功。不要解释，不要添加其它文字。")
+                     if cfg.get("_use_all") else await _call_ai(cfg, "这是连接测试。请只回复四个字：测试成功。不要解释，不要添加其它文字。"))
             ok = reply.strip() == "测试成功"
             return {"ok": ok, "reply": reply, "error": "" if ok else "AI 已返回内容，但没有按要求回复“测试成功”",
                     "elapsed_ms": int((time.perf_counter() - started) * 1000)}
@@ -4401,7 +4584,11 @@ from ai_assistant import build_ai_assistant_router
 
 async def assistant_call_ai(*args, **kwargs):
     kwargs['assistant_mode'] = True
-    return await _call_ai(*args, **kwargs)
+    cfg = args[0] if args else kwargs.pop("cfg", {})
+    remaining = args[1:]
+    if cfg.get("_use_all"):
+        return await _call_ai_any(*remaining, **kwargs)
+    return await _call_ai(cfg, *remaining, **kwargs)
 
 app.include_router(build_ai_assistant_router(
     get_account_db, AutoIn, _valid_auto, _auto_vals, _AUTO_COLS,

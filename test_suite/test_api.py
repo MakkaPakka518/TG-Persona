@@ -132,6 +132,13 @@ def probe():
         check(https_client.post('/api/autos',json={**new_task,'refresh_buttons':2}).status_code==422, '拒绝未知连点模式')
         check(guest.post('/api/ai/task-draft',json={'text':'任务'}).status_code==401, 'AI生成必须经过面板鉴权')
         check(guest.post('/api/ai/diagnose',json={'id':delayed.json()['id']}).status_code==401, 'AI排障必须经过面板鉴权')
+        provider={'note':'测试线路','base':'https://example.invalid/v1','key':'provider-fixture-secret','model':'fixture-model','enabled':True}
+        check(guest.post('/api/ai/providers',json=provider).status_code==401, 'AI API 管理必须经过面板鉴权')
+        created_provider=https_client.post('/api/ai/providers',json=provider)
+        check(created_provider.status_code==200, '真实路由可新增 AI API')
+        listed_providers=https_client.get('/api/ai/providers')
+        check(listed_providers.status_code==200 and listed_providers.json()['enabled_count']==1, '真实路由可列出启用的 AI API')
+        check('provider-fixture-secret' not in listed_providers.text, 'AI API 列表不回传密钥')
         with patch.object(main,'_call_ai',new=AsyncMock(return_value='{"type":"signin","name":"AI草稿","target":"@dummy","command":"/start"}')):
             draft=https_client.post('/api/ai/task-draft',json={'text':'给 @dummy 发 /start'})
             check(draft.status_code==200 and draft.json()['draft']['enabled']==0,'真实路由只生成停用草稿')

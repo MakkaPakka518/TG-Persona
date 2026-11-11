@@ -24,7 +24,8 @@ class AssistantTests(unittest.TestCase):
             self.requests.append((cfg,content,kw))
             if self.ai_error:raise self.ai_error
             return self.reply
-        self.shared={'ai_base':'https://example.invalid/v1','ai_key':'dummy-provider-secret','ai_model':'fixture-model'}
+        self.shared={'ai_base':'https://example.invalid/v1','ai_key':'dummy-provider-secret','ai_model':'fixture-model',
+                     'ai_providers':json.dumps([{'key':'pool-provider-secret'}])}
         def settings(body):
             cfg={key:getattr(body,'ai_'+key,None) or self.shared['ai_'+key] for key in ('base','key','model')}
             return cfg,True,False
@@ -72,13 +73,13 @@ class AssistantTests(unittest.TestCase):
         response=self.client.post('/api/ai/diagnose',json={'id':999});self.assertEqual(response.status_code,404);self.assertEqual(self.requests,[])
     def test_diagnose_only_current_task_redacts_values_before_request(self):
         aid=self.task();bid=self.task('b')
-        self.bs['a']['add_hit']('signin',False,rule_id=-aid,content='captcha FICTION123 phone +19457455379',reply='Bearer abcsecret sk-abcdefghijk FICTION123',detail={'captcha':'FICTION123','error':'dummy-provider-secret','image':'data:image/png;base64,AAA'})
+        self.bs['a']['add_hit']('signin',False,rule_id=-aid,content='captcha FICTION123 phone +19457455379',reply='Bearer abcsecret sk-abcdefghijk FICTION123',detail={'captcha':'FICTION123','error':'dummy-provider-secret pool-provider-secret','image':'data:image/png;base64,AAA'})
         self.bs['b']['add_hit']('signin',False,rule_id=-bid,reply='OTHER_ACCOUNT_SECRET')
         self.reply=json.dumps({'analysis':'应该增加等待时间','suggestions':[{'field':'button_delay','value':4,'reason':'当前回复较晚'}]})
         d=self.client.post('/api/ai/diagnose',json={'id':aid}).json()
         self.assertTrue(d['ok']);self.assertEqual(len(d['timeline']),1)
         prompt=self.requests[0][1]
-        for secret in ('FICTION123','19457455379','dummy-provider-secret','OTHER_ACCOUNT_SECRET','sk-abcdefghijk','data:image'):
+        for secret in ('FICTION123','19457455379','dummy-provider-secret','pool-provider-secret','OTHER_ACCOUNT_SECRET','sk-abcdefghijk','data:image'):
             self.assertNotIn(secret,prompt)
         self.assertIn('****5379',prompt);self.assertEqual(d['suggestions'][0]['value'],4)
         self.assertEqual(self.bs['a']['conn'].execute('SELECT button_delay FROM automations').fetchone()[0],2)
