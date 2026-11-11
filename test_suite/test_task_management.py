@@ -32,9 +32,9 @@ def load_model_callbacks():
         return hour * 60 + minute
     source = ast.parse((ROOT / "main.py").read_text())
     wanted = {"AutoIn", "_valid_auto", "_auto_vals"}
-    nodes = [node for node in source.body if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in wanted]
-    nodes += [node for node in source.body if isinstance(node, ast.Assign)
-              and any(isinstance(target, ast.Name) and target.id == "_AUTO_COLS" for target in node.targets)]
+    assignments = [node for node in source.body if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id in ("_AUTO_COLS", "DEFAULT_SIGNIN_IMAGE_PROMPT") for target in node.targets)]
+    nodes = assignments + [node for node in source.body if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in wanted]
     namespace = {"BaseModel": BaseModel, "Field": Field, "HTTPException": HTTPException,
                  "math": math, "json": json, "re": re, "_win_minutes": win_minutes}
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "<safe-model-fixture>", "exec"), namespace)
@@ -173,6 +173,22 @@ class TaskManagementTests(unittest.TestCase):
         for key in ('announcement_kw', 'announcement_button', 'command', 'success_reply_text', 'success_reply_delay'):
             self.assertEqual(row[key], self.row(aid)[key])
         self.assertEqual(row['enabled'], 0)
+
+    def test_signin_image_mode_prompt_and_provider_selection_round_trip(self):
+        aid=self.add(signin_recognition_mode='image',signin_image_prompt='只输出图片物体名称',
+                     ai_provider_ids='0123456789abcdef',signin_captcha=0)
+        exported=self.client.get('/api/tasks/export')
+        self.assertEqual(exported.status_code,200,exported.text)
+        task=exported.json()['automations'][0]
+        self.assertEqual((task['signin_recognition_mode'],task['signin_image_prompt'],task['ai_provider_ids']),
+                         ('image','只输出图片物体名称','0123456789abcdef'))
+        invalid=json.loads(json.dumps(exported.json()));invalid['automations'][0].update(signin_recognition_mode='none',signin_captcha=1)
+        self.assertEqual(self.imp(invalid,account='other').status_code,400)
+        imported=self.imp(exported.json(),account='other',preview=False)
+        self.assertEqual(imported.status_code,200,imported.text)
+        row=self.row(imported.json()['ids'][0],'other')
+        self.assertEqual((row['signin_recognition_mode'],row['signin_image_prompt'],row['ai_provider_ids']),
+                         ('image','只输出图片物体名称','0123456789abcdef'))
 
     def test_code_register_export_import_and_single_group_validation(self):
         aid = self.add(type='code_register', groups='-100123', target='@fixed_bot',

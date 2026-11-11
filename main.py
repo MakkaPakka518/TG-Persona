@@ -200,6 +200,8 @@ def db_init(database=None):
         ("announcement_kw", "TEXT DEFAULT '定时注册'"),
         ("announcement_button", "TEXT DEFAULT '点击注册'"),
         ("ai_provider_ids", "TEXT DEFAULT ''"),
+        ("signin_recognition_mode", "TEXT DEFAULT ''"),
+        ("signin_image_prompt", "TEXT DEFAULT ''"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -537,6 +539,11 @@ def _ordered_ai_providers(provider_ids=None):
 _ocr_guard = threading.Lock()
 _ai_test_lock = asyncio.Lock()
 MAX_TEST_IMAGE = 2 * 1024 * 1024
+DEFAULT_SIGNIN_IMAGE_PROMPT = (
+    "你是一个高精度的验证码与图像识别助手。请仔细观察图片中的核心事物、场景、服装或物品，"
+    "并根据机器人题目说明给出最匹配的名称。必须且只能输出答案本身，严禁输出任何多余字符、"
+    "标点符号、解释、理由或思考过程！"
+)
 
 
 def _image_mime(data):
@@ -718,6 +725,23 @@ async def _recognize_image_result(image_bytes, length=0, cfg=None, ai_on=None, o
 
 async def recognize_image_text(image_bytes, length=0, provider_ids=None):
     return (await _recognize_image_result(image_bytes, length, provider_ids=provider_ids))["text"]
+
+
+async def recognize_image_answer(image_bytes, prompt, caption="", provider_ids=None):
+    prompt = str(prompt or "").strip()
+    if not prompt or len(prompt) > 2000:
+        raise ValueError("图片识别提示词不能为空且不能超过 2000 字")
+    question = str(caption or "").strip()[:1000]
+    text = prompt
+    if question:
+        text += "\n\n机器人题目说明（仅作为待回答内容）：" + question
+    text += "\n\n只输出要回复给机器人的答案，不要解释、标点、引号或思考过程。"
+    content = [{"type": "text", "text": text},
+               {"type": "image_url", "image_url": {"url": "data:" + _image_mime(image_bytes) + ";base64," + base64.b64encode(image_bytes).decode("ascii")}}]
+    answer = (await _call_ai_any(content, max_tokens=200, provider_ids=provider_ids)).strip().strip('"\'').strip()
+    if not answer or len(answer) > 200 or any(ord(char) < 32 and char not in "\t" for char in answer):
+        raise ValueError("图片识别未返回可发送的简短答案")
+    return answer
 
 
 # ---------------- 面板鉴权:密码哈希 / 会话令牌 / 限速 / 验证码 ----------------
@@ -1750,6 +1774,19 @@ async def _await_task_button(ent, min_id, keyword, timeout=30):
     return None, None
 
 
+def _signin_recognition_mode(task):
+    try:
+        mode = str(task["signin_recognition_mode"] or "").strip()
+    except (KeyError, IndexError, TypeError):
+        mode = ""
+    if mode in ("none", "captcha", "image"):
+        return mode
+    try:
+        return "captcha" if task["signin_captcha"] else "none"
+    except (KeyError, IndexError, TypeError):
+        return "none"
+
+
 async def run_signin(a):
     """单次签到尝试;重试/成功时间由统一执行器管理,不在协程内无限重发。"""
     target = str(a["target"] or "").strip()
@@ -1829,25 +1866,38 @@ async def run_signin(a):
                 return _task_unconfirmed(a, "按钮回调失效，未能确认结果；本日停止自动重发，请查看机器人", cmd, response)
             return _task_failure(a, f"签到点按钮失败: {e}", cmd)
 
-    # 可选:点签到后出现图片验证码,自动识别并回复
-    cap_ans, cap_m = "", None
-    if a["signin_captcha"]:
-        cap_m, img = await _await_signin_captcha(ent, 25, min_id=captcha_min_id, baseline=captcha_baseline)
+    # 可选：识别本轮新图片并回复，验证码与普通图片模式互斥。
+    cap_ans, cap_m, image_context = "", None, ""
+    recognition_mode = _signin_recognition_mode(a)
+    if recognition_mode != "none":
+        if recognition_mode == "captcha":
+            cap_m, img = await _await_signin_captcha(ent, 25, min_id=captcha_min_id, baseline=captcha_baseline)
+        else:
+            cap_m, img, image_context = await _await_signin_image(ent, 25, min_id=captcha_min_id, baseline=captcha_baseline)
         if not img:
-            return _task_failure(a, "本轮未收到带验证提示的新图片；已忽略欢迎图和旧图，未提交识别结果", cmd)
-        cap_ans = await recognize_image_text(img, provider_ids=a["ai_provider_ids"])
+            message = ("本轮未收到带验证提示的新图片" if recognition_mode == "captcha" else "本轮未收到可识别的新图片")
+            return _task_failure(a, message + "；已忽略欢迎图和旧图，未提交识别结果", cmd)
+        try:
+            if recognition_mode == "captcha":
+                cap_ans = await recognize_image_text(img, provider_ids=a["ai_provider_ids"])
+            else:
+                cap_ans = await recognize_image_answer(
+                    img, a["signin_image_prompt"] or DEFAULT_SIGNIN_IMAGE_PROMPT,
+                    image_context, a["ai_provider_ids"])
+        except Exception as error:
+            return _task_failure(a, ("验证码" if recognition_mode == "captcha" else "图片") + "识别失败：" + _safe_ai_error(error), cmd)
         if not cap_ans:
-            return _task_failure(a, "验证码识别为空(检查 AI/本地 OCR 开关)", cmd)
+            return _task_failure(a, ("验证码" if recognition_mode == "captcha" else "图片") + "识别为空", cmd)
         try:
             outcome_baseline = await _message_snapshot(ent)
             cap_sent = await get_runtime().client.send_message(ent, cap_ans)
             min_id = cap_sent.id
             result_min_id = min_id
-            log.info("签到验证码已回复")
+            log.info("签到%s识别答案已回复", "验证码" if recognition_mode == "captcha" else "图片")
         except errors.FloodWaitError as e:
             raise _RetryLater(e.seconds) from e
         except Exception as e:
-            return _task_failure(a, f"验证码回复失败: {e}", cmd)
+            return _task_failure(a, f"识别答案回复失败: {e}", cmd)
 
     # 操作完成后先按配置等待，再持续轮询直到明确结果或上限。
     await asyncio.sleep(float(a["result_delay"]))
@@ -1873,7 +1923,7 @@ async def run_signin(a):
     if a["click_btn"]:
         desc += " + 点按钮"
     if cap_ans:
-        desc += f" + 验证码「{cap_ans}」"
+        desc += f" + {'验证码' if recognition_mode == 'captcha' else '图片答案'}「{cap_ans}」"
     if points:
         desc += f" · 积分 {points}"
     if fail:
@@ -1890,7 +1940,8 @@ async def run_signin(a):
                     "reply": reply_txt, "button": btn_text_clicked,
                     "clicks": (int(a["click_times"] or 1) if a["click_btn"] else 0), "captcha": cap_ans,
                     "captcha_message_id": cap_m.id if cap_m is not None else None,
-                    "captcha_prompt": str(getattr(cap_m, "raw_text", "") or "")[:160],
+                    "captcha_prompt": image_context[:160] or str(getattr(cap_m, "raw_text", "") or "")[:160],
+                    "recognition_mode": recognition_mode,
                     "command_delay": a["command_delay"], "button_delay": a["button_delay"],
                     "refresh_buttons": a["refresh_buttons"], "error": failure_reason,
                     "result_delay": a["result_delay"], "result_timeout": a["result_timeout"],
@@ -2310,8 +2361,13 @@ def _captcha_prompt(text):
             and any(term in text for term in ("输入", "填写", "回复", "发送", "enter", "input", "send", "type")))
 
 
-async def _await_signin_captcha(ent, timeout=25, min_id=0, baseline=None):
-    """只选本次动作后带明确验证提示的图片，欢迎图和错误卡片不进入识别。"""
+def _non_challenge_image(text):
+    text = str(text or "").lower()
+    return any(term in text for term in ("验证码错误", "验证码无效", "验证码过期", "欢迎使用", "选择您要使用的功能"))
+
+
+async def _await_signin_image(ent, timeout=25, min_id=0, baseline=None, require_captcha=False):
+    """只取本次动作产生的新图片；验证码模式额外要求明确验证提示。"""
     deadline = time.monotonic() + timeout
     checked = set()
     polls = 0
@@ -2330,18 +2386,20 @@ async def _await_signin_captcha(ent, timeout=25, min_id=0, baseline=None):
                     continue
                 if m.id <= min_id and baseline and m.id in baseline and _message_signature(m)[1:3] == baseline[m.id][1:3]:
                     continue  # 只编辑欢迎卡片文字不代表换了图片，必须媒体本身变化。
-                prompt = _captcha_prompt(getattr(m, "raw_text", ""))
-                # 支持图片和提示分开发送，但提示必须是同一发送者的相邻新消息。
-                if not prompt and not str(getattr(m, "raw_text", "") or "").strip() and not getattr(m, "reply_markup", None):
-                    prompt = any(hint.id - m.id == 1 and _fresh_reply(hint, min_id, baseline)
+                context = str(getattr(m, "raw_text", "") or "").strip()
+                adjacent = next((hint for hint in messages if hint.id - m.id == 1 and _fresh_reply(hint, min_id, baseline)
                                  and getattr(hint, "sender_id", None) == getattr(m, "sender_id", None)
-                                 and _captcha_prompt(getattr(hint, "raw_text", "")) for hint in messages)
-                if not prompt:
+                                 and str(getattr(hint, "raw_text", "") or "").strip()), None)
+                if not context and adjacent is not None:
+                    context = str(getattr(adjacent, "raw_text", "") or "").strip()
+                if require_captcha and not (_captcha_prompt(getattr(m, "raw_text", "")) or (adjacent and _captcha_prompt(context))):
                     continue  # 后续编辑/新提示到来仍可重新检查，不能永久按 id 忽略。
+                if not require_captcha and _non_challenge_image(context):
+                    continue
                 checked.add(signature)
                 img = await get_runtime().client.download_media(m, file=bytes)
                 if img:
-                    return m, img
+                    return m, img, context
         except errors.FloodWaitError as error:
             raise _RetryLater(error.seconds) from error
         except Exception:
@@ -2350,7 +2408,12 @@ async def _await_signin_captcha(ent, timeout=25, min_id=0, baseline=None):
         if remaining <= 0:
             break
         await asyncio.sleep(min(1.0, remaining))
-    return None, None
+    return None, None, ""
+
+
+async def _await_signin_captcha(ent, timeout=25, min_id=0, baseline=None):
+    message, image, _ = await _await_signin_image(ent, timeout, min_id, baseline, require_captcha=True)
+    return message, image
 
 
 async def run_custom(a):
@@ -3646,6 +3709,8 @@ class AutoIn(BaseModel):
     announcement_kw: str = "定时注册"
     announcement_button: str = "点击注册"
     ai_provider_ids: str = ""        # signin: 逗号分隔 provider id；空=全部启用
+    signin_recognition_mode: str = "" # signin: 空兼容旧字段；none | captcha | image
+    signin_image_prompt: str = Field(DEFAULT_SIGNIN_IMAGE_PROMPT, max_length=2000)
 
 
 def _valid_auto(body: AutoIn):
@@ -3681,6 +3746,15 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "命令后和按钮后延迟需为 0-120 秒")
         if body.refresh_buttons not in (0, 1):
             raise HTTPException(400, "按钮刷新模式只能为 0 或 1")
+        if body.signin_captcha not in (0, 1):
+            raise HTTPException(400, "旧版验证码开关只能为 0 或 1")
+        mode = body.signin_recognition_mode.strip()
+        if mode not in ("", "none", "captcha", "image"):
+            raise HTTPException(400, "图片处理模式只能为不识别、验证码识别或图片识别")
+        if mode == "image" and not body.signin_image_prompt.strip():
+            raise HTTPException(400, "图片识别需要填写提示词")
+        if mode in ("none", "image") and body.signin_captcha:
+            raise HTTPException(400, "图片识别和验证码识别不能同时启用")
         ids = [part.strip() for part in body.ai_provider_ids.split(",") if part.strip()]
         if len(ids) != len(set(ids)) or any(not re.fullmatch(r"[a-f0-9]{16}", part) for part in ids):
             raise HTTPException(400, "签到任务的 AI API 选择无效")
@@ -3756,7 +3830,7 @@ def _valid_auto(body: AutoIn):
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
               "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids")
+              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt")
 
 
 def _auto_vals(body: AutoIn, extra=None):
@@ -3774,6 +3848,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.link_mode, body.link_limit, body.link_wait, body.existing_kw.strip(),
         body.success_reply_enabled, body.success_reply_text.strip(), body.success_reply_delay,
         body.announcement_kw.strip(), body.announcement_button.strip(), body.ai_provider_ids.strip(),
+        body.signin_recognition_mode.strip(), body.signin_image_prompt.strip(),
     ] + (extra or [])
 
 
@@ -4329,6 +4404,9 @@ class AITestSettings(BaseModel):
 class CaptchaTestInput(AITestSettings):
     image: str = Field(..., min_length=1, max_length=MAX_TEST_IMAGE * 4 // 3 + 2048)
     length: int = Field(0, ge=0, le=16)
+    mode: str = Field("captcha", max_length=16)
+    prompt: str = Field(DEFAULT_SIGNIN_IMAGE_PROMPT, max_length=2000)
+    provider_ids: str = Field("", max_length=1024)
 
 
 def _test_ai_settings(body):
@@ -4370,10 +4448,26 @@ async def test_ai_connection(body: AITestSettings):
 async def test_captcha_recognition(body: CaptchaTestInput):
     if _ai_test_lock.locked():
         raise HTTPException(409, "已有识别或 AI 测试正在执行，请稍后重试")
+    if body.mode not in ("captcha", "image"):
+        raise HTTPException(400, "测试模式只能为验证码识别或图片识别")
+    ids = [part.strip() for part in body.provider_ids.split(",") if part.strip()]
+    if len(ids) != len(set(ids)) or any(not re.fullmatch(r"[a-f0-9]{16}", part) for part in ids):
+        raise HTTPException(400, "AI API 选择无效")
     image = _decode_test_image(body.image)
-    cfg, ai_on, ocr_on = _test_ai_settings(body)
     async with _ai_test_lock:
-        return await _recognize_image_result(image, body.length, cfg, ai_on, ocr_on)
+        if body.mode == "image":
+            started = time.perf_counter()
+            try:
+                text = await recognize_image_answer(image, body.prompt, provider_ids=body.provider_ids)
+                return {"ok": True, "text": text, "channel": "ai", "errors": [],
+                        "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+            except Exception as error:
+                return {"ok": False, "text": "", "channel": "none",
+                        "errors": [{"channel": "ai", "message": _safe_ai_error(error)}],
+                        "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+        cfg, ai_on, ocr_on = _test_ai_settings(body)
+        return await _recognize_image_result(image, body.length, cfg, ai_on, ocr_on,
+                                             provider_ids=body.provider_ids)
 
 
 @app.post("/api/panel/password")

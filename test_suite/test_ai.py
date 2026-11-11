@@ -49,7 +49,8 @@ class AITest(unittest.IsolatedAsyncioTestCase):
 
     def body(self, **kwargs):
         values = dict(ai_base=None, ai_key=None, ai_model=None, ai_enabled=None, ocr_enabled=None,
-                      image=self.data_url, length=0)
+                      image=self.data_url, length=0, mode='captcha',
+                      prompt=self.b['DEFAULT_SIGNIN_IMAGE_PROMPT'], provider_ids='')
         values.update(kwargs)
         return SimpleNamespace(**values)
 
@@ -114,6 +115,20 @@ class AITest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['errors'],[])
         content=self.calls[0][1]['json']['messages'][0]['content']
         self.assertEqual(content[1]['image_url']['url'],self.data_url)
+
+    async def test_object_image_mode_uses_custom_prompt_and_preserves_answer(self):
+        self.reply='红色 连衣裙'
+        result=await self.b['test_captcha_recognition'](self.body(mode='image',prompt='识别服装，只输出名称'))
+        self.assertTrue(result['ok']);self.assertEqual(result['text'],'红色 连衣裙');self.assertEqual(result['channel'],'ai')
+        content=self.calls[0][1]['json']['messages'][0]['content']
+        self.assertIn('识别服装，只输出名称',content[0]['text']);self.assertEqual(content[1]['image_url']['url'],self.data_url)
+
+    async def test_object_image_mode_never_falls_back_to_text_ocr(self):
+        self.response_status=400;self.response_data={'error':{'message':'vision unavailable'}}
+        self.b['_classify_local_image']=Mock(return_value='WRONG-OCR')
+        result=await self.b['test_captcha_recognition'](self.body(mode='image',prompt='识别物体'))
+        self.assertFalse(result['ok']);self.assertEqual(result['errors'][0]['channel'],'ai')
+        self.b['_classify_local_image'].assert_not_called()
 
     async def test_image_ai_failure_falls_back_to_local_ocr_and_shows_reason(self):
         self.response_status=400;self.response_data={'error':{'message':'model does not support images'}}

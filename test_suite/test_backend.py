@@ -66,7 +66,8 @@ def load_backend():
     tree = ast.parse(SOURCE.read_text(encoding='utf-8'), filename=str(SOURCE))
     safe_assignments = {'SESSION_TTL', 'CAPTCHA_TTL', 'AUTH_CACHE_MAX', 'CAPTCHA_CACHE_MAX',
                         'RL_WINDOW', 'RL_MAX', 'RL_BLOCK', 'CAPTCHA_AFTER', '_CAPTCHA_FONT', 'MAX_TEST_IMAGE',
-                        '_AUTO_COLS', 'RETRY_BASE', 'GLOBAL_SETTING_KEYS', '_TZ_FALLBACK', '_failure_context'}
+                        '_AUTO_COLS', 'RETRY_BASE', 'GLOBAL_SETTING_KEYS', '_TZ_FALLBACK', '_failure_context',
+                        'DEFAULT_SIGNIN_IMAGE_PROMPT'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -504,6 +505,8 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(a['last_status'], 'interrupted')
         self.assertEqual(a['last_attempt'], 0)
         self.assertIn('next_run_at', a.keys())
+        self.assertIn('signin_recognition_mode', a.keys())
+        self.assertIn('signin_image_prompt', a.keys())
 
 
 if __name__ == '__main__':

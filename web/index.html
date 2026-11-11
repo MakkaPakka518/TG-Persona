@@ -189,7 +189,7 @@ html[data-theme="light"] .grp-pick .gp.on{color:#15803d}
 .ai-provider-row{padding:12px 0;border-bottom:1px solid var(--hair)}.ai-provider-row:last-child{border-bottom:0}
 .ai-provider-head{display:flex;align-items:flex-start;gap:10px}.ai-provider-note{font-weight:600;flex:1;min-width:0;overflow-wrap:anywhere}
 .ai-provider-meta{font-size:12px;color:var(--dim);line-height:1.55;overflow-wrap:anywhere}.ai-token-usage{font-variant-numeric:tabular-nums}
-.ai-provider-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}#foldAiProviders button,#sCaptchaProviders .gp{min-height:44px}
+.ai-provider-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}#foldAiProviders button,#aiTestCard button,#sCaptchaProviders .gp,#aiTestProviders .gp{min-height:44px}
 .switch.on::after{transform:translateX(18px)}
 .switch.acc.on{background:var(--acc)}
 
@@ -796,25 +796,37 @@ section.act,.fold.open .fold-b{animation:none}
       </div>
     </div>
 
-    <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M7 21h10M12 17a5 5 0 0 0 5-5V5a2 2 0 0 0-4 0v6M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7"/></svg>验证码识别</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+    <div class="card fold" id="aiTestCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M7 21h10M12 17a5 5 0 0 0 5-5V5a2 2 0 0 0-4 0v6M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7"/></svg>AI 测试</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <div class="flex" style="gap:18px">
-          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sAiOn" style="width:auto"> 启用 AI 识别</label>
-          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sOcrOn" style="width:auto"> 启用本地 OCR</label>
+        <div class="seg" id="aiTestSeg">
+          <button class="on" type="button" data-ai-test-mode="captcha">验证码识别</button>
+          <button type="button" data-ai-test-mode="image">图片识别</button>
         </div>
-        <button class="btn" type="button" style="margin-top:12px" onclick="saveSettings()">保存识别开关</button>
+        <div id="aiTestCaptchaSettings" style="margin-top:14px">
+          <div class="flex" style="gap:18px">
+            <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sAiOn" style="width:auto"> 启用 AI 识别</label>
+            <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sOcrOn" style="width:auto"> 启用本地 OCR</label>
+          </div>
+          <button class="btn" type="button" style="margin-top:12px" onclick="saveSettings()">保存识别开关</button>
+        </div>
         <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--hair)">
-          <label for="captchaTestFile">上传验证码图片（PNG / JPG / WebP，最大 2MB）</label>
+          <label>测试使用的 AI API（可多选）</label>
+          <div id="aiTestProviders" class="grp-pick"></div>
+          <div class="hint">不选择表示使用全部已启用 API；选中多条时失败自动切换。</div>
+          <div id="aiTestImagePromptWrap" class="hidden">
+            <label for="aiTestImagePrompt">图片识别提示词</label>
+            <textarea id="aiTestImagePrompt" maxlength="2000" rows="5">你是一个高精度的验证码与图像识别助手。请仔细观察图片中的核心事物、场景、服装或物品，并根据机器人题目说明给出最匹配的名称。必须且只能输出答案本身，严禁输出任何多余字符、标点符号、解释、理由或思考过程！</textarea>
+            <div class="hint">模型回答会直接用于签到，请让提示词要求只输出答案。图片识别仅使用 AI，不回退本地 OCR。</div>
+          </div>
+          <label for="captchaTestFile" id="aiTestUploadLabel">上传验证码图片（PNG / JPG / WebP，最大 2MB）</label>
           <input type="file" id="captchaTestFile" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" onchange="previewCaptchaFile()" style="max-width:100%">
-          <img id="captchaTestPreview" alt="待识别验证码预览" style="display:none;max-width:100%;max-height:160px;object-fit:contain;margin-top:12px">
-          <label for="captchaTestLength">期望字符数（可选，0 表示不限）</label>
-          <input type="number" id="captchaTestLength" min="0" max="16" step="1" value="0" inputmode="numeric">
-          <button class="ghost" type="button" id="captchaTestBtn" disabled style="margin-top:12px" onclick="testCaptchaRecognition()">识别上传图片</button>
-          <div class="hint">选择图片只在本地预览；点击识别才上传。按上方开关选择通道，AI 优先，失败后可回退本地 OCR。</div>
+          <img id="captchaTestPreview" alt="待识别图片预览" style="display:none;max-width:100%;max-height:160px;object-fit:contain;margin-top:12px">
+          <div id="captchaTestLengthWrap"><label for="captchaTestLength">期望字符数（可选，0 表示不限）</label><input type="number" id="captchaTestLength" min="0" max="16" step="1" value="0" inputmode="numeric"></div>
+          <button class="ghost" type="button" id="captchaTestBtn" disabled style="margin-top:12px" onclick="testCaptchaRecognition()">开始验证码识别</button>
+          <div class="hint">选择图片只在本地预览；点击识别才上传。</div>
           <div id="captchaTestResult" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
         </div>
-        <div class="hint">两个开关独立可选：AI 会使用设置中已启用的 API 池，失败后继续尝试下一条；本地 OCR 可作为最后兜底。</div>
       </div>
     </div>
 
@@ -858,7 +870,7 @@ section.act,.fold.open .fold-b{animation:none}
             <div><label for="sCommandDelay">发送命令后延迟（秒）</label><input type="number" id="sCommandDelay" value="1.6" min="0" max="120" step="0.1" required></div>
             <div><label for="sButtonDelay">点击按钮后延迟（秒）</label><input type="number" id="sButtonDelay" value="2" min="0" max="120" step="0.1" required></div>
           </div>
-          <div class="hint">发送命令 → 等待命令后延迟 → 点击按钮 → 等待按钮后延迟 → 后续验证码步骤。两段独立设置，范围 0–120 秒；0 秒表示立即进行。</div>
+          <div class="hint">发送命令 → 等待命令后延迟 → 点击按钮 → 等待按钮后延迟 → 后续图片处理。两段独立设置，范围 0–120 秒；0 秒表示立即进行。</div>
           <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="sClickBtn" style="width:auto"> 签到后自动点击回复里的按钮</label>
           <div id="sBtnWrap" class="hidden">
             <label>按钮表情(推荐 · 文字会变但图标不变的 bot 用它)</label>
@@ -884,11 +896,21 @@ section.act,.fold.open .fold-b{animation:none}
             </select>
             <div class="hint">刷新模式每次连点重新获取最新按钮；复用模式始终点击同一按钮，不在连点中重新获取消息。</div>
           </div>
-          <label style="display:flex;align-items:center;gap:8px;margin-top:10px"><input type="checkbox" id="sCap" style="width:auto"> 点签到后出现图片验证码,自动识别并回复</label>
+          <label for="sRecognitionMode">图片处理</label>
+          <select id="sRecognitionMode">
+            <option value="none" selected>不识别图片</option>
+            <option value="captcha">验证码识别</option>
+            <option value="image">图片识别并回复物体名称</option>
+          </select>
           <div id="sCaptchaProviderWrap" class="hidden">
-            <label>验证码 AI API（可多选）</label>
+            <label>识别使用的 AI API（可多选）</label>
             <div id="sCaptchaProviders" class="grp-pick"></div>
             <div class="hint">不选择表示使用设置中全部已启用 API；多选后按所选列表轮询，失败自动切换。</div>
+          </div>
+          <div id="sImagePromptWrap" class="hidden">
+            <label for="sImagePrompt">图片识别提示词</label>
+            <textarea id="sImagePrompt" maxlength="2000" rows="5">你是一个高精度的验证码与图像识别助手。请仔细观察图片中的核心事物、场景、服装或物品，并根据机器人题目说明给出最匹配的名称。必须且只能输出答案本身，严禁输出任何多余字符、标点符号、解释、理由或思考过程！</textarea>
+            <div class="hint">识别结果会直接发送给机器人。图片识别仅调用所选 AI API，不使用本地 OCR。</div>
           </div>
           <div class="flex">
             <div><label for="sResultDelay">结果判断前延迟（秒）</label><input type="number" id="sResultDelay" value="0" min="0" max="120" step="0.1" required></div>
@@ -1169,7 +1191,7 @@ section.act,.fold.open .fold-b{animation:none}
     <div class="card fold" id="foldAiProviders">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3a4 4 0 0 0-4 4v1a4 4 0 0 0-3 6v1a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4v-1a4 4 0 0 0-3-6V7a4 4 0 0 0-4-4zM9 12h6M12 9v6"/></svg>AI API</span><span class="cnt" id="aiProvidersCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <div class="hint">验证码识别、说人话建任务、AI 排障及后续 AI 功能共用。启用多条时按列表轮询，失败自动切换下一条。</div>
+        <div class="hint">验证码识别、图片识别、说人话建任务和 AI 排障共用。启用多条时按列表轮询，失败自动切换下一条。</div>
         <div id="aiProvidersList"></div>
         <button class="btn" type="button" id="aiProviderAdd" style="margin-top:10px" onclick="openAIProviderForm()">添加 AI API</button>
         <div id="aiProviderForm" class="hidden">
@@ -1322,6 +1344,7 @@ section.act,.fold.open .fold-b{animation:none}
 const $=s=>document.querySelector(s);
 let state={tg:{},logged_in:false,running:true};
 const EMOJIS=["👍","👎","❤","🔥","🥰","👏","😁","🤔","🤯","😱","🤬","😢","🎉","🤩","🤮","💩","🙏","👌","🤡","🥱","🥴","😍","🐳","🌚","🌭","🍌","🍎","😘","😎","🆒","🆕","🏆","✌","🍾","🖖","😭","😅","🥳","🎃","🙃","🤝","🗿","🛸","🤗","😴","😂","💅","🎊","🥂","😈"];
+const DEFAULT_SIGNIN_IMAGE_PROMPT='你是一个高精度的验证码与图像识别助手。请仔细观察图片中的核心事物、场景、服装或物品，并根据机器人题目说明给出最匹配的名称。必须且只能输出答案本身，严禁输出任何多余字符、标点符号、解释、理由或思考过程！';
 function toast(msg,err){if(!msg)return;const t=$('#toast');t.textContent=msg;t.classList.add('show');t.classList.toggle('err',!!err);setTimeout(()=>t.classList.remove('show'),2600)}
 // ---------- 账号请求范围 ----------
 let selectedAccount='default', accountEpoch=0;
@@ -1870,10 +1893,14 @@ function renderAutoList(type){
     else ({run:runAuto,test:testAuto,toggle:toggleAuto,edit:editAutoItem,duplicate:dupAuto,delete:delAuto}[action])?.(id);
   };
 }
+function signinRecognitionMode(a){const mode=String(a?.signin_recognition_mode||'');return ['none','captcha','image'].includes(mode)?mode:(a?.signin_captcha?'captcha':'none')}
 function autoDesc(a){
   if(a.type==='code_register')return `群：${esc(a.groups)}；Bot：${esc(a.target)}；${Number(a.link_mode)===0?'随机一条':'串行最多 '+esc(String(a.link_limit??4))+' 条'}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒回群发送 '+esc(a.success_reply_text):''}`;
   if(a.type==='button_register')return `群：${esc(a.groups||'全部监听群')}；开注：${esc(a.announcement_kw)}；群按钮：${esc(a.announcement_button)}；指令：${esc(a.command||'/start')}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒向原群发送 '+esc(a.success_reply_text):''}`;
-  if(a.type==='signin')return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${a.signin_captcha?' · 验证码':''}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
+  if(a.type==='signin'){
+    const mode=signinRecognitionMode(a),recognition=mode==='captcha'?' · 验证码识别':mode==='image'?' · 图片识别':'';
+    return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${recognition}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
+  }
   if(a.type==='scheduled_register')return `${esc(a.target)}，${esc(a.command)}，${esc(autoWindow(a))}，按钮 ${esc(a.btn_text)}${a.history_first?'，历史卡片优先':''}${Number(a.poll_interval)>0?'，关闭弹窗每 '+esc(String(a.poll_interval))+' 秒重试':''}，收到 ${esc(a.keywords)} 后回复，成功 ${esc(a.success_kw)}，每步等待 ${esc(String(a.result_timeout??30))}秒`;
   if(a.type==='link_register')return `群:${esc(a.groups||'全部监听群')} · 自动识别机器人 · 按钮 ${esc(a.btn_text)}${Number(a.link_mode)===0?' · 随机一条':' · 串行最多 '+esc(String(a.link_limit??4))+' 条'} · 失效等待 ${esc(String(a.link_wait??5))}秒 · 成功 ${esc(a.success_kw)}${a.existing_kw?' · 已有号即停止':''}${a.success_reply_enabled?' · 成功后 '+esc(String(a.success_reply_delay??5))+' 秒群内发送 '+esc(a.success_reply_text):''}${a.link_credential_set?' · 已保存账号信息':' · 未填写账号信息'}`;
   if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}${a.poll_interval>0?' · 轮询'+a.poll_interval+'s@'+esc(a.target):''}`;
@@ -1912,7 +1939,8 @@ function editAutoItem(id){
     $('#sClicks').value=a.click_times||1;
     $('#sClickGap').value=a.click_interval||300;
     $('#sRefreshButtons').value=String(a.refresh_buttons??1);
-    $('#sCap').checked=!!a.signin_captcha;signinAIProviderSel=new Set(String(a.ai_provider_ids||'').split(',').filter(Boolean));renderSigninAIProviders();syncSigninCaptchaProviders();
+    $('#sRecognitionMode').value=signinRecognitionMode(a);$('#sImagePrompt').value=a.signin_image_prompt||DEFAULT_SIGNIN_IMAGE_PROMPT;
+    signinAIProviderSel=new Set(String(a.ai_provider_ids||'').split(',').filter(Boolean));renderSigninAIProviders();syncSigninRecognitionFields();
     $('#sKw').value=a.success_kw||'';
     $('#sFw').value=a.fail_kw||'';
     $('#sPts').value=a.points_pat||'';
@@ -1974,7 +2002,7 @@ function editAutoItem(id){
 }
 function cancelAutoEdit(t){
   editAuto=null;editAutoAccount=null;if(typeof assistantFormDraft!=='undefined')assistantFormDraft=null;
-  ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sCap').checked=false;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninCaptchaProviders();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
+  ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sRecognitionMode').value='none';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
@@ -2143,10 +2171,13 @@ async function saveAuto(type){
       result_timeout:$('#sResultTimeout').value.trim()===''?30:Number($('#sResultTimeout').value),
       success_kw:$('#sKw').value.trim(),fail_kw:$('#sFw').value.trim(),
       points_pat:$('#sPts').value.trim(),retries:$('#sRetries').value.trim()===''?2:Number($('#sRetries').value),
-      signin_captcha:$('#sCap').checked?1:0};
+      signin_recognition_mode:$('#sRecognitionMode').value,signin_image_prompt:$('#sImagePrompt').value.trim(),
+      signin_captcha:$('#sRecognitionMode').value==='captcha'?1:0};
     if(signinAIProviderSel.size)body.ai_provider_ids=[...signinAIProviderSel].join(',');
     if(body.icon_url&&!safeHttpUrl(body.icon_url))return toast('图标仅支持安全的 HTTP / HTTPS URL',1);
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
+    if(!['none','captcha','image'].includes(body.signin_recognition_mode))return toast('请选择有效的图片处理方式',1);
+    if(body.signin_recognition_mode==='image'&&!body.signin_image_prompt)return toast('图片识别需要填写提示词',1);
     for(const delay of [body.command_delay,body.button_delay,body.result_delay]){
       if(!Number.isFinite(delay)||delay<0||delay>120||Math.abs(delay*10-Math.round(delay*10))>1e-7)
         return toast('签到延迟须为 0–120 秒，步进 0.1 秒；0 秒表示立即进行',1);
@@ -2259,7 +2290,7 @@ async function toggleAuto(id){
   try{await api('/api/autos/'+id+'/toggle',{method:'POST'});loadAutos()}catch(e){toast(e.message,1)}
 }
 $('#sClickBtn').addEventListener('change',function(){$('#sBtnWrap').classList.toggle('hidden',!this.checked)});
-$('#sCap').addEventListener('change',syncSigninCaptchaProviders);
+$('#sRecognitionMode').addEventListener('change',syncSigninRecognitionFields);
 function toggleClosedRetryFields(){$('#trClosedRetryFields').classList.toggle('hidden',!$('#trClosedRetry').checked)}
 $('#trClosedRetry').addEventListener('change',toggleClosedRetryFields);
 function toggleLinkReplyFields(){$('#lkGroupReplyFields').classList.toggle('hidden',!$('#lkGroupReply').checked)}
@@ -2402,8 +2433,8 @@ async function exportConfig(selected){
 }
 
 // ---------- AI 助手：所有保存和应用均由用户确认 ----------
-const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled'.split(',');
-const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',result_delay:'结果判断前延迟（秒）',result_timeout:'等待最终回复上限（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
+const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,signin_recognition_mode,signin_image_prompt,ai_provider_ids,groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled'.split(',');
+const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',result_delay:'结果判断前延迟（秒）',result_timeout:'等待最终回复上限（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',signin_recognition_mode:'图片处理',signin_image_prompt:'图片识别提示词',ai_provider_ids:'识别 API',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
 const AI_RANGES={command_delay:[0,120],button_delay:[0,120],result_delay:[0,120],result_timeout:[1,300],refresh_buttons:[0,1],click_times:[1,20],click_interval:[50,3000],retries:[0,5],poll_interval:[60,7776000]};
 const AI_TEXT_FIELDS=['win_start','win_end','success_kw','fail_kw','btn_text','btn_emoji','command'];
 let aiDraft=null,aiDraftBusy=false,aiDraftSeq=0,assistantFormDraft=null,aiDiagnoses=new Map();
@@ -2420,7 +2451,7 @@ function syncAIDraftButtons(){const ready=!!aiDraft&&!aiDraftBusy&&isCurrentAcco
 function invalidateAIDraft(){aiDraftSeq++;aiDraft=null;syncAIDraftButtons();$('#aiDraftResult').textContent=''}
 function resetAIAssistant(){aiDraftSeq++;aiDraftBusy=false;aiDraft=null;assistantFormDraft=null;aiDiagnoses.clear();$('#aiDraftText').value='';$('#aiDraftResult').textContent='';syncAIDraftButtons()}
 function readableAIDraft(d){
- const rows=[d.summary||'任务草稿'];for(const [k,v] of Object.entries(d.draft||{})){if(v===''||v==null)continue;let value=v;if(k==='type')value=AUTO_TYPE[v]||v;if(k==='enabled')value='停用（复核后手动开启）';if(k==='custom_steps'){try{value=JSON.parse(v).map((s,i)=>`${i+1}. ${{send:'发送',wait:'等待（毫秒）',click:'点击',until:'等待回复'}[s.t]||s.t}：${s.v??s.success??''}`).join('\n')}catch(e){value='请在步骤编辑器核对'}}rows.push((AI_LABELS[k]||k)+'：'+String(value))}
+ const rows=[d.summary||'任务草稿'];for(const [k,v] of Object.entries(d.draft||{})){if(v===''||v==null||(k==='signin_image_prompt'&&d.draft?.signin_recognition_mode!=='image'))continue;let value=v;if(k==='type')value=AUTO_TYPE[v]||v;if(k==='enabled')value='停用（复核后手动开启）';if(k==='custom_steps'){try{value=JSON.parse(v).map((s,i)=>`${i+1}. ${{send:'发送',wait:'等待（毫秒）',click:'点击',until:'等待回复'}[s.t]||s.t}：${s.v??s.success??''}`).join('\n')}catch(e){value='请在步骤编辑器核对'}}rows.push((AI_LABELS[k]||k)+'：'+String(value))}
  if(Array.isArray(d.warnings))rows.push('\n注意：\n'+d.warnings.map(String).join('\n'));rows.push('耗时：'+testElapsed(d.elapsed_ms));return rows.join('\n');
 }
 async function generateAIDraft(){
@@ -2451,7 +2482,7 @@ function applyDraftToForm(d){
     $('#sClickBtn').checked=!!d.click_btn;$('#sBtnWrap').classList.toggle('hidden',!d.click_btn);
     $('#sBtnText').value=typeof d.btn_text==='string'?d.btn_text:'';$('#sBtnEmoji').value=typeof d.btn_emoji==='string'?d.btn_emoji:'';
     $('#sClicks').value=d.click_times??1;$('#sClickGap').value=d.click_interval??300;
-    $('#sRefreshButtons').value=String(d.refresh_buttons??1);$('#sCap').checked=false;
+    $('#sRefreshButtons').value=String(d.refresh_buttons??1);$('#sRecognitionMode').value='none';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();
     $('#sKw').value=typeof d.success_kw==='string'?d.success_kw:'';$('#sFw').value=typeof d.fail_kw==='string'?d.fail_kw:'';
     $('#sPts').value=typeof d.points_pat==='string'?d.points_pat:'';$('#sRetries').value=d.retries??2;
   }else if(type==='custom'){
@@ -2473,7 +2504,7 @@ async function saveAIDraft(){
   if(!aiDraft||aiDraftBusy||!isCurrentAccount(aiDraft.account))return;
   if(!window.confirm('保存为停用任务？不会发送 Telegram 消息，确认无误后需手动启用。'))return;
   const c=aiDraft.account,draft=taskConfig(aiDraft.draft);aiDraftBusy=true;syncAIDraftButtons();
-  delete draft.id;draft.enabled=0;draft.signin_captcha=0;
+  delete draft.id;draft.enabled=0;draft.signin_captcha=0;draft.signin_recognition_mode='none';draft.ai_provider_ids='';
   try{
     await api('/api/autos',{method:'POST',body:JSON.stringify(draft),_account:c});
     if(!isCurrentAccount(c))return;
@@ -2705,7 +2736,7 @@ async function toggleTheme(){
 }
 
 // ---------- AI API 池 ----------
-let aiProviders=[],editingAIProviderId=null,aiProvidersSeq=0,signinAIProviderSel=new Set();
+let aiProviders=[],editingAIProviderId=null,aiProvidersSeq=0,signinAIProviderSel=new Set(),aiTestProviderSel=new Set();
 function formatTokenCount(value){return Number(value||0).toLocaleString('zh-CN')}
 function renderAIProviders(){
   $('#aiProvidersCount').textContent=aiProviders.length;
@@ -2715,14 +2746,24 @@ function renderAIProviders(){
     <div class="ai-provider-meta ai-token-usage">输入 ${formatTokenCount(p.input_tokens)}　输出 ${formatTokenCount(p.output_tokens)} Token</div>
     <div class="ai-provider-actions"><button class="ghost" data-ai-action="test">测试</button><button class="ghost" data-ai-action="edit">编辑</button><button class="ghost" data-ai-action="toggle">${p.enabled?'停用':'启用'}</button><button class="danger" data-ai-action="delete">删除</button></div>
   </div>`).join(''):'<div class="empty">尚未添加 AI API</div>';
-  renderSigninAIProviders();
+  renderSigninAIProviders();renderAITestProviders();
 }
 function renderSigninAIProviders(){
   const box=$('#sCaptchaProviders');if(!box)return;
   const enabled=aiProviders.filter(p=>p.enabled);
   box.innerHTML=enabled.length?enabled.map(p=>`<button type="button" class="gp ${signinAIProviderSel.has(p.id)?'on':''}" data-signin-ai="${p.id}">${esc(p.note)}</button>`).join(''):'<div class="empty" style="padding:6px">请先到设置启用 AI API</div>';
 }
-function syncSigninCaptchaProviders(){$('#sCaptchaProviderWrap').classList.toggle('hidden',!$('#sCap').checked)}
+function renderAITestProviders(){
+  const box=$('#aiTestProviders');if(!box)return;
+  const enabled=aiProviders.filter(p=>p.enabled);
+  const enabledIds=new Set(enabled.map(p=>p.id));aiTestProviderSel=new Set([...aiTestProviderSel].filter(id=>enabledIds.has(id)));
+  box.innerHTML=enabled.length?enabled.map(p=>`<button type="button" class="gp ${aiTestProviderSel.has(p.id)?'on':''}" data-test-ai="${p.id}">${esc(p.note)}</button>`).join(''):'<div class="empty" style="padding:6px">请先到设置启用 AI API</div>';
+}
+function syncSigninRecognitionFields(){
+  const mode=$('#sRecognitionMode').value;
+  $('#sCaptchaProviderWrap').classList.toggle('hidden',mode==='none');
+  $('#sImagePromptWrap').classList.toggle('hidden',mode!=='image');
+}
 async function loadAIProviders(){
   const seq=++aiProvidersSeq;
   try{const d=await api('/api/ai/providers');if(seq!==aiProvidersSeq)return;aiProviders=Array.isArray(d.providers)?d.providers:[];renderAIProviders()}
@@ -2756,6 +2797,7 @@ async function mutateAIProvider(id,action){
 }
 $('#aiProvidersList').addEventListener('click',e=>{const b=e.target.closest('[data-ai-action]'),row=e.target.closest('[data-ai-id]');if(b&&row)mutateAIProvider(row.dataset.aiId,b.dataset.aiAction)});
 $('#sCaptchaProviders').addEventListener('click',e=>{const b=e.target.closest('[data-signin-ai]');if(!b)return;const id=b.dataset.signinAi;signinAIProviderSel.has(id)?signinAIProviderSel.delete(id):signinAIProviderSel.add(id);renderSigninAIProviders()});
+$('#aiTestProviders').addEventListener('click',e=>{const b=e.target.closest('[data-test-ai]');if(!b)return;const id=b.dataset.testAi;aiTestProviderSel.has(id)?aiTestProviderSel.delete(id):aiTestProviderSel.add(id);renderAITestProviders()});
 
 // ---------- 状态 ----------
 async function loadState(){
@@ -2858,12 +2900,23 @@ function currentAIConfig(){
   };
 }
 function testElapsed(ms){return typeof ms==='number'&&Number.isFinite(ms)&&ms>=0?ms+' ms':'未知'}
-let captchaTestImage='',captchaTestVersion=0,captchaTestReader=null,captchaTestBusy=false;
+let captchaTestImage='',captchaTestVersion=0,captchaTestReader=null,captchaTestBusy=false,aiTestMode='captcha';
+function setAITestMode(mode){
+  aiTestMode=mode==='image'?'image':'captcha';
+  for(const button of $('#aiTestSeg').querySelectorAll('[data-ai-test-mode]'))button.classList.toggle('on',button.dataset.aiTestMode===aiTestMode);
+  $('#aiTestCaptchaSettings').classList.toggle('hidden',aiTestMode!=='captcha');
+  $('#captchaTestLengthWrap').classList.toggle('hidden',aiTestMode!=='captcha');
+  $('#aiTestImagePromptWrap').classList.toggle('hidden',aiTestMode!=='image');
+  $('#aiTestUploadLabel').textContent=aiTestMode==='image'?'上传待识别图片（PNG / JPG / WebP，最大 2MB）':'上传验证码图片（PNG / JPG / WebP，最大 2MB）';
+  $('#captchaTestBtn').textContent=aiTestMode==='image'?'开始图片识别':'开始验证码识别';
+  $('#captchaTestResult').textContent='';
+}
 function resetAccountTests(){
   captchaTestVersion++;captchaTestImage='';captchaTestBusy=false;
   if(captchaTestReader){const reader=captchaTestReader;captchaTestReader=null;try{reader.abort()}catch(e){}}
   $('#captchaTestFile').value='';$('#captchaTestPreview').removeAttribute('src');$('#captchaTestPreview').style.display='none';
-  $('#captchaTestResult').textContent='';$('#captchaTestBtn').disabled=true;
+  $('#captchaTestResult').textContent='';$('#captchaTestBtn').disabled=true;$('#aiTestImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;
+  aiTestProviderSel.clear();renderAITestProviders();setAITestMode('captcha');
 }
 function previewCaptchaFile(){
   const version=++captchaTestVersion,result=$('#captchaTestResult'),preview=$('#captchaTestPreview'),btn=$('#captchaTestBtn');
@@ -2903,14 +2956,18 @@ async function testCaptchaRecognition(){
   const c=accountContext(),btn=$('#captchaTestBtn'),result=$('#captchaTestResult');
   if(captchaTestBusy)return;
   if(!captchaTestImage){result.textContent='请先选择有效图片';return}
-  const length=Number($('#captchaTestLength').value);
-  if(!Number.isInteger(length)||length<0||length>16){result.textContent='期望字符数必须为 0 到 16 的整数';return}
+  const length=aiTestMode==='captcha'?Number($('#captchaTestLength').value):0;
+  if(aiTestMode==='captcha'&&(!Number.isInteger(length)||length<0||length>16)){result.textContent='期望字符数必须为 0 到 16 的整数';return}
+  const prompt=$('#aiTestImagePrompt').value.trim();
+  if(aiTestMode==='image'&&!prompt){result.textContent='请填写图片识别提示词';return}
   const config=currentAIConfig();
-  if(config.ai_enabled==='0'&&config.ocr_enabled==='0'){result.textContent='请至少启用 AI 识别或本地 OCR';return}
+  if(aiTestMode==='captcha'&&config.ai_enabled==='0'&&config.ocr_enabled==='0'){result.textContent='请至少启用 AI 识别或本地 OCR';return}
   const version=captchaTestVersion;
   captchaTestBusy=true;btn.disabled=true;result.textContent='正在识别…';
   try{
-    const d=await api('/api/captcha/test',{method:'POST',body:JSON.stringify({image:captchaTestImage,length,...config}),_account:c});
+    const payload={image:captchaTestImage,length,mode:aiTestMode,provider_ids:[...aiTestProviderSel].join(',')};
+    if(aiTestMode==='captcha')Object.assign(payload,config);else payload.prompt=prompt;
+    const d=await api('/api/captcha/test',{method:'POST',body:JSON.stringify(payload),_account:c});
     if(!isCurrentAccount(c)||version!==captchaTestVersion)return;
     const text=typeof d.text==='string'?d.text:'';
     const channel={ai:'AI',ocr:'本地 OCR',none:'无'}[d.channel]||'未知';
@@ -2919,12 +2976,13 @@ async function testCaptchaRecognition(){
       (({ai:'AI',ocr:'本地 OCR',none:'无'}[e.channel]||'未知通道')+'：'+(e.message||'未知错误')):'未知错误');
     const success=d.ok===true&&!!text.trim();
     result.textContent=(success?'识别成功':'识别失败')+
-      '\n识别文本：'+(text||'（空文本）')+'\n使用通道：'+channel+'\n耗时：'+testElapsed(d.elapsed_ms)+
+      '\n'+(aiTestMode==='image'?'图片答案：':'识别文本：')+(text||'（空文本）')+'\n使用通道：'+channel+'\n耗时：'+testElapsed(d.elapsed_ms)+
       (warnings.length?'\n'+(success?'通道提醒（已使用上述通道完成识别）':'失败原因')+'：\n'+warnings.join('\n'):
         (success?'':'\n失败原因：'+(d.error||'未获得有效识别文本')));
   }catch(e){if(isCurrentAccount(c)&&version===captchaTestVersion){result.textContent='识别失败：'+e.message;toast(e.message,1)}}
   finally{if(isCurrentAccount(c)){captchaTestBusy=false;btn.disabled=!captchaTestImage}}
 }
+$('#aiTestSeg').addEventListener('click',e=>{const button=e.target.closest('[data-ai-test-mode]');if(button)setAITestMode(button.dataset.aiTestMode)});
 async function changePw(){
   const pw=$('#sNewPw').value.trim();
   const old=$('#sOldPw').value;

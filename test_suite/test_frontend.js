@@ -49,12 +49,13 @@ function run(s){return vm.runInContext(s,context)}
 function slice(start,end){const a=js.indexOf(start),b=js.indexOf(end,a+start.length);assert(a>=0&&b>a,start);return js.slice(a,b)}
 run(js.split('\n').find(line=>line.startsWith('const $=')));
 run(js.split('\n').find(line=>line.startsWith('const esc=')));
+run(js.split('\n').find(line=>line.startsWith('const DEFAULT_SIGNIN_IMAGE_PROMPT=')));
 run(slice('// ---------- AI API 池 ----------','// ---------- 状态 ----------'));
 run(slice('// ---------- 账号请求范围 ----------','async function api('));
 run(slice('// ---------- 安全图标与共享图标库 ----------','let autos=[], editAuto=null, editAutoAccount=null;'));
 run(slice('// ---------- 可视化步骤编辑器 ----------','const autoGroupSel='));
 run(slice('let allGroups=[];','async function loadDialogs'));
-run(slice('function autoDesc(a){','function dupAuto'));
+run(slice('function signinRecognitionMode(a){','function dupAuto'));
 run('let autos=[],editAuto=null,editAutoAccount=null;');
 run(slice('function editAutoItem(id){','function pickGrabAct(v){'));
 run(slice('function openAutoForm(type){','async function toggleAuto(id){'));
@@ -147,7 +148,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
       const input=form.match(new RegExp('<input\\b[^>]*id="'+id+'"[^>]*>'))[0];
       for(const attr of ['type="number"','value="'+value+'"','min="0"','max="120"','step="0.1"','required'])assert(input.includes(attr));
     }
-    assert(form.includes('发送命令 → 等待命令后延迟 → 点击按钮 → 等待按钮后延迟 → 后续验证码步骤'));
+    assert(form.includes('发送命令 → 等待命令后延迟 → 点击按钮 → 等待按钮后延迟 → 后续图片处理'));
     assert(form.includes('0 秒表示立即进行'));
   });
   await test('新增及取消编辑恢复 1.6 秒和 2 秒默认值',async()=>{
@@ -187,13 +188,24 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('签到验证码可多选 AI API 并在编辑时完整回填',async()=>{
     const first='0123456789abcdef',second='fedcba9876543210';
     context.providerFixture=[{id:first,note:'主线路',enabled:true},{id:second,note:'备用线路',enabled:true},{id:'aaaaaaaaaaaaaaaa',note:'停用线路',enabled:false}];
-    run('aiProviders=providerFixture;renderSigninAIProviders()');prepareSignin();element('#sCap').checked=true;
+    run('aiProviders=providerFixture;renderSigninAIProviders()');prepareSignin();element('#sRecognitionMode').value='captcha';
     assert(!element('#sCaptchaProviders').innerHTML.includes('停用线路'));
     for(const id of [first,second])element('#sCaptchaProviders').listeners.click({target:{closest:()=>({dataset:{signinAi:id}})}});
     let body;context.api=async(_p,o)=>{body=JSON.parse(o.body);return {}};await run("saveAuto('signin')");
     assert.strictEqual(body.ai_provider_ids,first+','+second);
     editSignin({ai_provider_ids:second});assert.strictEqual(run("[...signinAIProviderSel].join(',')"),second);
     assert(element('#sCaptchaProviders').innerHTML.includes('备用线路'));
+  });
+  await test('签到图片处理三选一，图片模式保存自定义提示词并兼容旧验证码任务',async()=>{
+    const form=html.slice(html.indexOf('id="af-signin"'),html.indexOf('id="af-grabcodes"'));
+    for(const mode of ['none','captcha','image'])assert(form.includes('<option value="'+mode+'"'));
+    prepareSignin();assert.strictEqual(element('#sImagePrompt').value,run('DEFAULT_SIGNIN_IMAGE_PROMPT'));
+    element('#sRecognitionMode').value='image';element('#sImagePrompt').value='只输出物体名称';let body;
+    context.api=async(_p,o)=>{body=JSON.parse(o.body);return {}};await run("saveAuto('signin')");
+    assert.strictEqual(body.signin_recognition_mode,'image');assert.strictEqual(body.signin_captcha,0);assert.strictEqual(body.signin_image_prompt,'只输出物体名称');
+    editSignin({signin_recognition_mode:'image',signin_image_prompt:'自定义识图提示'});assert.strictEqual(element('#sRecognitionMode').value,'image');assert.strictEqual(element('#sImagePrompt').value,'自定义识图提示');
+    editSignin({signin_captcha:1});assert.strictEqual(element('#sRecognitionMode').value,'captcha');
+    prepareSignin();element('#sRecognitionMode').value='image';element('#sImagePrompt').value=' ';let sent=0;context.api=async()=>{sent++;return {}};await run("saveAuto('signin')");assert.strictEqual(sent,0);
   });
   await test('编辑 PUT 保存独立延迟和边界值且保持启用状态',async()=>{
     for(const [command_delay,button_delay] of [[0,120],[120,0],[0.1,3.7]]){
@@ -260,10 +272,10 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
       editing?editSignin({enabled:0}):prepareSignin();
       const values={'#sName':'完整任务','#sTarget':'@dummy_bot','#sCmd':'/checkin','#sIconUrl':'https://dummy.invalid/icon.png','#sWinStart':'09:00','#sWinEnd':'10:00','#sCommandDelay':'0','#sButtonDelay':'2.7','#sResultDelay':delay,'#sResultTimeout':timeout,'#sBtnText':'签到','#sBtnEmoji':'✅','#sClicks':'3','#sClickGap':'500','#sRefreshButtons':'0','#sKw':'成功','#sFw':'明确失败','#sPts':'积分:(\\d+)','#sRetries':'0'};
       for(const [id,value] of Object.entries(values))element(id).value=value;
-      for(const id of ['#sIsChat','#sClickBtn','#sCap'])element(id).checked=true;
+      for(const id of ['#sIsChat','#sClickBtn'])element(id).checked=true;element('#sRecognitionMode').value='captcha';
       let request;context.api=async(p,o)=>{request=[p,o];return {}};await run("saveAuto('signin')");
       assert.strictEqual(request[0],editing?'/api/autos/42':'/api/autos');assert.strictEqual(request[1].method,editing?'PUT':'POST');
-      const expected={type:'signin',name:'完整任务',target:'@dummy_bot',command:'/checkin',icon_url:'https://dummy.invalid/icon.png',is_chat:1,win_start:'09:00',win_end:'10:00',click_btn:1,btn_text:'签到',btn_emoji:'✅',click_times:3,click_interval:500,refresh_buttons:0,command_delay:0,button_delay:2.7,result_delay:delay,result_timeout:timeout,success_kw:'成功',fail_kw:'明确失败',points_pat:'积分:(\\d+)',retries:0,signin_captcha:1};
+      const expected={type:'signin',name:'完整任务',target:'@dummy_bot',command:'/checkin',icon_url:'https://dummy.invalid/icon.png',is_chat:1,win_start:'09:00',win_end:'10:00',click_btn:1,btn_text:'签到',btn_emoji:'✅',click_times:3,click_interval:500,refresh_buttons:0,command_delay:0,button_delay:2.7,result_delay:delay,result_timeout:timeout,success_kw:'成功',fail_kw:'明确失败',points_pat:'积分:(\\d+)',retries:0,signin_recognition_mode:'captcha',signin_image_prompt:run('DEFAULT_SIGNIN_IMAGE_PROMPT'),signin_captcha:1};
       if(editing)expected.enabled=0;assert.deepStrictEqual(JSON.parse(request[1].body),expected);
     }
   });
@@ -463,8 +475,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     await assert.rejects(()=>run('loadUpd(true)'),/mock network error/);
     assert.strictEqual(element('#updCheck').disabled,false);
   });
-  await test('AI API 已移到设置，验证码卡片不再包含密钥表单',async()=>{
-    const captcha=html.slice(html.indexOf('>验证码识别<'),html.indexOf('id="aCntSign"'));
+  await test('AI API 已移到设置，自动化 AI 测试卡不包含密钥表单',async()=>{
+    const captcha=html.slice(html.indexOf('>AI 测试<'),html.indexOf('id="aCntSign"'));
     const settings=html.slice(html.indexOf('<section id="tab-settings">'),html.indexOf('</section>',html.indexOf('<section id="tab-settings">')));
     for(const id of ['aiProvidersList','aiProviderAdd','aiProviderNote','aiProviderBase','aiProviderKey','aiProviderModel'])assert(settings.includes('id="'+id+'"'));
     assert(settings.includes('type="password" id="aiProviderKey"'));
@@ -550,7 +562,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     for(const length of ['', '0', '16']){
       element('#captchaTestLength').value=length;await run('testCaptchaRecognition()');
       assert.strictEqual(request[0],'/api/captcha/test');assert.strictEqual(request[1].method,'POST');
-      assert.deepStrictEqual(JSON.parse(request[1].body),{image:sampleImage,length:Number(length),ai_enabled:'0',ocr_enabled:'1'});
+      assert.deepStrictEqual(JSON.parse(request[1].body),{image:sampleImage,length:Number(length),mode:'captcha',provider_ids:'',ai_enabled:'0',ocr_enabled:'1'});
       const out=element('#captchaTestResult').textContent;
       assert(out.includes('识别成功')&&out.includes('aB42')&&out.includes('本地 OCR')&&out.includes('48 ms'));
       assert(!element('#captchaTestBtn').disabled);
@@ -559,6 +571,15 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     context.api=async(p,o)=>{request=JSON.parse(o.body);return {ok:true,text:'1234',channel:'ai',elapsed_ms:5}};
     await run('testCaptchaRecognition()');assert.strictEqual(request.ai_enabled,'1');assert.strictEqual(request.ocr_enabled,'0');
     assert(element('#captchaTestResult').textContent.includes('使用通道：AI'));
+  });
+  await test('自动化 AI 测试可切换图片识别、自定义提示词并选择 API',async()=>{
+    assert(html.includes('>AI 测试<')&&html.includes('data-ai-test-mode="captcha"')&&html.includes('data-ai-test-mode="image"'));
+    context.providerFixture=[{id:'0123456789abcdef',note:'主线路',enabled:true},{id:'aaaaaaaaaaaaaaaa',note:'停用线路',enabled:false}];run("aiProviders=providerFixture;aiTestProviderSel=new Set(['aaaaaaaaaaaaaaaa']);renderAITestProviders()");assert.strictEqual(run('aiTestProviderSel.size'),0);assert(!element('#aiTestProviders').innerHTML.includes('停用线路'));
+    selectImage();run("setAITestMode('image');aiTestProviderSel=new Set(['0123456789abcdef'])");element('#aiTestImagePrompt').value='识别并只输出物体名称';let body;
+    context.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true,text:'苹果',channel:'ai',errors:[],elapsed_ms:12}};
+    await run('testCaptchaRecognition()');assert.deepStrictEqual(body,{image:sampleImage,length:0,mode:'image',prompt:'识别并只输出物体名称',provider_ids:'0123456789abcdef'});
+    assert(element('#captchaTestResult').textContent.includes('图片答案：苹果'));assert(element('#captchaTestResult').textContent.includes('12 ms'));
+    run("setAITestMode('captcha');aiTestProviderSel.clear()");
   });
   await test('AI 失败但 OCR 回退成功保留通道提醒与实际文本',async()=>{
     configureAI();context.api=async()=>({ok:true,text:'<img onerror=alert(1)>',channel:'ocr',errors:[{channel:'ai',message:'AI 超时 <script>'}],elapsed_ms:73});
@@ -1057,7 +1078,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     ex('aiDraft={account:accountContext(),draft:generated};aiDraftBusy=false');
     let sent=[];app.api=async(p,o)=>{sent.push([p,JSON.parse(o.body)]);return {ok:true}};
     app.window.confirm=()=>false;await ex('saveAIDraft()');assert.strictEqual(sent.length,0);
-    app.window.confirm=()=>true;await ex('saveAIDraft()');assert.strictEqual(sent.length,1);assert.strictEqual(sent[0][1].enabled,0);assert.strictEqual(sent[0][1].signin_captcha,0);
+    app.window.confirm=()=>true;await ex('saveAIDraft()');assert.strictEqual(sent.length,1);assert.strictEqual(sent[0][1].enabled,0);assert.strictEqual(sent[0][1].signin_captcha,0);assert.strictEqual(sent[0][1].signin_recognition_mode,'none');
   });
   await test('AI草稿请求防重复，描述改变后丢弃旧结果并恢复按钮',async()=>{
     ex('resetAIAssistant()');q('#aiDraftText').value='old';let resolve,hits=0;

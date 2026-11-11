@@ -18,7 +18,7 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.b=load_backend()
         self.b['now_local']=lambda: datetime(2026,10,30,9,0,tzinfo=timezone.utc)
-        self.events=[];self.phase='before';self.fetch_count=0;self.answer_result='签到成功';self.deliver=True
+        self.events=[];self.phase='before';self.fetch_count=0;self.answer_result='签到成功';self.deliver=True;self.image_mode=False
         outer=self
         async def send(ent,text):
             outer.events.append(('send',text))
@@ -33,7 +33,7 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
                     outer.events.append(('click',index));outer.phase='clicked'
                 button=SimpleNamespace(text='签到',click=AsyncMock(side_effect=click))
                 return [photo_message(101,'欢迎使用测试机器人，请选择功能',1,buttons=[[button]])]
-            if outer.phase=='prompt': return [photo_message(102,'请输入验证码（测试消息）',2),photo_message(101,'欢迎使用测试机器人',1)]
+            if outer.phase=='prompt': return [photo_message(102,'请发送图片中物体的名称' if outer.image_mode else '请输入验证码（测试消息）',2),photo_message(101,'欢迎使用测试机器人',1)]
             if outer.phase=='result': return [message(104,outer.answer_result),photo_message(102,'请输入验证码（测试消息）',2)]
             return []
         async def recognize(data,*args,**kwargs):
@@ -41,6 +41,7 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
         self.b['client']=SimpleNamespace(send_message=AsyncMock(side_effect=send),get_messages=AsyncMock(side_effect=get),download_media=AsyncMock(return_value=b'fake-image-no-real-captcha'))
         self.b['resolve_entity']=AsyncMock(return_value='entity')
         self.b['recognize_image_text']=AsyncMock(side_effect=recognize)
+        self.b['recognize_image_answer']=AsyncMock(return_value='苹果')
         self.b['send_notify']=self.b['notify_event']=AsyncMock()
         # 通知函数是同步入口，使用普通 mock 避免产生未等待协程。
         from unittest.mock import Mock
@@ -49,8 +50,8 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self): self.b['conn'].close()
 
     async def create(self,**values):
-        body=self.b['AutoIn'](name='fixture',target='@dummy',command='/start',click_btn=1,signin_captcha=1,
-            **values)
+        values.setdefault('signin_captcha',1)
+        body=self.b['AutoIn'](name='fixture',target='@dummy',command='/start',click_btn=1,**values)
         return (await self.b['create_auto'](body))['id']
 
     def row(self,aid): return self.b['conn'].execute('SELECT * FROM automations WHERE id=?',(aid,)).fetchone()
@@ -88,6 +89,25 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.run_flow(aid)
         self.assertEqual(self.row(aid)['ai_provider_ids'],selected)
         self.assertEqual(self.b['recognize_image_text'].call_args.kwargs['provider_ids'],selected)
+
+    async def test_image_mode_uses_custom_prompt_selected_apis_and_sends_object_name(self):
+        self.image_mode=True;selected='0123456789abcdef';prompt='识别核心物体，只输出名称'
+        aid=await self.create(signin_captcha=0,signin_recognition_mode='image',signin_image_prompt=prompt,ai_provider_ids=selected)
+        await self.run_flow(aid)
+        self.b['recognize_image_text'].assert_not_awaited()
+        args=self.b['recognize_image_answer'].call_args.args
+        self.assertEqual((args[1],args[2],args[3]),(prompt,'请发送图片中物体的名称',selected))
+        self.assertIn(('send','苹果'),self.events);self.assertEqual(self.row(aid)['last_status'],'success')
+
+    async def test_image_wait_accepts_fresh_non_captcha_picture_but_rejects_welcome_card(self):
+        target=photo_message(102,'图中是什么物品？',2)
+        self.b['client'].get_messages=AsyncMock(return_value=[target])
+        result=await self.b['_await_signin_image']('entity',1,101)
+        self.assertEqual((result[0].id,result[2]),(102,'图中是什么物品？'))
+        welcome=photo_message(103,'欢迎使用测试机器人',3)
+        self.b['client'].get_messages=AsyncMock(return_value=[welcome])
+        with patch.object(asyncio,'sleep',new=AsyncMock()):
+            self.assertEqual(await self.b['_await_signin_image']('entity',0.01,102),(None,None,''))
 
     async def test_fixed_mode_does_not_fetch_between_clicks(self):
         aid=await self.create(click_times=3,refresh_buttons=0)

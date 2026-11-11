@@ -87,12 +87,12 @@ def normalized_draft(obj, model_type, validate, values, columns):
     data = {key: value for key,value in obj.items() if key in allowed}
     if data.get('type','signin') not in ('signin','custom','keepalive'):
         raise ValueError('仅支持生成签到、自定义步骤或群保号任务')
-    # 任何 AI 草稿都只能等待用户复核，不能直接启用或新增验证码自动化。
+    # 任何 AI 草稿都只能等待用户复核，不能直接启用图片自动化。
     if data.get('enabled'):
         warnings.append('草稿默认停用，请复核后手动启用')
-    if data.get('signin_captcha'):
-        warnings.append('验证码自动识别不由 AI 草稿开启，请在表单人工确认')
-    data.update(enabled=0, signin_captcha=0)
+    if data.get('signin_captcha') or data.get('signin_recognition_mode') not in (None,'','none'):
+        warnings.append('图片或验证码识别不由 AI 草稿开启，请在表单人工确认')
+    data.update(enabled=0, signin_captcha=0, signin_recognition_mode='none', signin_image_prompt='')
     for key,value in data.items():
         if isinstance(value,str) and len(value) > (20000 if key=='custom_steps' else 2048):
             raise ValueError('AI 草稿字段过长，请简化描述')
@@ -247,7 +247,7 @@ def build_ai_assistant_router(get_db, model_type, validate, values, columns, ai_
             timeline.append({'ts':row['ts'],'ok':row['ok'],
                 'content':redact(row['content'],secrets,120),'reply':redact(row['reply'],secrets,200),'detail':safe})
         timeline.reverse()
-        config = {key:task[key] for key in columns.split(',') if key not in ('icon_url','custom_steps','groups','reply_text','signin_captcha')}
+        config = {key:task[key] for key in columns.split(',') if key not in ('icon_url','custom_steps','groups','reply_text','signin_captcha','signin_image_prompt')}
         config = {key:redact(value,secrets,400) if isinstance(value,str) else value for key,value in config.items()}
         allowed = [key for key in SUGGESTIONS if valid_suggestion(key,
                    NUMERIC[key][0] if key in NUMERIC else '09:00' if key.startswith('win_') else '',task['type'])]
