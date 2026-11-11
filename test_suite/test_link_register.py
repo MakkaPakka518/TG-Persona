@@ -19,7 +19,7 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         self.b["conn"].close()
 
     async def create(self, **values):
-        body = dict(type="link_register", name="链接抢注", target="@testkky_makka_bot",
+        body = dict(type="link_register", name="链接抢注",
                     btn_text="注册", keywords="已进入注册状态", success_kw="注册成功",
                     groups="", result_timeout=3, retries=0, link_mode=1, link_limit=4, link_wait=2)
         body.update(values)
@@ -184,18 +184,33 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         await self.b["run_link_register"](self.row(aid), links)
         self.assertEqual(self.b["client"].send_message.await_count, 1)
 
-    async def test_ignores_other_bot_and_rejects_missing_credential(self):
+    async def test_infers_bot_and_rejects_missing_credential(self):
         aid = await self.create()
-        self.b["client"] = SimpleNamespace(send_message=AsyncMock(), get_messages=AsyncMock(return_value=[]))
+        self.b["client"] = SimpleNamespace(
+            send_message=AsyncMock(return_value=SimpleNamespace(id=50)),
+            get_messages=AsyncMock(return_value=[message(101, "A-1 注册码已被使用")]))
         ok = await self.b["run_link_register"](
             self.row(aid), [{"bot": "evil_bot", "payload": "A-1"}])
         self.assertFalse(ok)
-        self.assertEqual(self.b["client"].send_message.await_count, 0)
+        self.b["resolve_entity"].assert_awaited_with("@evil_bot")
+        sent_before = self.b["client"].send_message.await_count
         self.b["_delete_link_credential"](aid)
         ok = await self.b["run_link_register"](
             self.row(aid), [{"bot": "testkky_makka_bot", "payload": "A-1"}])
         self.assertFalse(ok)
-        self.assertEqual(self.b["client"].send_message.await_count, 0)
+        self.assertEqual(self.b["client"].send_message.await_count, sent_before)
+
+    async def test_mixed_links_only_use_first_bot(self):
+        aid = await self.create()
+        self.b["client"] = SimpleNamespace(
+            send_message=AsyncMock(return_value=SimpleNamespace(id=50)),
+            get_messages=AsyncMock(return_value=[message(101, "FIRST-1 注册码已被使用")]))
+        await self.b["run_link_register"](
+            self.row(aid), [{"bot": "first_bot", "payload": "FIRST-1"},
+                            {"bot": "second_bot", "payload": "SECOND-2"}])
+        self.b["resolve_entity"].assert_awaited_with("@first_bot")
+        sent = [call.args[1] for call in self.b["client"].send_message.await_args_list]
+        self.assertNotIn("/start SECOND-2", sent)
 
     def test_credential_roundtrip_and_not_in_task_row(self):
         self.b["set_link_credential"](7, "用户甲", "秘密乙")

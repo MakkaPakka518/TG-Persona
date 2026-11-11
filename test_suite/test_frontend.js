@@ -798,10 +798,11 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('群链接抢注表单与凭据分离保存，任务体不含安全码',async()=>{
     const form=html.slice(html.indexOf('id="af-link_register"'),html.indexOf('id="af-custom"'));
-    for(const id of ['lkName','lkGroups','lkTarget','lkButton','lkReady','lkUser','lkSecret','lkMode','lkLimit','lkWwait','lkSuccess','lkFail','lkTimeout'])assert(form.includes('id="'+id+'"'));
+    for(const id of ['lkName','lkGroups','lkButton','lkReady','lkUser','lkSecret','lkMode','lkLimit','lkWwait','lkSuccess','lkFail','lkTimeout'])assert(form.includes('id="'+id+'"'));
+    assert(!form.includes('id="lkTarget"'));assert(form.includes('机器人从消息中的注册链接自动识别'));
     assert(form.includes('type="password"')&&form.includes('串行接力')&&form.includes('随机一条'));
     ex("selectedAccount='default';accountEpoch++;editAuto=null;editAutoAccount=null;cancelAutoEdit('link_register')");
-    q('#lkName').value='链接抢注';q('#lkTarget').value='@testkky_makka_bot';q('#lkButton').value='注册';
+    q('#lkName').value='链接抢注';q('#lkButton').value='注册';
     q('#lkReady').value='已进入注册状态';q('#lkSuccess').value='注册成功';q('#lkUser').value='测试用户';q('#lkSecret').value='测试安全码';
     q('#lkMode').value='1';q('#lkLimit').value='3';q('#lkWwait').value='6';q('#lkTimeout').value='30';
     const requests=[];app.api=async(p,o)=>{requests.push([p,o]);return p==='/api/autos'?{ok:true,id:88}:{ok:true}};app.loadAutos=async()=>{};
@@ -809,7 +810,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert.deepStrictEqual(requests.map(x=>x[0]),['/api/autos','/api/autos/88/link-credential']);
     const body=JSON.parse(requests[0][1].body);
     assert(!('lkUser' in body)&&!('link_secret' in body)&&!JSON.stringify(body).includes('测试安全码'));
-    assert.deepStrictEqual(body,{type:'link_register',name:'链接抢注',target:'@testkky_makka_bot',groups:'',btn_text:'注册',keywords:'已进入注册状态',success_kw:'注册成功',fail_kw:'',link_mode:1,link_limit:3,link_wait:6,result_timeout:30,retries:0});
+    assert.deepStrictEqual(body,{type:'link_register',name:'链接抢注',groups:'',btn_text:'注册',keywords:'已进入注册状态',success_kw:'注册成功',fail_kw:'',link_mode:1,link_limit:3,link_wait:6,result_timeout:30,retries:0});
     assert.deepStrictEqual(JSON.parse(requests[1][1].body),{user:'测试用户',secret:'测试安全码'});
   });
   await test('群链接抢注测试按钮调用测试接口',async()=>{

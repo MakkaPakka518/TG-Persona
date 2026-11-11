@@ -1313,7 +1313,8 @@ async def on_link_event(event):
                 continue
         elif chat not in watched:
             continue
-        matched = [link for link in links if link["bot"] == _link_bot(a["target"])]
+        first_bot = links[0]["bot"]
+        matched = [link for link in links if link["bot"] == first_bot]
         if not matched:
             continue
         runtime = _auto_runtime_state()
@@ -1346,7 +1347,8 @@ async def _run_link_event(aid, links):
         except _RetryLater as error:
             _task_failure(a, "Telegram 限流，至少 %s 秒后请人工确认" % error.seconds)
         except asyncio.CancelledError:
-            add_hit("link_register", False, chat_id=a["target"], rule_id=-aid, grp_name=a["name"],
+            target = "@" + links[0]["bot"] if links else ""
+            add_hit("link_register", False, chat_id=target, rule_id=-aid, grp_name=a["name"],
                     content="用户手动停止", detail={"kind": "link_register", "task": a["name"],
                                                     "error": "用户手动停止", "manual_stop": True})
             raise
@@ -1854,8 +1856,8 @@ async def _await_link_stage(ent, min_id, baseline, invalid_kw, button_kw, invali
 
 async def run_link_register(a, links, test_only=False):
     """群链接抢注：逐条 /start，明确失效才发下一条，只完成一次注册。"""
-    target = str(a["target"] or "").strip()
-    expected_bot = _link_bot(target)
+    expected_bot = str((links or [{}])[0].get("bot") or "").strip().lower()
+    target = "@" + expected_bot if expected_bot else ""
     button_kw = str(a["btn_text"] or "").strip()
     ready_kw = str(a["keywords"] or "").strip()
     success_kw = str(a["success_kw"] or "").strip()
@@ -1865,7 +1867,7 @@ async def run_link_register(a, links, test_only=False):
     wait = max(2, min(15, int(a["link_wait"] or 5)))
     limit = max(2, min(4, int(a["link_limit"] or 4)))
     mode = int(a["link_mode"] if a["link_mode"] is not None else 1)
-    if not expected_bot or not button_kw or not ready_kw or not success_kw:
+    if not button_kw or not ready_kw or not success_kw:
         return _task_failure(a, "群链接抢注配置不完整")
     credential = get_link_credential(a["id"])
     if not credential.get("u") or not credential.get("s"):
@@ -1873,7 +1875,7 @@ async def run_link_register(a, links, test_only=False):
     candidates = [item for item in (links or [])
                   if item.get("bot") == expected_bot and item.get("payload")]
     if not candidates:
-        return _task_failure(a, "消息中没有符合目标机器人的注册链接")
+        return _task_failure(a, "消息中没有可用的注册链接")
     runtime = _link_runtime_state()
     seen = runtime.link_seen.setdefault(expected_bot, set())
     if not test_only:
@@ -1890,7 +1892,7 @@ async def run_link_register(a, links, test_only=False):
     ent = await resolve_entity("@" + expected_bot)
     if ent is None:
         runtime.link_running.discard(expected_bot)
-        return _task_failure(a, "目标机器人解析失败")
+        return _task_failure(a, "注册链接中的机器人解析失败")
     attempted, last_text, popup = [], "", ""
     try:
         try:
@@ -3456,10 +3458,8 @@ def _valid_auto(body: AutoIn):
         if body.poll_interval and (body.poll_interval < 1 or body.poll_interval > 300 or not body.fail_kw.strip()):
             raise HTTPException(400, "关闭弹窗重试需填写关键词，间隔应为 1-300 秒")
     if body.type == "link_register":
-        if not all(value.strip() for value in (body.target, body.btn_text, body.keywords, body.success_kw)):
-            raise HTTPException(400, "群链接抢注需填写目标机器人、注册按钮、进入注册状态关键词和成功关键词")
-        if not re.fullmatch(r"@?[A-Za-z0-9_]{4,32}", body.target.strip()):
-            raise HTTPException(400, "目标机器人须为 @username")
+        if not all(value.strip() for value in (body.btn_text, body.keywords, body.success_kw)):
+            raise HTTPException(400, "群链接抢注需填写注册按钮、进入注册状态关键词和成功关键词")
         if body.link_mode not in (0, 1):
             raise HTTPException(400, "链接模式只能为 0 或 1")
         if body.link_limit < 2 or body.link_limit > 4:
@@ -3665,7 +3665,7 @@ async def test_scheduled_auto(aid: int):
     if a["type"] == "link_register":
         links = await _latest_link_probe(a)
         if not links:
-            raise HTTPException(400, "所选群最近一条消息里没有目标机器人的注册链接")
+            raise HTTPException(400, "所选群最近一条消息里没有可用的注册链接")
         runtime.auto_tasks[aid] = asyncio.get_running_loop().create_future()
         try:
             ok = bool(await run_link_register(a, links, test_only=True))
@@ -3682,7 +3682,6 @@ async def test_scheduled_auto(aid: int):
 
 async def _latest_link_probe(a):
     """Read the newest message from configured groups and return matching links."""
-    expected = _link_bot(a["target"])
     groups = [g.strip() for g in str(a["groups"] or "").split(",") if g.strip()]
     if not groups:
         groups = [r["chat_id"] for r in get_account_db().execute(
@@ -3695,7 +3694,10 @@ async def _latest_link_probe(a):
                 continue
             recent = await get_runtime().client.get_messages(ent, limit=1)
             for message in recent or []:
-                collected.extend(link for link in _message_links(message) if link["bot"] == expected)
+                links = _message_links(message)
+                if links:
+                    first_bot = links[0]["bot"]
+                    collected.extend(link for link in links if link["bot"] == first_bot)
         except Exception:
             continue
     deduped, seen = [], set()
