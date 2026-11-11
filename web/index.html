@@ -701,6 +701,11 @@ section.act,.fold.open .fold-b{animation:none}
             <label for="brReplyText">群内发送内容</label><input type="text" id="brReplyText" maxlength="1000" value="拿下！">
             <label for="brReplyDelay">延迟发送（秒）</label><input id="brReplyDelay" type="number" value="5" min="0" max="300" step="1" inputmode="numeric">
           </div>
+          <label class="button-reply-toggle"><input type="checkbox" id="brAiFlock"> 注册成功后开启 AI 水群</label>
+          <div id="brAiFlockFields" class="hidden">
+            <label for="brAiFlockMinutes">持续分钟</label><input id="brAiFlockMinutes" type="number" value="5" min="1" max="60" step="1" inputmode="numeric">
+            <label for="brAiFlockPrompt">人格提示词</label><textarea id="brAiFlockPrompt" maxlength="1000" rows="4">你是群聊中的普通成员。结合最近聊天自然回复一句简短中文，不要解释身份，不要使用链接、命令、@提及或 Markdown，不要连续刷屏。</textarea>
+          </div>
           <div class="hint">长期监听，只有注册成功才推送通知。新任务保存后请手动启用。</div>
           <div class="flex" style="margin-top:14px"><button class="btn" type="submit">保存</button><button class="ghost" type="button" id="brCancel" style="display:none" onclick="cancelAutoEdit('button_register')">取消编辑</button></div>
         </form></div></div>
@@ -753,6 +758,11 @@ section.act,.fold.open .fold-b{animation:none}
             <label for="lkGroupReplyDelay">延迟发送（秒）</label>
             <input type="number" id="lkGroupReplyDelay" value="5" min="0" max="300" step="1" inputmode="numeric">
           </div>
+          <label class="link-reply-toggle"><input type="checkbox" id="lkAiFlock"> 注册成功后开启 AI 水群</label>
+          <div id="lkAiFlockFields" class="hidden">
+            <label for="lkAiFlockMinutes">持续分钟</label><input type="number" id="lkAiFlockMinutes" value="5" min="1" max="60" step="1" inputmode="numeric">
+            <label for="lkAiFlockPrompt">人格提示词</label><textarea id="lkAiFlockPrompt" maxlength="1000" rows="4">你是群聊中的普通成员。结合最近聊天自然回复一句简短中文，不要解释身份，不要使用链接、命令、@提及或 Markdown，不要连续刷屏。</textarea>
+          </div>
           <label for="lkTimeout">每步最长等待（秒）</label>
           <input type="number" id="lkTimeout" value="30" min="1" max="300" step="1" inputmode="numeric" required>
           <div class="hint">每条链接只发送一次；只有明确提示注册码已被使用才尝试下一条；同一机器人同时只跑一个流程，成功只提交一次账号信息。</div>
@@ -789,6 +799,11 @@ section.act,.fold.open .fold-b{animation:none}
           <div id="crReplyFields" class="hidden">
             <label for="crReplyText">群内发送内容</label><input type="text" id="crReplyText" maxlength="1000" placeholder="如：拿下！">
             <label for="crReplyDelay">延迟发送（秒）</label><input type="number" id="crReplyDelay" value="5" min="0" max="300" step="1" inputmode="numeric">
+          </div>
+          <label class="button-reply-toggle"><input type="checkbox" id="crAiFlock"> 注册成功后开启 AI 水群</label>
+          <div id="crAiFlockFields" class="hidden">
+            <label for="crAiFlockMinutes">持续分钟</label><input type="number" id="crAiFlockMinutes" value="5" min="1" max="60" step="1" inputmode="numeric">
+            <label for="crAiFlockPrompt">人格提示词</label><textarea id="crAiFlockPrompt" maxlength="1000" rows="4">你是群聊中的普通成员。结合最近聊天自然回复一句简短中文，不要解释身份，不要使用链接、命令、@提及或 Markdown，不要连续刷屏。</textarea>
           </div>
           <div class="hint">仅成功推送通知。新任务保存后请手动启用，即可持续监听所选群。</div>
           <div class="flex" style="margin-top:14px"><button class="btn" type="submit">保存</button><button class="ghost" type="button" id="crCancel" style="display:none" onclick="cancelAutoEdit('code_register')">取消编辑</button></div>
@@ -839,6 +854,17 @@ section.act,.fold.open .fold-b{animation:none}
       </div>
     </div>
 
+    <div class="card fold" id="waterAiCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">AI 水群</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="waterAiEnabled" style="width:auto"> 开启时间段 AI 水群（默认关闭）</label>
+        <label>生效群</label><div id="waterAiGroups" class="grp-pick"></div>
+        <div class="flex"><div><label for="waterAiStart">开始</label><input type="time" id="waterAiStart" value="09:00"></div><div><label for="waterAiEnd">结束</label><input type="time" id="waterAiEnd" value="22:00"></div></div>
+        <label for="waterAiPrompt">人格提示词</label><textarea id="waterAiPrompt" maxlength="1000" rows="4">你是群聊中的普通成员。结合最近聊天自然回复一句简短中文，不要解释身份，不要使用链接、命令、@提及或 Markdown，不要连续刷屏。</textarea>
+        <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+        <div class="hint">收到所选群的新消息后，结合最近聊天生成一句短回复；同群至少间隔 60 秒。群消息会发送给所选 AI API，可能产生费用。</div>
+      </div>
+    </div>
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12a9 9 0 1 1-9-9"/></svg>签到任务</span><span class="cnt" id="aCntSign">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
@@ -1167,6 +1193,7 @@ section.act,.fold.open .fold-b{animation:none}
       <button data-k="redpacket" onclick="pickLogKind('redpacket')">红包</button>
       <button data-k="custom" onclick="pickLogKind('custom')">自定义</button>
       <button data-k="keepalive" onclick="pickLogKind('keepalive')">群聊</button>
+      <button data-k="ai_flock" onclick="pickLogKind('ai_flock')">AI 水群</button>
     </div>
     <div class="card" id="logList"></div>
     <div class="flex" style="margin-top:12px">
@@ -1359,6 +1386,7 @@ const $=s=>document.querySelector(s);
 let state={tg:{},logged_in:false,running:true};
 const EMOJIS=["👍","👎","❤","🔥","🥰","👏","😁","🤔","🤯","😱","🤬","😢","🎉","🤩","🤮","💩","🙏","👌","🤡","🥱","🥴","😍","🐳","🌚","🌭","🍌","🍎","😘","😎","🆒","🆕","🏆","✌","🍾","🖖","😭","😅","🥳","🎃","🙃","🤝","🗿","🛸","🤗","😴","😂","💅","🎊","🥂","😈"];
 const DEFAULT_SIGNIN_IMAGE_PROMPT='你是一个高精度的验证码与图像识别助手。请仔细观察图片中的核心事物、场景、服装或物品，并根据机器人题目说明给出最匹配的名称。必须且只能输出答案本身，严禁输出任何多余字符、标点符号、解释、理由或思考过程！';
+const DEFAULT_AI_FLOCK_PROMPT='你是群聊中的普通成员。结合最近聊天自然回复一句简短中文，不要解释身份，不要使用链接、命令、@提及或 Markdown，不要连续刷屏。';
 function toast(msg,err){if(!msg)return;const t=$('#toast');t.textContent=msg;t.classList.add('show');t.classList.toggle('err',!!err);setTimeout(()=>t.classList.remove('show'),2600)}
 // ---------- 账号请求范围 ----------
 let selectedAccount='default', accountEpoch=0;
@@ -1442,6 +1470,7 @@ function resetAccountCaches(){
   invalidateBatchPreview();cancelConfigImport();resetAccountTests();
   for(const id of ['sBark','sBt','sBc','sFlPool'])$('#'+id).value='';
   $('#sTaskConcurrency').value='2';signinAIProviderSel.clear();renderSigninAIProviders();
+  waterAIGroupSel.clear();renderWaterAIGroups();
   syncAutoSelection();
 }
 function switchAccount(id){
@@ -1909,14 +1938,14 @@ function renderAutoList(type){
 }
 function signinRecognitionMode(a){const mode=String(a?.signin_recognition_mode||'');return ['none','captcha','image'].includes(mode)?mode:(a?.signin_captcha?'captcha':'none')}
 function autoDesc(a){
-  if(a.type==='code_register')return `群：${esc(a.groups)}；Bot：${esc(a.target)}；${Number(a.link_mode)===0?'随机一条':'串行最多 '+esc(String(a.link_limit??4))+' 条'}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒回群发送 '+esc(a.success_reply_text):''}`;
-  if(a.type==='button_register')return `群：${esc(a.groups||'全部监听群')}；开注：${esc(a.announcement_kw)}；群按钮：${esc(a.announcement_button)}；指令：${esc(a.command||'/start')}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒向原群发送 '+esc(a.success_reply_text):''}`;
+  if(a.type==='code_register')return `群：${esc(a.groups)}；Bot：${esc(a.target)}；${Number(a.link_mode)===0?'随机一条':'串行最多 '+esc(String(a.link_limit??4))+' 条'}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒回群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
+  if(a.type==='button_register')return `群：${esc(a.groups||'全部监听群')}；开注：${esc(a.announcement_kw)}；群按钮：${esc(a.announcement_button)}；指令：${esc(a.command||'/start')}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒向原群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
   if(a.type==='signin'){
     const mode=signinRecognitionMode(a),recognition=mode==='captcha'?' · 验证码识别':mode==='image'?(a.signin_image_action==='click'?' · 图片识别点选':' · 图片识别回复'):'';
     return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${recognition}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
   }
   if(a.type==='scheduled_register')return `${esc(a.target)}，${esc(a.command)}，${esc(autoWindow(a))}，按钮 ${esc(a.btn_text)}${a.history_first?'，历史卡片优先':''}${Number(a.poll_interval)>0?'，关闭弹窗每 '+esc(String(a.poll_interval))+' 秒重试':''}，收到 ${esc(a.keywords)} 后回复，成功 ${esc(a.success_kw)}，每步等待 ${esc(String(a.result_timeout??30))}秒`;
-  if(a.type==='link_register')return `群:${esc(a.groups||'全部监听群')} · 自动识别机器人 · 按钮 ${esc(a.btn_text)}${Number(a.link_mode)===0?' · 随机一条':' · 串行最多 '+esc(String(a.link_limit??4))+' 条'} · 失效等待 ${esc(String(a.link_wait??5))}秒 · 成功 ${esc(a.success_kw)}${a.existing_kw?' · 已有号即停止':''}${a.success_reply_enabled?' · 成功后 '+esc(String(a.success_reply_delay??5))+' 秒群内发送 '+esc(a.success_reply_text):''}${a.link_credential_set?' · 已保存账号信息':' · 未填写账号信息'}`;
+  if(a.type==='link_register')return `群:${esc(a.groups||'全部监听群')} · 自动识别机器人 · 按钮 ${esc(a.btn_text)}${Number(a.link_mode)===0?' · 随机一条':' · 串行最多 '+esc(String(a.link_limit??4))+' 条'} · 失效等待 ${esc(String(a.link_wait??5))}秒 · 成功 ${esc(a.success_kw)}${a.existing_kw?' · 已有号即停止':''}${a.success_reply_enabled?' · 成功后 '+esc(String(a.success_reply_delay??5))+' 秒群内发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?' · AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}${a.link_credential_set?' · 已保存账号信息':' · 未填写账号信息'}`;
   if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}${a.poll_interval>0?' · 轮询'+a.poll_interval+'s@'+esc(a.target):''}`;
   if(a.type==='redpacket')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
   if(a.type==='keepalive'){
@@ -1973,6 +2002,7 @@ function editAutoItem(id){
     $('#lkReady').value=a.keywords||'已进入注册状态';$('#lkUser').value='';$('#lkSecret').value='';
     $('#lkExisting').value=a.existing_kw||'';$('#lkGroupReply').checked=!!a.success_reply_enabled;
     $('#lkGroupReplyText').value=a.success_reply_text||'';$('#lkGroupReplyDelay').value=a.success_reply_delay??5;$('#lkGroupReplyFields').classList.toggle('hidden',!$('#lkGroupReply').checked);
+    $('#lkAiFlock').checked=!!a.ai_flock_enabled;$('#lkAiFlockMinutes').value=a.ai_flock_minutes??5;$('#lkAiFlockPrompt').value=a.ai_flock_prompt||DEFAULT_AI_FLOCK_PROMPT;$('#lkAiFlockFields').classList.toggle('hidden',!$('#lkAiFlock').checked);
     $('#lkMode').value=String(Number(a.link_mode)===0?0:1);$('#lkLimit').value=Number(a.link_limit)||4;
     $('#lkWwait').value=Number(a.link_wait)||3;$('#lkSuccess').value=a.success_kw||'成功';
     $('#lkFail').value=a.fail_kw||'';$('#lkTimeout').value=a.result_timeout??30;
@@ -1984,6 +2014,7 @@ function editAutoItem(id){
     $('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value=a.success_kw||'成功';$('#brFail').value=a.fail_kw||'';$('#brTimeout').value=a.result_timeout??30;
     $('#brGroupReply').checked=!!a.success_reply_enabled;$('#brReplyText').value=a.success_reply_text||'';$('#brReplyDelay').value=a.success_reply_delay??5;
     $('#brGroupReplyFields').classList.toggle('hidden',!$('#brGroupReply').checked);$('#brCancel').style.display='inline-block';
+    $('#brAiFlock').checked=!!a.ai_flock_enabled;$('#brAiFlockMinutes').value=a.ai_flock_minutes??5;$('#brAiFlockPrompt').value=a.ai_flock_prompt||DEFAULT_AI_FLOCK_PROMPT;$('#brAiFlockFields').classList.toggle('hidden',!$('#brAiFlock').checked);
   }else if(t==='code_register'){
     $('#crName').value=a.name;renderCodeGroupOptions(a.groups);$('#crBot').value=a.target||'';
     $('#crButton').value=a.btn_text||'注册';$('#crReady').value=a.keywords||'已进入注册状态';$('#crExisting').value=a.existing_kw||'';
@@ -1991,6 +2022,7 @@ function editAutoItem(id){
     $('#crSuccess').value=a.success_kw||'成功';$('#crFail').value=a.fail_kw||'';$('#crTimeout').value=a.result_timeout??30;
     $('#crGroupReply').checked=!!a.success_reply_enabled;$('#crReplyText').value=a.success_reply_text||'';$('#crReplyDelay').value=a.success_reply_delay??5;
     $('#crReplyFields').classList.toggle('hidden',!$('#crGroupReply').checked);$('#crCancel').style.display='inline-block';
+    $('#crAiFlock').checked=!!a.ai_flock_enabled;$('#crAiFlockMinutes').value=a.ai_flock_minutes??5;$('#crAiFlockPrompt').value=a.ai_flock_prompt||DEFAULT_AI_FLOCK_PROMPT;$('#crAiFlockFields').classList.toggle('hidden',!$('#crAiFlock').checked);
   }else if(t==='grabcodes'){
     $('#gName').value=a.name;setAutoGroups('grabcodes',a.groups);$('#gKeywords').value=a.keywords;
     $('#gText').value=a.reply_text;$('#gCd').value=a.cooldown;
@@ -2019,10 +2051,10 @@ function cancelAutoEdit(t){
   ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sRecognitionMode').value='none';$('#sImageAction').value='reply';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
-    link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
+    link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkAiFlock').checked=false;$('#lkAiFlockMinutes').value='5';$('#lkAiFlockPrompt').value=DEFAULT_AI_FLOCK_PROMPT;$('#lkAiFlockFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';setVisualSteps('[]');$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cCancel').style.display='none'},
-    code_register:()=>{$('#crName').value='';$('#crGroup').value='';$('#crBot').value='';$('#crButton').value='注册';$('#crReady').value='已进入注册状态';$('#crExisting').value='无法启用续期功能';$('#crUser').value='';$('#crSecret').value='';$('#crMode').value='1';$('#crLimit').value=4;$('#crWait').value=3;$('#crSuccess').value='成功';$('#crFail').value='';$('#crTimeout').value=30;$('#crGroupReply').checked=false;$('#crReplyText').value='';$('#crReplyDelay').value=5;$('#crReplyFields').classList.add('hidden');$('#crCancel').style.display='none'},
-    button_register:()=>{$('#brName').value='';setAutoGroups('button_register','');$('#brAnnouncement').value='定时注册';$('#brAnnouncementButton').value='点击注册';$('#brCommand').value='/start';$('#brButton').value='创建';$('#brReady').value='注册状态';$('#brExisting').value='';$('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value='成功';$('#brFail').value='';$('#brTimeout').value=30;$('#brGroupReply').checked=true;$('#brReplyText').value='拿下！';$('#brReplyDelay').value=5;$('#brGroupReplyFields').classList.remove('hidden');$('#brCancel').style.display='none'},
+    code_register:()=>{$('#crName').value='';$('#crGroup').value='';$('#crBot').value='';$('#crButton').value='注册';$('#crReady').value='已进入注册状态';$('#crExisting').value='无法启用续期功能';$('#crUser').value='';$('#crSecret').value='';$('#crMode').value='1';$('#crLimit').value=4;$('#crWait').value=3;$('#crSuccess').value='成功';$('#crFail').value='';$('#crTimeout').value=30;$('#crGroupReply').checked=false;$('#crReplyText').value='';$('#crReplyDelay').value=5;$('#crReplyFields').classList.add('hidden');$('#crAiFlock').checked=false;$('#crAiFlockMinutes').value=5;$('#crAiFlockPrompt').value=DEFAULT_AI_FLOCK_PROMPT;$('#crAiFlockFields').classList.add('hidden');$('#crCancel').style.display='none'},
+    button_register:()=>{$('#brName').value='';setAutoGroups('button_register','');$('#brAnnouncement').value='定时注册';$('#brAnnouncementButton').value='点击注册';$('#brCommand').value='/start';$('#brButton').value='创建';$('#brReady').value='注册状态';$('#brExisting').value='';$('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value='成功';$('#brFail').value='';$('#brTimeout').value=30;$('#brGroupReply').checked=true;$('#brReplyText').value='拿下！';$('#brReplyDelay').value=5;$('#brGroupReplyFields').classList.remove('hidden');$('#brAiFlock').checked=false;$('#brAiFlockMinutes').value=5;$('#brAiFlockPrompt').value=DEFAULT_AI_FLOCK_PROMPT;$('#brAiFlockFields').classList.add('hidden');$('#brCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'},
     keepalive:()=>{$('#kName').value='';$('#kTarget').value='';$('#kText').value='';$('#kEvery').value=7;$('#kUnit').value='86400';$('#kDel').value=10;$('#kCancel').style.display='none'}})[t]();
 }
@@ -2225,6 +2257,7 @@ async function saveAuto(type){
     body={type,name:$('#brName').value.trim(),groups:getAutoGroups(type),announcement_kw:$('#brAnnouncement').value.trim(),announcement_button:$('#brAnnouncementButton').value.trim(),command:$('#brCommand').value.trim()||'/start',
       btn_text:$('#brButton').value.trim(),keywords:$('#brReady').value.trim(),existing_kw:$('#brExisting').value.trim(),success_kw:$('#brSuccess').value.trim(),fail_kw:$('#brFail').value.trim(),result_timeout:Number($('#brTimeout').value),
       success_reply_enabled:$('#brGroupReply').checked?1:0,success_reply_text:$('#brReplyText').value.trim(),success_reply_delay:Number($('#brReplyDelay').value),retries:0,enabled:0};
+    Object.assign(body,{ai_flock_enabled:$('#brAiFlock').checked?1:0,ai_flock_minutes:Number($('#brAiFlockMinutes').value),ai_flock_prompt:$('#brAiFlockPrompt').value.trim()});
     if(!body.name||!body.announcement_kw||!body.announcement_button||!body.btn_text||!body.keywords||!body.success_kw)return toast('请填写开注关键词、按钮文字和注册流程',1);
     if(!Number.isInteger(body.result_timeout)||body.result_timeout<1||body.result_timeout>300)return toast('每步等待须为 1–300 秒',1);
     if(body.success_reply_enabled&&!body.success_reply_text)return toast('请填写成功后的群内发送内容',1);
@@ -2240,7 +2273,8 @@ async function saveAuto(type){
       success_kw:$('#lkSuccess').value.trim(),fail_kw:$('#lkFail').value.trim(),
       link_mode:mode,link_limit:limit,link_wait:wait,result_timeout:timeout,retries:0,
       existing_kw:$('#lkExisting').value.trim(),success_reply_enabled:groupReply?1:0,
-      success_reply_text:groupReplyText,success_reply_delay:groupReplyDelay};
+      success_reply_text:groupReplyText,success_reply_delay:groupReplyDelay,
+      ai_flock_enabled:$('#lkAiFlock').checked?1:0,ai_flock_minutes:Number($('#lkAiFlockMinutes').value),ai_flock_prompt:$('#lkAiFlockPrompt').value.trim()};
     if(!body.name||!body.btn_text||!body.keywords||!body.success_kw)return toast('请完整填写按钮、进入注册状态和成功关键词',1);
     if(![0,1].includes(mode)||!Number.isInteger(limit)||limit<2||limit>4||!Number.isInteger(wait)||wait<2||wait>15)return toast('链接模式/数量或失效等待无效',1);
     if(!Number.isInteger(timeout)||timeout<1||timeout>300)return toast('每步最长等待须为 1–300 秒',1);
@@ -2255,6 +2289,7 @@ async function saveAuto(type){
       btn_text:$('#crButton').value.trim(),keywords:$('#crReady').value.trim(),existing_kw:$('#crExisting').value.trim(),success_kw:$('#crSuccess').value.trim(),fail_kw:$('#crFail').value.trim(),
       link_mode:Number($('#crMode').value),link_limit:Number($('#crLimit').value),link_wait:Number($('#crWait').value),result_timeout:Number($('#crTimeout').value),
       success_reply_enabled:$('#crGroupReply').checked?1:0,success_reply_text:$('#crReplyText').value.trim(),success_reply_delay:Number($('#crReplyDelay').value),retries:0,enabled:0};
+    Object.assign(body,{ai_flock_enabled:$('#crAiFlock').checked?1:0,ai_flock_minutes:Number($('#crAiFlockMinutes').value),ai_flock_prompt:$('#crAiFlockPrompt').value.trim()});
     if(!body.name||!body.btn_text||!body.keywords||!body.success_kw)return toast('请完整填写任务名称和注册流程',1);
     if(!/^-[1-9][0-9]*$/.test(body.groups))return toast('请选择一个监听群',1);
     if(!/^@?[A-Za-z0-9_]{4,32}$/.test(body.target))return toast('请填写该群的 Bot 用户名',1);
@@ -2284,6 +2319,10 @@ async function saveAuto(type){
       cooldown:+$('#pCd').value||5};
     if(!body.name)return toast('请填写任务名称',1);
   }
+  if(['link_register','button_register','code_register'].includes(type)&&body.ai_flock_enabled){
+    if(!aiProviders.some(provider=>provider.enabled))return toast('请先到设置添加并启用 AI API',1);
+    if(!Number.isInteger(body.ai_flock_minutes)||body.ai_flock_minutes<1||body.ai_flock_minutes>60||!body.ai_flock_prompt)return toast('注册水群持续时间须为 1–60 分钟，并填写人格提示词',1);
+  }
   if(typeof assistantFormDraft!=='undefined'&&assistantFormDraft&&!wasEditing){
     if(!isCurrentAccount(assistantFormDraft.account))return toast('草稿所属账号已切换',1);
     body={...taskConfig(assistantFormDraft.draft),...body,enabled:0};
@@ -2310,6 +2349,9 @@ function toggleClosedRetryFields(){$('#trClosedRetryFields').classList.toggle('h
 $('#trClosedRetry').addEventListener('change',toggleClosedRetryFields);
 function toggleLinkReplyFields(){$('#lkGroupReplyFields').classList.toggle('hidden',!$('#lkGroupReply').checked)}
 $('#lkGroupReply').addEventListener('change',toggleLinkReplyFields);
+function syncRegistrationAIFlock(prefix){const box=$('#'+prefix+'AiFlock'),on=box.checked;if(on&&!aiProviders.some(provider=>provider.enabled)){box.checked=false;toast('请先到设置添加并启用 AI API',1)}$('#'+prefix+'AiFlockFields').classList.toggle('hidden',!box.checked)}
+for(const prefix of ['br','lk','cr'])$('#'+prefix+'AiFlock').addEventListener('change',()=>syncRegistrationAIFlock(prefix));
+$('#waterAiEnabled').addEventListener('change',function(){if(this.checked&&!aiProviders.some(provider=>provider.enabled)){this.checked=false;toast('请先到设置添加并启用 AI API',1)}});
 async function delAuto(id){
   const a=autos.find(x=>x.id===id);
   if(!a||!confirm('删除任务「'+a.name+'」?'))return;
@@ -2448,7 +2490,7 @@ async function exportConfig(selected){
 }
 
 // ---------- AI 助手：所有保存和应用均由用户确认 ----------
-const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_provider_ids,groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled'.split(',');
+const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_provider_ids,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled'.split(',');
 const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',result_delay:'结果判断前延迟（秒）',result_timeout:'等待最终回复上限（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',signin_recognition_mode:'图片处理',signin_image_prompt:'图片识别提示词',signin_image_action:'图片识别动作',ai_provider_ids:'识别 API',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
 const AI_RANGES={command_delay:[0,120],button_delay:[0,120],result_delay:[0,120],result_timeout:[1,300],refresh_buttons:[0,1],click_times:[1,20],click_interval:[50,3000],retries:[0,5],poll_interval:[60,7776000]};
 const AI_TEXT_FIELDS=['win_start','win_end','success_kw','fail_kw','btn_text','btn_emoji','command'];
@@ -2877,6 +2919,8 @@ async function loadSettings(){
     $('#sFlCnt').value=s.flock_count||5;
     $('#sFlMin').value=s.flock_minutes||5;
     $('#sFlPool').value=s.flock_pool||'';
+    $('#waterAiEnabled').checked=s.water_ai_enabled==='1';waterAIGroupSel=new Set(String(s.water_ai_groups||'').split(',').filter(Boolean));
+    $('#waterAiStart').value=s.water_ai_start||'09:00';$('#waterAiEnd').value=s.water_ai_end||'22:00';$('#waterAiPrompt').value=s.water_ai_prompt||DEFAULT_AI_FLOCK_PROMPT;renderWaterAIGroups();
     if(s.theme && !localStorage.getItem('tgp_theme'))applyTheme(s.theme);  // 本机优先,其它设备首次访问才用后端主题
     loadTz();loadSessions();loadAIProviders();
   }catch(e){}
@@ -2884,6 +2928,8 @@ async function loadSettings(){
 async function saveSettings(){
   const concurrency=String($('#sTaskConcurrency').value||'2'),c=accountContext();
   if(!/^[1-5]$/.test(concurrency))return toast('每账号任务并发上限须为 1–5',1);
+  if($('#waterAiEnabled').checked&&!aiProviders.some(provider=>provider.enabled))return toast('请先到设置添加并启用 AI API',1);
+  if($('#waterAiEnabled').checked&&(!waterAIGroupSel.size||!$('#waterAiPrompt').value.trim()))return toast('开启 AI 水群前请选择群并填写人格提示词',1);
   try{
     await api('/api/settings',{method:'POST',body:JSON.stringify({
       cooldown:+$('#sCooldown').value,
@@ -2902,6 +2948,8 @@ async function saveSettings(){
       flock_count:$('#sFlCnt').value||5,
       flock_minutes:$('#sFlMin').value||5,
       flock_pool:$('#sFlPool').value.trim(),
+      water_ai_enabled:$('#waterAiEnabled').checked?'1':'0',water_ai_groups:[...waterAIGroupSel].join(','),
+      water_ai_start:$('#waterAiStart').value,water_ai_end:$('#waterAiEnd').value,water_ai_prompt:$('#waterAiPrompt').value.trim(),
       theme:document.documentElement.dataset.theme||'dark'
     }),_account:c});
     if(!isCurrentAccount(c))return;
@@ -3165,16 +3213,19 @@ async function loadRules(){
 }
 let ruleGroupSel=new Set();
 $('#rGroups').addEventListener('click',e=>{const b=e.target.closest('[data-rule-group]');if(b&&$('#rGroups').contains(b))toggleRuleGroup(b.dataset.ruleGroup)});
-let watchedGroups=[];
+let watchedGroups=[],waterAIGroupSel=new Set();
 async function loadRuleGroups(){
   const c=accountContext();
   try{
     const d=await api('/api/watched',{_account:c});if(!isCurrentAccount(c))return;watchedGroups=d.groups||[];renderRuleGroups();
     Object.keys(autoGroupSel).forEach(renderAutoGroups);
+    renderWaterAIGroups();
     renderCodeGroupOptions();
     if(allRules.length)loadRules();   // 群名到位后刷新规则列表的「范围」文案
   }catch(e){}
 }
+function renderWaterAIGroups(){const box=$('#waterAiGroups');if(!box)return;box.innerHTML=watchedGroups.length?watchedGroups.map(g=>`<button type="button" class="gp ${waterAIGroupSel.has(String(g.chat_id))?'on':''}" data-water-ai-group="${esc(String(g.chat_id))}">${esc(g.name||g.chat_id)}</button>`).join(''):'<div class="empty" style="padding:6px">请先添加监听群</div>'}
+$('#waterAiGroups').addEventListener('click',e=>{const button=e.target.closest('[data-water-ai-group]');if(!button)return;const id=button.dataset.waterAiGroup;waterAIGroupSel.has(id)?waterAIGroupSel.delete(id):waterAIGroupSel.add(id);renderWaterAIGroups()});
 function renderRuleGroups(){
   const box=$('#rGroups');if(!box)return;
   if(!watchedGroups.length){box.innerHTML='<div class="empty" style="padding:6px">还没有监听群,先去「群组」页添加</div>';return}
@@ -3237,7 +3288,7 @@ async function delRule(id){if(!confirm('删除规则 #'+id+'?'))return;try{await
 
 // ---------- 日志 ----------
 let logKind='reply';
-const LOG_KINDS={reply:'回复',anomaly:'异常',signin:'签到',scheduled_register:'定时抢注',link_register:'链接抢注',button_register:'按钮开注',code_register:'兑换码抢注',grabcodes:'抢注',redpacket:'红包',custom:'自定义',keepalive:'群聊'};
+const LOG_KINDS={reply:'回复',anomaly:'异常',signin:'签到',scheduled_register:'定时抢注',link_register:'链接抢注',button_register:'按钮开注',code_register:'兑换码抢注',grabcodes:'抢注',redpacket:'红包',custom:'自定义',keepalive:'群聊',ai_flock:'AI 水群'};
 function pickLogKind(k){
   if(k!==logKind)resetLogOpenState();
   logKind=k;

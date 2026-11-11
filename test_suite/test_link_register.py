@@ -170,7 +170,8 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         button.click.assert_awaited_once()
 
     async def test_valid_card_registers_once_and_stops_relay(self):
-        aid = await self.create()
+        await self.b['create_ai_provider'](self.b['AIProviderInput'](note='测试',base='https://example.invalid/v1',key='fixture-key',model='m'))
+        aid = await self.create(ai_flock_enabled=1,ai_flock_minutes=5,ai_flock_prompt='注册人格')
         sends, events, phase = [], [], {"v": "card"}
         button = SimpleNamespace(text="注册", click=AsyncMock())
 
@@ -207,6 +208,8 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hit["ok"], 1)
         self.assertNotIn("测试安全码", hit["detail"])
         self.b["send_notify"].assert_called_once()
+        session=self.b['conn'].execute("SELECT source_task_id,prompt FROM ai_flock_sessions WHERE chat_id='-100123'").fetchone()
+        self.assertEqual((session['source_task_id'],session['prompt']),(aid,'注册人格'))
 
     async def test_success_can_reply_to_source_group(self):
         aid = await self.create(success_reply_enabled=1, success_reply_text="拿下",

@@ -33,10 +33,11 @@ def load_model_callbacks():
     source = ast.parse((ROOT / "main.py").read_text())
     wanted = {"AutoIn", "_valid_auto", "_auto_vals"}
     assignments = [node for node in source.body if isinstance(node, ast.Assign)
-                   and any(isinstance(target, ast.Name) and target.id in ("_AUTO_COLS", "DEFAULT_SIGNIN_IMAGE_PROMPT") for target in node.targets)]
+                   and any(isinstance(target, ast.Name) and target.id in ("_AUTO_COLS", "DEFAULT_SIGNIN_IMAGE_PROMPT", "DEFAULT_AI_FLOCK_PROMPT") for target in node.targets)]
     nodes = assignments + [node for node in source.body if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in wanted]
     namespace = {"BaseModel": BaseModel, "Field": Field, "HTTPException": HTTPException,
-                 "math": math, "json": json, "re": re, "_win_minutes": win_minutes}
+                 "math": math, "json": json, "re": re, "_win_minutes": win_minutes,
+                 "_ai_provider_configs": lambda: []}
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "<safe-model-fixture>", "exec"), namespace)
     return namespace
 

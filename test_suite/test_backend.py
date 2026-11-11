@@ -66,8 +66,8 @@ def load_backend():
     tree = ast.parse(SOURCE.read_text(encoding='utf-8'), filename=str(SOURCE))
     safe_assignments = {'SESSION_TTL', 'CAPTCHA_TTL', 'AUTH_CACHE_MAX', 'CAPTCHA_CACHE_MAX',
                         'RL_WINDOW', 'RL_MAX', 'RL_BLOCK', 'CAPTCHA_AFTER', '_CAPTCHA_FONT', 'MAX_TEST_IMAGE',
-                        '_AUTO_COLS', 'RETRY_BASE', 'GLOBAL_SETTING_KEYS', '_TZ_FALLBACK', '_failure_context',
-                        'DEFAULT_SIGNIN_IMAGE_PROMPT'}
+                        '_AUTO_COLS', 'RETRY_BASE', 'GLOBAL_SETTING_KEYS', 'SETTING_KEYS', 'DEFAULTS', '_TZ_FALLBACK', '_failure_context',
+                        'DEFAULT_SIGNIN_IMAGE_PROMPT', 'DEFAULT_AI_FLOCK_PROMPT'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -90,7 +90,8 @@ def load_backend():
     aliases = {'db': 'conn', 'auto_tasks': '_auto_running', 'running': '_running',
                'session_alerted': '_session_alerted', 'cache': '_cache', 'dialog_cache': '_dialog_cache'}
     dict_fields = {'cache','dialog_cache','running','tg_state','hits_count','last_hit_ts','flock_buf',
-                   'auto_last_ts','signin_plans','poll_last','auto_tasks'}
+                    'auto_last_ts','signin_plans','poll_last','auto_tasks','ai_flock_last','ai_flock_blocked'}
+    set_fields = {'tasks','ai_flock_busy_groups'}
     class RuntimeFixture:
         id = 'default'
         label = '测试默认账号'
@@ -99,7 +100,7 @@ def load_backend():
         avatar_file = Path('/tmp/never-read-backend-fixture/avatar.jpg')
         def __getattr__(self, name):
             key = aliases.get(name, name)
-            default = {} if name in dict_fields else set() if name=='tasks' else False if name in ('handler_registered','session_alerted','closing','closed','stopping') else '' if name=='tg_phone' else None
+            default = {} if name in dict_fields else set() if name in set_fields else False if name in ('handler_registered','session_alerted','closing','closed','stopping','ai_flock_busy') else '' if name=='tg_phone' else None
             return names.setdefault(key, default)
         def __setattr__(self, name, value):
             names[aliases.get(name, name)] = value

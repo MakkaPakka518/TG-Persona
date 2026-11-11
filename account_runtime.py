@@ -88,6 +88,10 @@ class AccountRuntime:
     running: dict = field(default_factory=lambda: {"paused": False})
     last_hit_ts: dict = field(default_factory=dict)
     flock_buf: dict = field(default_factory=dict)
+    ai_flock_busy: bool = False
+    ai_flock_busy_groups: set = field(default_factory=set)
+    ai_flock_last: dict = field(default_factory=dict)
+    ai_flock_blocked: dict = field(default_factory=dict)
     auto_last_ts: dict = field(default_factory=dict)
     signin_plans: dict = field(default_factory=dict)
     poll_last: dict = field(default_factory=dict)
@@ -261,6 +265,10 @@ class AccountRuntime:
             self.poll_last.clear()
             self.signin_plans.clear()
             self.flock_buf.clear()
+            self.ai_flock_busy = False
+            self.ai_flock_busy_groups.clear()
+            self.ai_flock_last.clear()
+            self.ai_flock_blocked.clear()
             self.session_alerted = False
             if secure_storage and not self.storage_error:
                 secure_directory(self.directory)

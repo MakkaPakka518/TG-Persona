@@ -50,6 +50,7 @@ function slice(start,end){const a=js.indexOf(start),b=js.indexOf(end,a+start.len
 run(js.split('\n').find(line=>line.startsWith('const $=')));
 run(js.split('\n').find(line=>line.startsWith('const esc=')));
 run(js.split('\n').find(line=>line.startsWith('const DEFAULT_SIGNIN_IMAGE_PROMPT=')));
+run(js.split('\n').find(line=>line.startsWith('const DEFAULT_AI_FLOCK_PROMPT=')));
 run(slice('// ---------- AI API 池 ----------','// ---------- 状态 ----------'));
 run(slice('// ---------- 账号请求范围 ----------','async function api('));
 run(slice('// ---------- 安全图标与共享图标库 ----------','let autos=[], editAuto=null, editAutoAccount=null;'));
@@ -819,6 +820,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(!form.includes('id="lkTarget"'));assert(form.includes('start=服务名-天数-Register_代码'));
     assert(form.includes('type="password"')&&form.includes('串行接力')&&form.includes('随机一条'));
     ex("selectedAccount='default';accountEpoch++;editAuto=null;editAutoAccount=null;cancelAutoEdit('link_register')");
+    assert.strictEqual(q('#lkAiFlock').checked,false);assert.strictEqual(q('#lkAiFlockMinutes').value,'5');assert.strictEqual(q('#lkAiFlockPrompt').value,ex('DEFAULT_AI_FLOCK_PROMPT'));
+    app.providerFixture=[{id:'0123456789abcdef',note:'AI',enabled:true}];ex('aiProviders=providerFixture');q('#lkAiFlock').checked=true;q('#lkAiFlockPrompt').value='注册成功人格';
     q('#lkName').value='链接抢注';q('#lkButton').value='注册';
     q('#lkReady').value='已进入注册状态';q('#lkExisting').value='已有号';q('#lkSuccess').value='注册成功';q('#lkUser').value='测试用户';q('#lkSecret').value='测试安全码';
     q('#lkGroupReply').checked=true;q('#lkGroupReplyText').value='拿下';q('#lkGroupReplyDelay').value='7';
@@ -828,7 +831,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert.deepStrictEqual(requests.map(x=>x[0]),['/api/autos','/api/autos/88/link-credential']);
     const body=JSON.parse(requests[0][1].body);
     assert(!('lkUser' in body)&&!('link_secret' in body)&&!JSON.stringify(body).includes('测试安全码'));
-    assert.deepStrictEqual(body,{type:'link_register',name:'链接抢注',groups:'',btn_text:'注册',keywords:'已进入注册状态',success_kw:'注册成功',fail_kw:'',link_mode:1,link_limit:3,link_wait:6,result_timeout:30,retries:0,existing_kw:'已有号',success_reply_enabled:1,success_reply_text:'拿下',success_reply_delay:7});
+    assert.deepStrictEqual(body,{type:'link_register',name:'链接抢注',groups:'',btn_text:'注册',keywords:'已进入注册状态',success_kw:'注册成功',fail_kw:'',link_mode:1,link_limit:3,link_wait:6,result_timeout:30,retries:0,existing_kw:'已有号',success_reply_enabled:1,success_reply_text:'拿下',success_reply_delay:7,ai_flock_enabled:1,ai_flock_minutes:5,ai_flock_prompt:'注册成功人格'});
     assert.deepStrictEqual(JSON.parse(requests[1][1].body),{user:'测试用户',secret:'测试安全码'});
   });
   await test('群链接抢注测试按钮调用测试接口',async()=>{
@@ -1177,6 +1180,12 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     resolves[0]({task_concurrency:'1'});await old;assert.strictEqual(q('#sTaskConcurrency').value,'5');
     q('#sTaskConcurrency').value='4';let posted;app.api=async(p,o)=>{if(o?.method==='POST'){posted=[p,o];return {ok:true}}return {task_concurrency:'4'}};
     await ex('saveSettings()');assert.strictEqual(posted[0],'/api/settings');assert.strictEqual(posted[1]._account.id,'settings-b');assert.strictEqual(JSON.parse(posted[1].body).task_concurrency,'4');assert(!('ai_key' in JSON.parse(posted[1].body)));
+  });
+  await test('时间段 AI 水群默认关闭，无 API 不能开启并保存独立人格',async()=>{
+    assert(html.includes('id="waterAiCard"')&&html.includes('id="waterAiGroups"')&&html.includes('id="waterAiPrompt"'));
+    ex('aiProviders=[]');q('#waterAiEnabled').checked=true;q('#waterAiEnabled').listeners.change.call(q('#waterAiEnabled'));assert.strictEqual(q('#waterAiEnabled').checked,false);
+    ex("aiProviders=[{id:'0123456789abcdef',enabled:true}];waterAIGroupSel=new Set(['-1001'])");q('#waterAiEnabled').checked=true;q('#waterAiStart').value='09:00';q('#waterAiEnd').value='22:00';q('#waterAiPrompt').value='常驻人格';q('#sTaskConcurrency').value='2';let body;
+    app.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true}};app.loadSettings=()=>{};await ex('saveSettings()');assert.strictEqual(body.water_ai_enabled,'1');assert.strictEqual(body.water_ai_groups,'-1001');assert.strictEqual(body.water_ai_prompt,'常驻人格');
   });
   await test('运行与排队任务显示停止取消按钮并正确启用停止全部',async()=>{
     app.runTask={id:701,type:'signin',name:'运行任务',target:'@dummy',command:'/sign',enabled:1,running:true,queued:false};app.queueTask={id:702,type:'signin',name:'排队任务',target:'@dummy',command:'/sign',enabled:1,running:false,queued:true};

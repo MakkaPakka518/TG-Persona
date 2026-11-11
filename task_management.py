@@ -32,7 +32,7 @@ SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
     "poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action"
+    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt"
 ).split(","))
 # Credentials are stored per-account in settings, never in task rows/exports.
 INTEGER_LIMITS = {
@@ -42,6 +42,7 @@ INTEGER_LIMITS = {
     "cooldown": (0, 86400), "poll_interval": (0, 90 * 86400), "result_timeout": (1, 300),
     "history_first": (0, 1), "link_mode": (0, 1), "link_limit": (2, 4), "link_wait": (2, 15),
     "success_reply_enabled": (0, 1), "success_reply_delay": (0, 300),
+    "ai_flock_enabled": (0, 1), "ai_flock_minutes": (1, 60),
 }
 # Only effective fields are applied; custom windows/delays are NOT scheduled.
 APPLICABILITY = {
