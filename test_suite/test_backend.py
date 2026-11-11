@@ -507,6 +507,7 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.assertIn('next_run_at', a.keys())
         self.assertIn('signin_recognition_mode', a.keys())
         self.assertIn('signin_image_prompt', a.keys())
+        self.assertIn('signin_image_action', a.keys())
 
 
 if __name__ == '__main__':

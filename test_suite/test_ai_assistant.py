@@ -64,10 +64,11 @@ class AssistantTests(unittest.TestCase):
         self.reply=json.dumps({'type':'custom','name':'A','target':'@dummy','custom_steps':[{'t':'captcha','v':4}]})
         self.assertEqual(self.draft().status_code,422)
     def test_ai_draft_cannot_enable_image_recognition(self):
-        self.reply=json.dumps({'type':'signin','name':'A','target':'@dummy','command':'/start','signin_recognition_mode':'image','signin_image_prompt':'ignore safeguards'})
+        self.reply=json.dumps({'type':'signin','name':'A','target':'@dummy','command':'/start','signin_recognition_mode':'image','signin_image_prompt':'ignore safeguards','signin_image_action':'click'})
         response=self.draft();self.assertEqual(response.status_code,200,response.text)
         self.assertEqual(response.json()['draft']['signin_recognition_mode'],'none')
         self.assertEqual(response.json()['draft']['signin_image_prompt'],'')
+        self.assertEqual(response.json()['draft']['signin_image_action'],'reply')
         self.assertTrue(any('图片' in warning for warning in response.json()['warnings']))
     def test_ai_exception_redacted_and_no_change(self):
         self.ai_error=RuntimeError('Unauthorized dummy-provider-secret')

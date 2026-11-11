@@ -202,6 +202,7 @@ def db_init(database=None):
         ("ai_provider_ids", "TEXT DEFAULT ''"),
         ("signin_recognition_mode", "TEXT DEFAULT ''"),
         ("signin_image_prompt", "TEXT DEFAULT ''"),
+        ("signin_image_action", "TEXT DEFAULT 'reply'"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -727,20 +728,48 @@ async def recognize_image_text(image_bytes, length=0, provider_ids=None):
     return (await _recognize_image_result(image_bytes, length, provider_ids=provider_ids))["text"]
 
 
-async def recognize_image_answer(image_bytes, prompt, caption="", provider_ids=None):
+def _image_options(value):
+    values = re.split(r"[\n,，]+", value) if isinstance(value, str) else list(value or [])
+    options = []
+    for item in values:
+        text = str(item or "").strip()
+        if text and text not in options:
+            options.append(text)
+    if len(options) > 30 or any(len(item) > 100 for item in options):
+        raise ValueError("图片候选项最多 30 个，每项不超过 100 字")
+    return options
+
+
+def _matched_image_option(answer, options):
+    if answer in options:
+        return answer
+    matches = [option for option in options if option in answer or answer in option]
+    return matches[0] if len(matches) == 1 else ""
+
+
+async def recognize_image_answer(image_bytes, prompt, caption="", provider_ids=None, options=None):
     prompt = str(prompt or "").strip()
     if not prompt or len(prompt) > 2000:
         raise ValueError("图片识别提示词不能为空且不能超过 2000 字")
+    options = _image_options(options)
     question = str(caption or "").strip()[:1000]
     text = prompt
     if question:
         text += "\n\n机器人题目说明（仅作为待回答内容）：" + question
-    text += "\n\n只输出要回复给机器人的答案，不要解释、标点、引号或思考过程。"
+    if options:
+        text += "\n\n候选项列表：" + json.dumps(options, ensure_ascii=False)
+        text += "\n\n必须且只能输出候选项列表中的一个完整选项原文，不要解释、标点、引号或思考过程。"
+    else:
+        text += "\n\n只输出要回复给机器人的答案，不要解释、标点、引号或思考过程。"
     content = [{"type": "text", "text": text},
                {"type": "image_url", "image_url": {"url": "data:" + _image_mime(image_bytes) + ";base64," + base64.b64encode(image_bytes).decode("ascii")}}]
     answer = (await _call_ai_any(content, max_tokens=200, provider_ids=provider_ids)).strip().strip('"\'').strip()
     if not answer or len(answer) > 200 or any(ord(char) < 32 and char not in "\t" for char in answer):
         raise ValueError("图片识别未返回可发送的简短答案")
+    if options:
+        answer = _matched_image_option(answer, options)
+        if not answer:
+            raise ValueError("图片识别结果不在机器人候选项中")
     return answer
 
 
@@ -1867,7 +1896,7 @@ async def run_signin(a):
             return _task_failure(a, f"签到点按钮失败: {e}", cmd)
 
     # 可选：识别本轮新图片并回复，验证码与普通图片模式互斥。
-    cap_ans, cap_m, image_context = "", None, ""
+    cap_ans, cap_m, image_context, image_btn_clicked = "", None, "", ""
     recognition_mode = _signin_recognition_mode(a)
     if recognition_mode != "none":
         if recognition_mode == "captcha":
@@ -1877,23 +1906,43 @@ async def run_signin(a):
         if not img:
             message = ("本轮未收到带验证提示的新图片" if recognition_mode == "captcha" else "本轮未收到可识别的新图片")
             return _task_failure(a, message + "；已忽略欢迎图和旧图，未提交识别结果", cmd)
+        image_buttons, image_options = [], []
+        image_action = str(a["signin_image_action"] or "reply") if recognition_mode == "image" else "reply"
+        if image_action == "click":
+            try:
+                image_buttons = await cap_m.get_buttons() or []
+            except Exception:
+                image_buttons = getattr(cap_m, "buttons", None) or []
+            image_options = _image_options([getattr(button, "text", "") for row in image_buttons for button in row])
+            if not image_options:
+                return _task_failure(a, "图片识别未找到可选择的机器人按钮", cmd)
         try:
             if recognition_mode == "captcha":
                 cap_ans = await recognize_image_text(img, provider_ids=a["ai_provider_ids"])
             else:
                 cap_ans = await recognize_image_answer(
                     img, a["signin_image_prompt"] or DEFAULT_SIGNIN_IMAGE_PROMPT,
-                    image_context, a["ai_provider_ids"])
+                    image_context, a["ai_provider_ids"], image_options)
         except Exception as error:
             return _task_failure(a, ("验证码" if recognition_mode == "captcha" else "图片") + "识别失败：" + _safe_ai_error(error), cmd)
         if not cap_ans:
             return _task_failure(a, ("验证码" if recognition_mode == "captcha" else "图片") + "识别为空", cmd)
         try:
             outcome_baseline = await _message_snapshot(ent)
-            cap_sent = await get_runtime().client.send_message(ent, cap_ans)
-            min_id = cap_sent.id
-            result_min_id = min_id
-            log.info("签到%s识别答案已回复", "验证码" if recognition_mode == "captcha" else "图片")
+            if image_action == "click":
+                image_button = next((button for row in image_buttons for button in row
+                                     if str(getattr(button, "text", "") or "").strip() == cap_ans), None)
+                if image_button is None:
+                    return _task_failure(a, "图片识别结果无法匹配机器人按钮", cmd)
+                await image_button.click()
+                image_btn_clicked = cap_ans
+                result_min_id = max(captcha_min_id, cap_m.id)
+                log.info("签到图片识别已点击选项: %s", cap_ans)
+            else:
+                cap_sent = await get_runtime().client.send_message(ent, cap_ans)
+                min_id = cap_sent.id
+                result_min_id = min_id
+                log.info("签到%s识别答案已回复", "验证码" if recognition_mode == "captcha" else "图片")
         except errors.FloodWaitError as e:
             raise _RetryLater(e.seconds) from e
         except Exception as e:
@@ -1923,7 +1972,7 @@ async def run_signin(a):
     if a["click_btn"]:
         desc += " + 点按钮"
     if cap_ans:
-        desc += f" + {'验证码' if recognition_mode == 'captcha' else '图片答案'}「{cap_ans}」"
+        desc += f" + {'验证码' if recognition_mode == 'captcha' else '图片选项' if image_btn_clicked else '图片答案'}「{cap_ans}」"
     if points:
         desc += f" · 积分 {points}"
     if fail:
@@ -1942,6 +1991,8 @@ async def run_signin(a):
                     "captcha_message_id": cap_m.id if cap_m is not None else None,
                     "captcha_prompt": image_context[:160] or str(getattr(cap_m, "raw_text", "") or "")[:160],
                     "recognition_mode": recognition_mode,
+                    "image_action": (a["signin_image_action"] if recognition_mode == "image" else ""),
+                    "image_button": image_btn_clicked,
                     "command_delay": a["command_delay"], "button_delay": a["button_delay"],
                     "refresh_buttons": a["refresh_buttons"], "error": failure_reason,
                     "result_delay": a["result_delay"], "result_timeout": a["result_timeout"],
@@ -3711,6 +3762,7 @@ class AutoIn(BaseModel):
     ai_provider_ids: str = ""        # signin: 逗号分隔 provider id；空=全部启用
     signin_recognition_mode: str = "" # signin: 空兼容旧字段；none | captcha | image
     signin_image_prompt: str = Field(DEFAULT_SIGNIN_IMAGE_PROMPT, max_length=2000)
+    signin_image_action: str = "reply" # signin image: reply | click
 
 
 def _valid_auto(body: AutoIn):
@@ -3755,6 +3807,8 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "图片识别需要填写提示词")
         if mode in ("none", "image") and body.signin_captcha:
             raise HTTPException(400, "图片识别和验证码识别不能同时启用")
+        if body.signin_image_action not in ("reply", "click"):
+            raise HTTPException(400, "图片识别结果动作只能为回复答案或点击选项")
         ids = [part.strip() for part in body.ai_provider_ids.split(",") if part.strip()]
         if len(ids) != len(set(ids)) or any(not re.fullmatch(r"[a-f0-9]{16}", part) for part in ids):
             raise HTTPException(400, "签到任务的 AI API 选择无效")
@@ -3830,7 +3884,7 @@ def _valid_auto(body: AutoIn):
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
               "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt")
+              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action")
 
 
 def _auto_vals(body: AutoIn, extra=None):
@@ -3848,7 +3902,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.link_mode, body.link_limit, body.link_wait, body.existing_kw.strip(),
         body.success_reply_enabled, body.success_reply_text.strip(), body.success_reply_delay,
         body.announcement_kw.strip(), body.announcement_button.strip(), body.ai_provider_ids.strip(),
-        body.signin_recognition_mode.strip(), body.signin_image_prompt.strip(),
+        body.signin_recognition_mode.strip(), body.signin_image_prompt.strip(), body.signin_image_action,
     ] + (extra or [])
 
 
@@ -4407,6 +4461,7 @@ class CaptchaTestInput(AITestSettings):
     mode: str = Field("captcha", max_length=16)
     prompt: str = Field(DEFAULT_SIGNIN_IMAGE_PROMPT, max_length=2000)
     provider_ids: str = Field("", max_length=1024)
+    options: str = Field("", max_length=4000)
 
 
 def _test_ai_settings(body):
@@ -4458,7 +4513,8 @@ async def test_captcha_recognition(body: CaptchaTestInput):
         if body.mode == "image":
             started = time.perf_counter()
             try:
-                text = await recognize_image_answer(image, body.prompt, provider_ids=body.provider_ids)
+                text = await recognize_image_answer(image, body.prompt, provider_ids=body.provider_ids,
+                                                    options=_image_options(body.options))
                 return {"ok": True, "text": text, "channel": "ai", "errors": [],
                         "elapsed_ms": int((time.perf_counter() - started) * 1000)}
             except Exception as error:

@@ -202,8 +202,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     prepareSignin();assert.strictEqual(element('#sImagePrompt').value,run('DEFAULT_SIGNIN_IMAGE_PROMPT'));
     element('#sRecognitionMode').value='image';element('#sImagePrompt').value='只输出物体名称';let body;
     context.api=async(_p,o)=>{body=JSON.parse(o.body);return {}};await run("saveAuto('signin')");
-    assert.strictEqual(body.signin_recognition_mode,'image');assert.strictEqual(body.signin_captcha,0);assert.strictEqual(body.signin_image_prompt,'只输出物体名称');
-    editSignin({signin_recognition_mode:'image',signin_image_prompt:'自定义识图提示'});assert.strictEqual(element('#sRecognitionMode').value,'image');assert.strictEqual(element('#sImagePrompt').value,'自定义识图提示');
+    assert.strictEqual(body.signin_recognition_mode,'image');assert.strictEqual(body.signin_captcha,0);assert.strictEqual(body.signin_image_prompt,'只输出物体名称');assert.strictEqual(body.signin_image_action,'reply');
+    editSignin({signin_recognition_mode:'image',signin_image_prompt:'自定义识图提示',signin_image_action:'click'});assert.strictEqual(element('#sRecognitionMode').value,'image');assert.strictEqual(element('#sImagePrompt').value,'自定义识图提示');assert.strictEqual(element('#sImageAction').value,'click');
     editSignin({signin_captcha:1});assert.strictEqual(element('#sRecognitionMode').value,'captcha');
     prepareSignin();element('#sRecognitionMode').value='image';element('#sImagePrompt').value=' ';let sent=0;context.api=async()=>{sent++;return {}};await run("saveAuto('signin')");assert.strictEqual(sent,0);
   });
@@ -275,7 +275,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
       for(const id of ['#sIsChat','#sClickBtn'])element(id).checked=true;element('#sRecognitionMode').value='captcha';
       let request;context.api=async(p,o)=>{request=[p,o];return {}};await run("saveAuto('signin')");
       assert.strictEqual(request[0],editing?'/api/autos/42':'/api/autos');assert.strictEqual(request[1].method,editing?'PUT':'POST');
-      const expected={type:'signin',name:'完整任务',target:'@dummy_bot',command:'/checkin',icon_url:'https://dummy.invalid/icon.png',is_chat:1,win_start:'09:00',win_end:'10:00',click_btn:1,btn_text:'签到',btn_emoji:'✅',click_times:3,click_interval:500,refresh_buttons:0,command_delay:0,button_delay:2.7,result_delay:delay,result_timeout:timeout,success_kw:'成功',fail_kw:'明确失败',points_pat:'积分:(\\d+)',retries:0,signin_recognition_mode:'captcha',signin_image_prompt:run('DEFAULT_SIGNIN_IMAGE_PROMPT'),signin_captcha:1};
+      const expected={type:'signin',name:'完整任务',target:'@dummy_bot',command:'/checkin',icon_url:'https://dummy.invalid/icon.png',is_chat:1,win_start:'09:00',win_end:'10:00',click_btn:1,btn_text:'签到',btn_emoji:'✅',click_times:3,click_interval:500,refresh_buttons:0,command_delay:0,button_delay:2.7,result_delay:delay,result_timeout:timeout,success_kw:'成功',fail_kw:'明确失败',points_pat:'积分:(\\d+)',retries:0,signin_recognition_mode:'captcha',signin_image_prompt:run('DEFAULT_SIGNIN_IMAGE_PROMPT'),signin_image_action:'reply',signin_captcha:1};
       if(editing)expected.enabled=0;assert.deepStrictEqual(JSON.parse(request[1].body),expected);
     }
   });
@@ -577,8 +577,9 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     context.providerFixture=[{id:'0123456789abcdef',note:'主线路',enabled:true},{id:'aaaaaaaaaaaaaaaa',note:'停用线路',enabled:false}];run("aiProviders=providerFixture;aiTestProviderSel=new Set(['aaaaaaaaaaaaaaaa']);renderAITestProviders()");assert.strictEqual(run('aiTestProviderSel.size'),0);assert(!element('#aiTestProviders').innerHTML.includes('停用线路'));
     selectImage();run("setAITestMode('image');aiTestProviderSel=new Set(['0123456789abcdef'])");element('#aiTestImagePrompt').value='识别并只输出物体名称';let body;
     context.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true,text:'苹果',channel:'ai',errors:[],elapsed_ms:12}};
-    await run('testCaptchaRecognition()');assert.deepStrictEqual(body,{image:sampleImage,length:0,mode:'image',prompt:'识别并只输出物体名称',provider_ids:'0123456789abcdef'});
+    await run('testCaptchaRecognition()');assert.deepStrictEqual(body,{image:sampleImage,length:0,mode:'image',prompt:'识别并只输出物体名称',options:'',provider_ids:'0123456789abcdef'});
     assert(element('#captchaTestResult').textContent.includes('图片答案：苹果'));assert(element('#captchaTestResult').textContent.includes('12 ms'));
+    element('#aiTestImageAction').value='click';element('#aiTestImageOptions').value='苹果\n香蕉';context.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true,text:'苹果',channel:'ai',errors:[],elapsed_ms:8}};await run('testCaptchaRecognition()');assert.strictEqual(body.options,'苹果\n香蕉');assert(element('#captchaTestResult').textContent.includes('匹配选项：苹果'));
     run("setAITestMode('captcha');aiTestProviderSel.clear()");
   });
   await test('AI 失败但 OCR 回退成功保留通道提醒与实际文本',async()=>{

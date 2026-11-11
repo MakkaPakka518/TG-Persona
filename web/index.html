@@ -815,6 +815,15 @@ section.act,.fold.open .fold-b{animation:none}
           <div id="aiTestProviders" class="grp-pick"></div>
           <div class="hint">不选择表示使用全部已启用 API；选中多条时失败自动切换。</div>
           <div id="aiTestImagePromptWrap" class="hidden">
+            <label for="aiTestImageAction">图片识别测试</label>
+            <select id="aiTestImageAction">
+              <option value="reply" selected>识别并输出答案</option>
+              <option value="click">从候选项中选择</option>
+            </select>
+            <div id="aiTestImageOptionsWrap" class="hidden">
+              <label for="aiTestImageOptions">候选项（每行一个，与机器人按钮文字一致）</label>
+              <textarea id="aiTestImageOptions" maxlength="4000" rows="4" placeholder="苹果&#10;香蕉&#10;橙子"></textarea>
+            </div>
             <label for="aiTestImagePrompt">图片识别提示词</label>
             <textarea id="aiTestImagePrompt" maxlength="2000" rows="5">你是一个高精度的验证码与图像识别助手。请仔细观察图片中的核心事物、场景、服装或物品，并根据机器人题目说明给出最匹配的名称。必须且只能输出答案本身，严禁输出任何多余字符、标点符号、解释、理由或思考过程！</textarea>
             <div class="hint">模型回答会直接用于签到，请让提示词要求只输出答案。图片识别仅使用 AI，不回退本地 OCR。</div>
@@ -908,6 +917,11 @@ section.act,.fold.open .fold-b{animation:none}
             <div class="hint">不选择表示使用设置中全部已启用 API；多选后按所选列表轮询，失败自动切换。</div>
           </div>
           <div id="sImagePromptWrap" class="hidden">
+            <label for="sImageAction">识别后执行</label>
+            <select id="sImageAction">
+              <option value="reply" selected>回复识别答案</option>
+              <option value="click">点击机器人给出的匹配选项</option>
+            </select>
             <label for="sImagePrompt">图片识别提示词</label>
             <textarea id="sImagePrompt" maxlength="2000" rows="5">你是一个高精度的验证码与图像识别助手。请仔细观察图片中的核心事物、场景、服装或物品，并根据机器人题目说明给出最匹配的名称。必须且只能输出答案本身，严禁输出任何多余字符、标点符号、解释、理由或思考过程！</textarea>
             <div class="hint">识别结果会直接发送给机器人。图片识别仅调用所选 AI API，不使用本地 OCR。</div>
@@ -1898,7 +1912,7 @@ function autoDesc(a){
   if(a.type==='code_register')return `群：${esc(a.groups)}；Bot：${esc(a.target)}；${Number(a.link_mode)===0?'随机一条':'串行最多 '+esc(String(a.link_limit??4))+' 条'}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒回群发送 '+esc(a.success_reply_text):''}`;
   if(a.type==='button_register')return `群：${esc(a.groups||'全部监听群')}；开注：${esc(a.announcement_kw)}；群按钮：${esc(a.announcement_button)}；指令：${esc(a.command||'/start')}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒向原群发送 '+esc(a.success_reply_text):''}`;
   if(a.type==='signin'){
-    const mode=signinRecognitionMode(a),recognition=mode==='captcha'?' · 验证码识别':mode==='image'?' · 图片识别':'';
+    const mode=signinRecognitionMode(a),recognition=mode==='captcha'?' · 验证码识别':mode==='image'?(a.signin_image_action==='click'?' · 图片识别点选':' · 图片识别回复'):'';
     return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${recognition}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
   }
   if(a.type==='scheduled_register')return `${esc(a.target)}，${esc(a.command)}，${esc(autoWindow(a))}，按钮 ${esc(a.btn_text)}${a.history_first?'，历史卡片优先':''}${Number(a.poll_interval)>0?'，关闭弹窗每 '+esc(String(a.poll_interval))+' 秒重试':''}，收到 ${esc(a.keywords)} 后回复，成功 ${esc(a.success_kw)}，每步等待 ${esc(String(a.result_timeout??30))}秒`;
@@ -1939,7 +1953,7 @@ function editAutoItem(id){
     $('#sClicks').value=a.click_times||1;
     $('#sClickGap').value=a.click_interval||300;
     $('#sRefreshButtons').value=String(a.refresh_buttons??1);
-    $('#sRecognitionMode').value=signinRecognitionMode(a);$('#sImagePrompt').value=a.signin_image_prompt||DEFAULT_SIGNIN_IMAGE_PROMPT;
+    $('#sRecognitionMode').value=signinRecognitionMode(a);$('#sImageAction').value=a.signin_image_action==='click'?'click':'reply';$('#sImagePrompt').value=a.signin_image_prompt||DEFAULT_SIGNIN_IMAGE_PROMPT;
     signinAIProviderSel=new Set(String(a.ai_provider_ids||'').split(',').filter(Boolean));renderSigninAIProviders();syncSigninRecognitionFields();
     $('#sKw').value=a.success_kw||'';
     $('#sFw').value=a.fail_kw||'';
@@ -2002,7 +2016,7 @@ function editAutoItem(id){
 }
 function cancelAutoEdit(t){
   editAuto=null;editAutoAccount=null;if(typeof assistantFormDraft!=='undefined')assistantFormDraft=null;
-  ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sRecognitionMode').value='none';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
+  ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sRecognitionMode').value='none';$('#sImageAction').value='reply';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
@@ -2171,13 +2185,14 @@ async function saveAuto(type){
       result_timeout:$('#sResultTimeout').value.trim()===''?30:Number($('#sResultTimeout').value),
       success_kw:$('#sKw').value.trim(),fail_kw:$('#sFw').value.trim(),
       points_pat:$('#sPts').value.trim(),retries:$('#sRetries').value.trim()===''?2:Number($('#sRetries').value),
-      signin_recognition_mode:$('#sRecognitionMode').value,signin_image_prompt:$('#sImagePrompt').value.trim(),
+      signin_recognition_mode:$('#sRecognitionMode').value,signin_image_prompt:$('#sImagePrompt').value.trim(),signin_image_action:$('#sImageAction').value,
       signin_captcha:$('#sRecognitionMode').value==='captcha'?1:0};
     if(signinAIProviderSel.size)body.ai_provider_ids=[...signinAIProviderSel].join(',');
     if(body.icon_url&&!safeHttpUrl(body.icon_url))return toast('图标仅支持安全的 HTTP / HTTPS URL',1);
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
     if(!['none','captcha','image'].includes(body.signin_recognition_mode))return toast('请选择有效的图片处理方式',1);
     if(body.signin_recognition_mode==='image'&&!body.signin_image_prompt)return toast('图片识别需要填写提示词',1);
+    if(!['reply','click'].includes(body.signin_image_action))return toast('请选择图片识别后的执行方式',1);
     for(const delay of [body.command_delay,body.button_delay,body.result_delay]){
       if(!Number.isFinite(delay)||delay<0||delay>120||Math.abs(delay*10-Math.round(delay*10))>1e-7)
         return toast('签到延迟须为 0–120 秒，步进 0.1 秒；0 秒表示立即进行',1);
@@ -2433,8 +2448,8 @@ async function exportConfig(selected){
 }
 
 // ---------- AI 助手：所有保存和应用均由用户确认 ----------
-const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,signin_recognition_mode,signin_image_prompt,ai_provider_ids,groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled'.split(',');
-const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',result_delay:'结果判断前延迟（秒）',result_timeout:'等待最终回复上限（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',signin_recognition_mode:'图片处理',signin_image_prompt:'图片识别提示词',ai_provider_ids:'识别 API',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
+const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_provider_ids,groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled'.split(',');
+const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',result_delay:'结果判断前延迟（秒）',result_timeout:'等待最终回复上限（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',signin_recognition_mode:'图片处理',signin_image_prompt:'图片识别提示词',signin_image_action:'图片识别动作',ai_provider_ids:'识别 API',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
 const AI_RANGES={command_delay:[0,120],button_delay:[0,120],result_delay:[0,120],result_timeout:[1,300],refresh_buttons:[0,1],click_times:[1,20],click_interval:[50,3000],retries:[0,5],poll_interval:[60,7776000]};
 const AI_TEXT_FIELDS=['win_start','win_end','success_kw','fail_kw','btn_text','btn_emoji','command'];
 let aiDraft=null,aiDraftBusy=false,aiDraftSeq=0,assistantFormDraft=null,aiDiagnoses=new Map();
@@ -2482,7 +2497,7 @@ function applyDraftToForm(d){
     $('#sClickBtn').checked=!!d.click_btn;$('#sBtnWrap').classList.toggle('hidden',!d.click_btn);
     $('#sBtnText').value=typeof d.btn_text==='string'?d.btn_text:'';$('#sBtnEmoji').value=typeof d.btn_emoji==='string'?d.btn_emoji:'';
     $('#sClicks').value=d.click_times??1;$('#sClickGap').value=d.click_interval??300;
-    $('#sRefreshButtons').value=String(d.refresh_buttons??1);$('#sRecognitionMode').value='none';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();
+    $('#sRefreshButtons').value=String(d.refresh_buttons??1);$('#sRecognitionMode').value='none';$('#sImageAction').value='reply';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();
     $('#sKw').value=typeof d.success_kw==='string'?d.success_kw:'';$('#sFw').value=typeof d.fail_kw==='string'?d.fail_kw:'';
     $('#sPts').value=typeof d.points_pat==='string'?d.points_pat:'';$('#sRetries').value=d.retries??2;
   }else if(type==='custom'){
@@ -2504,7 +2519,7 @@ async function saveAIDraft(){
   if(!aiDraft||aiDraftBusy||!isCurrentAccount(aiDraft.account))return;
   if(!window.confirm('保存为停用任务？不会发送 Telegram 消息，确认无误后需手动启用。'))return;
   const c=aiDraft.account,draft=taskConfig(aiDraft.draft);aiDraftBusy=true;syncAIDraftButtons();
-  delete draft.id;draft.enabled=0;draft.signin_captcha=0;draft.signin_recognition_mode='none';draft.ai_provider_ids='';
+  delete draft.id;draft.enabled=0;draft.signin_captcha=0;draft.signin_recognition_mode='none';draft.signin_image_action='reply';draft.ai_provider_ids='';
   try{
     await api('/api/autos',{method:'POST',body:JSON.stringify(draft),_account:c});
     if(!isCurrentAccount(c))return;
@@ -2910,12 +2925,14 @@ function setAITestMode(mode){
   $('#aiTestUploadLabel').textContent=aiTestMode==='image'?'上传待识别图片（PNG / JPG / WebP，最大 2MB）':'上传验证码图片（PNG / JPG / WebP，最大 2MB）';
   $('#captchaTestBtn').textContent=aiTestMode==='image'?'开始图片识别':'开始验证码识别';
   $('#captchaTestResult').textContent='';
+  syncAITestImageAction();
 }
+function syncAITestImageAction(){$('#aiTestImageOptionsWrap').classList.toggle('hidden',aiTestMode!=='image'||$('#aiTestImageAction').value!=='click')}
 function resetAccountTests(){
   captchaTestVersion++;captchaTestImage='';captchaTestBusy=false;
   if(captchaTestReader){const reader=captchaTestReader;captchaTestReader=null;try{reader.abort()}catch(e){}}
   $('#captchaTestFile').value='';$('#captchaTestPreview').removeAttribute('src');$('#captchaTestPreview').style.display='none';
-  $('#captchaTestResult').textContent='';$('#captchaTestBtn').disabled=true;$('#aiTestImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;
+  $('#captchaTestResult').textContent='';$('#captchaTestBtn').disabled=true;$('#aiTestImageAction').value='reply';$('#aiTestImageOptions').value='';$('#aiTestImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;
   aiTestProviderSel.clear();renderAITestProviders();setAITestMode('captcha');
 }
 function previewCaptchaFile(){
@@ -2960,13 +2977,15 @@ async function testCaptchaRecognition(){
   if(aiTestMode==='captcha'&&(!Number.isInteger(length)||length<0||length>16)){result.textContent='期望字符数必须为 0 到 16 的整数';return}
   const prompt=$('#aiTestImagePrompt').value.trim();
   if(aiTestMode==='image'&&!prompt){result.textContent='请填写图片识别提示词';return}
+  const options=aiTestMode==='image'&&$('#aiTestImageAction').value==='click'?$('#aiTestImageOptions').value.trim():'';
+  if(aiTestMode==='image'&&$('#aiTestImageAction').value==='click'&&!options){result.textContent='请填写至少一个候选项';return}
   const config=currentAIConfig();
   if(aiTestMode==='captcha'&&config.ai_enabled==='0'&&config.ocr_enabled==='0'){result.textContent='请至少启用 AI 识别或本地 OCR';return}
   const version=captchaTestVersion;
   captchaTestBusy=true;btn.disabled=true;result.textContent='正在识别…';
   try{
     const payload={image:captchaTestImage,length,mode:aiTestMode,provider_ids:[...aiTestProviderSel].join(',')};
-    if(aiTestMode==='captcha')Object.assign(payload,config);else payload.prompt=prompt;
+    if(aiTestMode==='captcha')Object.assign(payload,config);else Object.assign(payload,{prompt,options});
     const d=await api('/api/captcha/test',{method:'POST',body:JSON.stringify(payload),_account:c});
     if(!isCurrentAccount(c)||version!==captchaTestVersion)return;
     const text=typeof d.text==='string'?d.text:'';
@@ -2976,13 +2995,14 @@ async function testCaptchaRecognition(){
       (({ai:'AI',ocr:'本地 OCR',none:'无'}[e.channel]||'未知通道')+'：'+(e.message||'未知错误')):'未知错误');
     const success=d.ok===true&&!!text.trim();
     result.textContent=(success?'识别成功':'识别失败')+
-      '\n'+(aiTestMode==='image'?'图片答案：':'识别文本：')+(text||'（空文本）')+'\n使用通道：'+channel+'\n耗时：'+testElapsed(d.elapsed_ms)+
+      '\n'+(aiTestMode==='image'?(options?'匹配选项：':'图片答案：'):'识别文本：')+(text||'（空文本）')+'\n使用通道：'+channel+'\n耗时：'+testElapsed(d.elapsed_ms)+
       (warnings.length?'\n'+(success?'通道提醒（已使用上述通道完成识别）':'失败原因')+'：\n'+warnings.join('\n'):
         (success?'':'\n失败原因：'+(d.error||'未获得有效识别文本')));
   }catch(e){if(isCurrentAccount(c)&&version===captchaTestVersion){result.textContent='识别失败：'+e.message;toast(e.message,1)}}
   finally{if(isCurrentAccount(c)){captchaTestBusy=false;btn.disabled=!captchaTestImage}}
 }
 $('#aiTestSeg').addEventListener('click',e=>{const button=e.target.closest('[data-ai-test-mode]');if(button)setAITestMode(button.dataset.aiTestMode)});
+$('#aiTestImageAction').addEventListener('change',syncAITestImageAction);
 async function changePw(){
   const pw=$('#sNewPw').value.trim();
   const old=$('#sOldPw').value;

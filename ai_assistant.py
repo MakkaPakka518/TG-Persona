@@ -92,7 +92,7 @@ def normalized_draft(obj, model_type, validate, values, columns):
         warnings.append('草稿默认停用，请复核后手动启用')
     if data.get('signin_captcha') or data.get('signin_recognition_mode') not in (None,'','none'):
         warnings.append('图片或验证码识别不由 AI 草稿开启，请在表单人工确认')
-    data.update(enabled=0, signin_captcha=0, signin_recognition_mode='none', signin_image_prompt='')
+    data.update(enabled=0, signin_captcha=0, signin_recognition_mode='none', signin_image_prompt='', signin_image_action='reply')
     for key,value in data.items():
         if isinstance(value,str) and len(value) > (20000 if key=='custom_steps' else 2048):
             raise ValueError('AI 草稿字段过长，请简化描述')

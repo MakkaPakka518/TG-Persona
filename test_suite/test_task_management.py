@@ -176,19 +176,19 @@ class TaskManagementTests(unittest.TestCase):
 
     def test_signin_image_mode_prompt_and_provider_selection_round_trip(self):
         aid=self.add(signin_recognition_mode='image',signin_image_prompt='只输出图片物体名称',
-                     ai_provider_ids='0123456789abcdef',signin_captcha=0)
+                     signin_image_action='click',ai_provider_ids='0123456789abcdef',signin_captcha=0)
         exported=self.client.get('/api/tasks/export')
         self.assertEqual(exported.status_code,200,exported.text)
         task=exported.json()['automations'][0]
-        self.assertEqual((task['signin_recognition_mode'],task['signin_image_prompt'],task['ai_provider_ids']),
-                         ('image','只输出图片物体名称','0123456789abcdef'))
+        self.assertEqual((task['signin_recognition_mode'],task['signin_image_prompt'],task['signin_image_action'],task['ai_provider_ids']),
+                         ('image','只输出图片物体名称','click','0123456789abcdef'))
         invalid=json.loads(json.dumps(exported.json()));invalid['automations'][0].update(signin_recognition_mode='none',signin_captcha=1)
         self.assertEqual(self.imp(invalid,account='other').status_code,400)
         imported=self.imp(exported.json(),account='other',preview=False)
         self.assertEqual(imported.status_code,200,imported.text)
         row=self.row(imported.json()['ids'][0],'other')
-        self.assertEqual((row['signin_recognition_mode'],row['signin_image_prompt'],row['ai_provider_ids']),
-                         ('image','只输出图片物体名称','0123456789abcdef'))
+        self.assertEqual((row['signin_recognition_mode'],row['signin_image_prompt'],row['signin_image_action'],row['ai_provider_ids']),
+                         ('image','只输出图片物体名称','click','0123456789abcdef'))
 
     def test_code_register_export_import_and_single_group_validation(self):
         aid = self.add(type='code_register', groups='-100123', target='@fixed_bot',

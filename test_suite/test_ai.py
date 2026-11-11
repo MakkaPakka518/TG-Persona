@@ -50,7 +50,7 @@ class AITest(unittest.IsolatedAsyncioTestCase):
     def body(self, **kwargs):
         values = dict(ai_base=None, ai_key=None, ai_model=None, ai_enabled=None, ocr_enabled=None,
                       image=self.data_url, length=0, mode='captcha',
-                      prompt=self.b['DEFAULT_SIGNIN_IMAGE_PROMPT'], provider_ids='')
+                      prompt=self.b['DEFAULT_SIGNIN_IMAGE_PROMPT'], provider_ids='', options='')
         values.update(kwargs)
         return SimpleNamespace(**values)
 
@@ -129,6 +129,15 @@ class AITest(unittest.IsolatedAsyncioTestCase):
         result=await self.b['test_captcha_recognition'](self.body(mode='image',prompt='识别物体'))
         self.assertFalse(result['ok']);self.assertEqual(result['errors'][0]['channel'],'ai')
         self.b['_classify_local_image'].assert_not_called()
+
+    async def test_object_image_mode_requires_and_returns_one_candidate(self):
+        self.reply='苹果'
+        result=await self.b['test_captcha_recognition'](self.body(mode='image',prompt='选择物体',options='苹果\n香蕉'))
+        self.assertTrue(result['ok']);self.assertEqual(result['text'],'苹果')
+        self.assertIn('候选项列表',self.calls[0][1]['json']['messages'][0]['content'][0]['text'])
+        self.calls.clear();self.reply='西瓜'
+        result=await self.b['test_captcha_recognition'](self.body(mode='image',prompt='选择物体',options='苹果\n香蕉'))
+        self.assertFalse(result['ok']);self.assertIn('候选项',result['errors'][0]['message'])
 
     async def test_image_ai_failure_falls_back_to_local_ocr_and_shows_reason(self):
         self.response_status=400;self.response_data={'error':{'message':'model does not support images'}}

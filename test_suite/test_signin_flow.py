@@ -18,7 +18,7 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.b=load_backend()
         self.b['now_local']=lambda: datetime(2026,10,30,9,0,tzinfo=timezone.utc)
-        self.events=[];self.phase='before';self.fetch_count=0;self.answer_result='签到成功';self.deliver=True;self.image_mode=False
+        self.events=[];self.phase='before';self.fetch_count=0;self.answer_result='签到成功';self.deliver=True;self.image_mode=False;self.image_click=False
         outer=self
         async def send(ent,text):
             outer.events.append(('send',text))
@@ -33,7 +33,12 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
                     outer.events.append(('click',index));outer.phase='clicked'
                 button=SimpleNamespace(text='签到',click=AsyncMock(side_effect=click))
                 return [photo_message(101,'欢迎使用测试机器人，请选择功能',1,buttons=[[button]])]
-            if outer.phase=='prompt': return [photo_message(102,'请发送图片中物体的名称' if outer.image_mode else '请输入验证码（测试消息）',2),photo_message(101,'欢迎使用测试机器人',1)]
+            if outer.phase=='prompt':
+                buttons=None
+                if outer.image_click:
+                    async def choose_apple(): outer.events.append(('image_click','苹果'));outer.phase='result'
+                    buttons=[[SimpleNamespace(text='苹果',click=AsyncMock(side_effect=choose_apple)),SimpleNamespace(text='香蕉',click=AsyncMock())]]
+                return [photo_message(102,'请选择图片中的物体' if outer.image_mode else '请输入验证码（测试消息）',2,buttons=buttons),photo_message(101,'欢迎使用测试机器人',1)]
             if outer.phase=='result': return [message(104,outer.answer_result),photo_message(102,'请输入验证码（测试消息）',2)]
             return []
         async def recognize(data,*args,**kwargs):
@@ -96,8 +101,16 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.run_flow(aid)
         self.b['recognize_image_text'].assert_not_awaited()
         args=self.b['recognize_image_answer'].call_args.args
-        self.assertEqual((args[1],args[2],args[3]),(prompt,'请发送图片中物体的名称',selected))
+        self.assertEqual((args[1],args[2],args[3],args[4]),(prompt,'请选择图片中的物体',selected,[]))
         self.assertIn(('send','苹果'),self.events);self.assertEqual(self.row(aid)['last_status'],'success')
+
+    async def test_image_mode_can_choose_matching_bot_button_instead_of_replying(self):
+        self.image_mode=True;self.image_click=True
+        aid=await self.create(signin_captcha=0,signin_recognition_mode='image',signin_image_action='click')
+        await self.run_flow(aid)
+        options=self.b['recognize_image_answer'].call_args.args[4]
+        self.assertEqual(options,['苹果','香蕉']);self.assertIn(('image_click','苹果'),self.events)
+        self.assertNotIn(('send','苹果'),self.events);self.assertEqual(self.row(aid)['last_status'],'success')
 
     async def test_image_wait_accepts_fresh_non_captcha_picture_but_rejects_welcome_card(self):
         target=photo_message(102,'图中是什么物品？',2)
