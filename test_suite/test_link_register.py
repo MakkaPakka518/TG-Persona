@@ -56,7 +56,7 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         aid = await self.create()
         sends, events, phase = [], [], {"v": "old"}
 
-        async def send(_entity, text):
+        async def send(_entity, text, **_kwargs):
             sends.append(text)
             events.append(("send", text))
             if text == "/start TEST-30-Register_NEW2":
@@ -102,7 +102,7 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         aid = await self.create(existing_kw="无法启用续期功能")
         sends = []
 
-        async def send(_entity, text):
+        async def send(_entity, text, **_kwargs):
             sends.append(text)
             return SimpleNamespace(id=50)
 
@@ -125,7 +125,7 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         polls = {"n": 0}
         sent = []
 
-        async def send(_entity, text):
+        async def send(_entity, text, **_kwargs):
             sent.append(text)
             return SimpleNamespace(id=50)
 
@@ -152,7 +152,7 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
             return_value=SimpleNamespace(message="您已进入注册状态")))
         phase = {"v": "card"}
 
-        async def send(_entity, text):
+        async def send(_entity, text, **_kwargs):
             if text.startswith("测试用户"):
                 phase["v"] = "success"
             return SimpleNamespace(id=50)
@@ -174,7 +174,7 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         sends, events, phase = [], [], {"v": "card"}
         button = SimpleNamespace(text="注册", click=AsyncMock())
 
-        async def send(_entity, text):
+        async def send(_entity, text, **_kwargs):
             sends.append(text)
             events.append(("send", text))
             if text.startswith("测试用户"):
@@ -213,7 +213,7 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
                                 success_reply_delay=7)
         sends, phase = [], {"v": "card"}
 
-        async def send(entity, text):
+        async def send(entity, text, **_kwargs):
             sends.append((entity, text))
             if text.startswith("测试用户"):
                 phase["v"] = "success"

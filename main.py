@@ -113,6 +113,10 @@ def db_init(database=None):
             token TEXT PRIMARY KEY, created INTEGER, ip TEXT, ua TEXT, last_seen INTEGER
         );
         CREATE TABLE IF NOT EXISTS watched_groups (chat_id TEXT PRIMARY KEY, name TEXT, added_at INTEGER);
+        CREATE TABLE IF NOT EXISTS registration_events (
+            task_id INTEGER, chat_id TEXT, message_id INTEGER,
+            PRIMARY KEY (task_id, chat_id)
+        );
         CREATE TABLE IF NOT EXISTS rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             keywords TEXT NOT NULL,
@@ -193,6 +197,8 @@ def db_init(database=None):
         ("success_reply_enabled", "INTEGER DEFAULT 0"),
         ("success_reply_text", "TEXT DEFAULT ''"),
         ("success_reply_delay", "INTEGER DEFAULT 5"),
+        ("announcement_kw", "TEXT DEFAULT ''"),
+        ("announcement_button", "TEXT DEFAULT '点击注册'"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -1158,6 +1164,36 @@ def _link_bot(target):
     return str(target or "").strip().lstrip("@").lower()
 
 
+def _button_bot_url(url):
+    """按钮只提供 Bot 身份；start 参数不替代任务配置的命令。"""
+    from urllib.parse import parse_qs, urlsplit
+    try:
+        parsed = urlsplit(str(url or "").strip())
+        if parsed.scheme in ("http", "https") and parsed.netloc.lower() in ("t.me", "telegram.me"):
+            bot = parsed.path.strip("/")
+        elif parsed.scheme == "tg" and parsed.netloc.lower() == "resolve":
+            bot = (parse_qs(parsed.query).get("domain") or [""])[0]
+        else:
+            return None
+        return bot.lower() if re.fullmatch(r"[A-Za-z0-9_]{4,32}", bot) else None
+    except ValueError:
+        return None
+
+
+def _announcement_bot(message, a):
+    if not match_keywords(a["announcement_kw"], str(getattr(message, "raw_text", "") or "")):
+        return None
+    for row in (getattr(getattr(message, "reply_markup", None), "rows", None) or []):
+        for button in (getattr(row, "buttons", None) or []):
+            if not match_keywords(a["announcement_button"], str(getattr(button, "text", "") or "")):
+                continue
+            url = getattr(button, "url", None) or getattr(getattr(button, "type", None), "url", None)
+            bot = _button_bot_url(url)
+            if bot:
+                return bot
+    return None
+
+
 def _link_secret_key(aid):
     return "link_cred_%s" % int(aid)
 
@@ -1294,17 +1330,17 @@ async def on_auto_event(event):
 
 
 async def on_link_event(event):
-    """群链接抢注：消息出现目标 Bot 深链时异步接力执行。"""
+    """群链接与群按钮注册共用账号作用域和任务生命周期。"""
+    # Bot 发布的开注公告也需触发；不使用普通回复规则的 ignore_bots 设置。
     if get_runtime().running["paused"] or not event.is_group or event.out:
         return
     autos = get_account_db().execute(
-        "SELECT * FROM automations WHERE enabled=1 AND type='link_register'"
+        "SELECT * FROM automations WHERE enabled=1 AND type IN ('link_register','button_register')"
     ).fetchall()
     if not autos:
         return
-    links = _message_links(getattr(event, "message", event))
-    if not links:
-        return
+    message = getattr(event, "message", event)
+    links = _message_links(message)
     chat = str(event.chat_id)
     watched = {r["chat_id"] for r in get_account_db().execute("SELECT chat_id FROM watched_groups").fetchall()}
     for a in autos:
@@ -1324,12 +1360,25 @@ async def on_link_event(event):
                 continue
         elif chat not in watched:
             continue
-        matched = links
+        if a["type"] == "button_register":
+            bot = _announcement_bot(message, a)
+            matched = [{"bot": bot}] if bot else []
+        else:
+            matched = links
         if not matched:
             continue
         runtime = _auto_runtime_state()
         if a["id"] in runtime.auto_tasks or a["id"] in runtime.auto_queued or a["id"] in runtime.auto_workers:
             continue
+        if a["type"] == "button_register":
+            db = get_account_db()
+            claimed = db.execute(
+                "INSERT INTO registration_events(task_id,chat_id,message_id) VALUES(?,?,?) "
+                "ON CONFLICT(task_id,chat_id) DO UPDATE SET message_id=excluded.message_id "
+                "WHERE excluded.message_id>registration_events.message_id", (a["id"], chat, event.id))
+            db.commit()
+            if not claimed.rowcount:
+                continue
         try:
             runtime.auto_tasks[a["id"]] = asyncio.get_running_loop().create_future()
             worker = runtime.spawn(_run_link_event(a["id"], matched, event.chat_id))
@@ -1353,13 +1402,16 @@ async def _run_link_event(aid, links, source_chat=None):
         get_account_db().commit()
         ok = False
         try:
-            ok = bool(await run_link_register(a, links, source_chat=source_chat))
+            if a["type"] == "button_register":
+                ok = bool(await run_button_register(a, links[0]["bot"], source_chat))
+            else:
+                ok = bool(await run_link_register(a, links, source_chat=source_chat))
         except _RetryLater as error:
             _task_failure(a, "Telegram 限流，至少 %s 秒后请人工确认" % error.seconds)
         except asyncio.CancelledError:
             target = "@" + links[0]["bot"] if links else ""
-            add_hit("link_register", False, chat_id=target, rule_id=-aid, grp_name=a["name"],
-                    content="用户手动停止", detail={"kind": "link_register", "task": a["name"],
+            add_hit(a["type"], False, chat_id=target, rule_id=-aid, grp_name=a["name"],
+                    content="用户手动停止", detail={"kind": a["type"], "task": a["name"],
                                                     "error": "用户手动停止", "manual_stop": True})
             raise
         except Exception as error:
@@ -1467,7 +1519,7 @@ def _notify_signin_success(a, detail):
 
 
 def _notify_task_failure(a, message):
-    if a["type"] == "link_register":
+    if a["type"] in ("link_register", "button_register"):
         return  # 群链接抢注只在成功时推送，失败与待确认仅保留日志。
     context = _failure_context.get()
     if context is not None and context["id"] == a["id"]:
@@ -1947,67 +1999,9 @@ async def run_link_register(a, links, test_only=False, source_chat=None):
             if state == "unknown" or found is None:
                 return _task_unconfirmed(a, "等待机器人回复超时，已停止且不会重试", "", last_text,
                                          {"attempted": attempted, "payload": payload})
-            button_message, button = found
-            success_baseline = await _message_snapshot(ent)
-            callback = await button.click()
-            popup = str(getattr(callback, "message", "") or "")
-            if match_keywords(ready_kw, popup):
-                trigger_message, trigger_text = button_message, popup
-                success_baseline = await _message_snapshot(ent)
-            else:
-                success_baseline = await _message_snapshot(ent)
-                trigger_message, trigger_text = await _await_task_reply(
-                    ent, button_message.id, ready_kw, success_baseline, timeout)
-            if trigger_message is None:
-                return _task_unconfirmed(a, "点击注册后未收到进入注册状态提示", "", trigger_text,
-                                         {"attempted": attempted, "payload": payload,
-                                          "button": str(getattr(button, "text", "") or ""), "popup": popup})
-            result_baseline = await _message_snapshot(ent)
-            replied = await get_runtime().client.send_message(
-                ent, credential["u"] + " " + credential["s"])
-            success_message, success_text = await _await_task_reply(
-                ent, replied.id, success_kw + "," + fail_kw, result_baseline, timeout)
-            if success_message is None:
-                return _task_unconfirmed(a, "发送用户名和安全码后未收到明确结果", "", success_text,
-                                         {"attempted": attempted, "payload": payload,
-                                          "button": str(getattr(button, "text", "") or ""),
-                                          "popup": popup, "ready": trigger_text})
-            if not match_keywords(success_kw, success_text):
-                add_hit("link_register", False, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
-                        content=payload, reply=success_text,
-                        detail={"kind": "link_register", "task": a["name"], "bot": target,
-                                "status": "failed", "attempted": attempted, "payload": payload,
-                                "button": str(getattr(button, "text", "") or ""), "popup": popup,
-                                "ready": trigger_text, "success": success_text,
-                                "error": "机器人明确回复失败： " + success_text[:120]})
-                _notify_task_failure(a, "链接注册失败：" + success_text[:120])
-                return False
-            if not test_only:
-                send_notify("✅ %s（%s）" % (a["name"], get_current_account_label()),
-                            "群链接抢注成功：" + target)
-            group_reply, group_reply_error = "", ""
-            group_reply_delay = max(0, min(300, int(a["success_reply_delay"] or 0)))
-            if (not test_only and source_chat is not None and a["success_reply_enabled"]
-                    and str(a["success_reply_text"] or "").strip()):
-                group_reply = str(a["success_reply_text"] or "").strip()
-                try:
-                    if group_reply_delay:
-                        await asyncio.sleep(group_reply_delay)
-                    await get_runtime().client.send_message(source_chat, group_reply)
-                except Exception as error:
-                    group_reply_error = str(error)[:160]
-                    log.warning("链接抢注成功，但来源群回复失败: %s", error)
-            add_hit("link_register", True, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
-                    content=payload, reply=success_text,
-                    detail={"kind": "link_register", "task": a["name"], "bot": target,
-                            "attempted": attempted, "payload": payload,
-                            "button": str(getattr(button, "text", "") or ""), "popup": popup,
-                            "ready": trigger_text, "success": success_text,
-                            "group_reply": group_reply, "group_reply_delay": group_reply_delay,
-                            "group_reply_error": group_reply_error,
-                            "test_only": bool(test_only)})
-            log.info("群链接抢注成功 任务=%s 目标=%s", a["name"], target)
-            return True
+            return await _finish_group_registration(
+                dict(a, target=target), ent, found, credential, source_chat, test_only,
+                {"attempted": attempted, "payload": payload})
         return _task_failure(a, "本次尝试的注册码均已被使用", "")
     except errors.FloodWaitError as error:
         raise _RetryLater(error.seconds) from error
@@ -2017,6 +2011,117 @@ async def run_link_register(a, links, test_only=False, source_chat=None):
         return _task_failure(a, "群链接抢注执行失败: %s" % error)
     finally:
         runtime.link_running.discard(expected_bot)
+
+
+def _registration_text_status(a, text, expected):
+    if a["existing_kw"] and a["existing_kw"].lower() in text.lower():
+        return "existing_account"
+    if match_keywords(a["fail_kw"], text):
+        return "failed"
+    if match_keywords(expected, text):
+        return "matched"
+    return "unknown"
+
+
+async def _await_registration_text(a, ent, min_id, baseline, expected):
+    deadline = time.monotonic() + a["result_timeout"]
+    last_text = ""
+    while time.monotonic() < deadline:
+        messages = await get_runtime().client.get_messages(ent, limit=12)
+        for msg in sorted(messages, key=lambda m: m.id, reverse=True):
+            if not _fresh_reply(msg, min_id, baseline):
+                continue
+            text = str(msg.raw_text or "")
+            last_text = text or last_text
+            status = _registration_text_status(a, text, expected)
+            if status != "unknown":
+                return status, text
+        await asyncio.sleep(min(0.3, max(0, deadline - time.monotonic())))
+    return "unknown", last_text
+
+
+async def _finish_group_registration(a, ent, found, credential, source_chat, test_only=False, extra=None):
+    """从本轮注册按钮继续；凭据只发一次，两类群注册共用。"""
+    def redact(text):
+        text = str(text or "")
+        for value in (credential["s"], credential["u"]):
+            if value:
+                text = text.replace(value, "***")
+        return text
+
+    def failed(status, text, reason):
+        detail.update(status="unconfirmed" if status == "unknown" else status, error=reason)
+        add_hit(a["type"], False, chat_id=a["target"], rule_id=-a["id"], grp_name=a["name"],
+                reply=redact(text), detail=detail)
+        return False
+
+    button_message, button = found
+    detail = {"kind": a["type"], "task": a["name"], "bot": a["target"],
+              "source_chat": source_chat, "button": button.text, "test_only": test_only, **(extra or {})}
+    baseline = await _message_snapshot(ent)
+    min_id = max([button_message.id] + list(baseline))
+    callback = await button.click()
+    popup = str(getattr(callback, "message", "") or "")
+    detail["popup"] = redact(popup)
+    status = _registration_text_status(a, popup, a["keywords"])
+    text = popup
+    if status == "unknown":
+        status, text = await _await_registration_text(a, ent, min_id, baseline, a["keywords"])
+    if status != "matched":
+        return failed(status, text, "未进入注册状态，已停止且未发送账号信息")
+    detail["ready"] = redact(text)
+    baseline = await _message_snapshot(ent)
+    sent = await get_runtime().client.send_message(ent, credential["u"] + " " + credential["s"], parse_mode=None)
+    status, text = await _await_registration_text(a, ent, sent.id, baseline, a["success_kw"])
+    if status != "matched":
+        return failed(status, text, "提交账号信息后未获得注册成功确认")
+    detail["success"] = redact(text)
+    if not test_only:
+        send_notify("✅ %s（%s）" % (a["name"], get_current_account_label()), "注册成功：" + a["target"])
+    if not test_only and source_chat is not None and a["success_reply_enabled"]:
+        detail["group_reply_delay"] = a["success_reply_delay"]
+        try:
+            if a["success_reply_delay"]:
+                await asyncio.sleep(a["success_reply_delay"])
+            await get_runtime().client.send_message(source_chat, a["success_reply_text"], parse_mode=None)
+            detail["group_reply"] = a["success_reply_text"]
+        except Exception as error:
+            detail["group_reply_error"] = redact(error)[:160]
+    add_hit(a["type"], True, chat_id=a["target"], rule_id=-a["id"], grp_name=a["name"],
+            reply=redact(text), detail=detail)
+    return True
+
+
+async def run_button_register(a, bot, source_chat):
+    a = dict(a, target="@" + bot)
+    a["fail_kw"] = a["fail_kw"] + ",注册已关闭,自助注册已关闭,尚未开放注册"
+    credential = get_link_credential(a["id"])
+    if not credential.get("u") or not credential.get("s"):
+        return _task_failure(a, "请先填写注册用户名和安全码")
+    runtime = _link_runtime_state()
+    if bot in runtime.link_running:
+        return _task_unconfirmed(a, "该机器人的注册流程正在运行，本条公告已跳过")
+    runtime.link_running.add(bot)
+    try:
+        ent = await resolve_entity(a["target"])
+        if ent is None or not getattr(ent, "bot", False):
+            return _task_failure(a, "公告按钮指向的账号不是可用的机器人")
+        baseline = await _message_snapshot(ent)
+        command = str(a["command"] or "/start").strip()
+        sent = await runtime.client.send_message(ent, command, parse_mode=None)
+        state, text, found = await _await_link_stage(
+            ent, sent.id, baseline, a["fail_kw"], a["existing_kw"], a["btn_text"],
+            a["result_timeout"], a["result_timeout"])
+        if state != "valid":
+            if state == "unknown":
+                return _task_unconfirmed(a, "未收到本轮注册按钮，已停止", reply=text)
+            return _task_failure(a, "机器人未允许注册，已停止")
+        return await _finish_group_registration(
+            a, ent, found, credential, source_chat, extra={"command": command})
+    except errors.FloodWaitError as error:
+        raise _RetryLater(error.seconds) from error
+    finally:
+        runtime.link_running.discard(bot)
 
 
 
@@ -3439,10 +3544,12 @@ class AutoIn(BaseModel):
     success_reply_enabled: int = 0  # link_register: 成功后回来源群发送文本
     success_reply_text: str = ""
     success_reply_delay: int = 5
+    announcement_kw: str = ""
+    announcement_button: str = "点击注册"
 
 
 def _valid_auto(body: AutoIn):
-    if body.type not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register"):
+    if body.type not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register"):
         raise HTTPException(400, "未知任务类型")
     if not body.name.strip():
         raise HTTPException(400, "请填写任务名称")
@@ -3497,7 +3604,7 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "历史卡片优先模式只能为 0 或 1")
         if body.poll_interval and (body.poll_interval < 1 or body.poll_interval > 300 or not body.fail_kw.strip()):
             raise HTTPException(400, "关闭弹窗重试需填写关键词，间隔应为 1-300 秒")
-    if body.type == "link_register":
+    if body.type in ("link_register", "button_register"):
         if not all(value.strip() for value in (body.btn_text, body.keywords, body.success_kw)):
             raise HTTPException(400, "群链接抢注需填写注册按钮、进入注册状态关键词和成功关键词")
         if body.link_mode not in (0, 1):
@@ -3514,6 +3621,11 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "成功群回复延迟须为 0-300 秒")
         if len(body.existing_kw) > 1000 or len(body.success_reply_text) > 1000:
             raise HTTPException(400, "已有号关键词或成功群回复内容过长")
+    if body.type == "button_register":
+        if not body.announcement_kw.strip() or not body.announcement_button.strip():
+            raise HTTPException(400, "请填写群开注关键词和群按钮文字")
+        if max(len(body.announcement_kw), len(body.announcement_button), len(body.command)) > 1000:
+            raise HTTPException(400, "开注关键词、按钮文字或首条指令过长")
     if body.type == "grabcodes" and not body.reply_text.strip():
         raise HTTPException(400, "抢注需要填写动作文本(支持 {code} 占位符)")
     if body.type == "grabcodes" and body.poll_interval:
@@ -3536,12 +3648,13 @@ def _valid_auto(body: AutoIn):
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
               "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay")
+              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button")
 
 
 def _auto_vals(body: AutoIn, extra=None):
     return [
-        body.type, body.name.strip(), body.target.strip(), body.command.strip(),
+        body.type, body.name.strip(), body.target.strip(),
+        (body.command.strip() or "/start") if body.type == "button_register" else body.command.strip(),
         body.win_start.strip(), body.win_end.strip(), body.click_btn,
         body.btn_text.strip(), body.btn_emoji.strip(), body.click_times, body.click_interval,
         body.success_kw.strip(), body.fail_kw.strip(),
@@ -3552,6 +3665,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.result_delay, body.result_timeout, body.scheduled_at.strip(), body.history_first,
         body.link_mode, body.link_limit, body.link_wait, body.existing_kw.strip(),
         body.success_reply_enabled, body.success_reply_text.strip(), body.success_reply_delay,
+        body.announcement_kw.strip(), body.announcement_button.strip(),
     ] + (extra or [])
 
 
@@ -3674,7 +3788,7 @@ async def delete_auto(aid: int):
 
 @app.post("/api/autos/{aid}/link-credential")
 async def save_link_credential(aid: int, body: dict):
-    row = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type='link_register'", (aid,)).fetchone()
+    row = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('link_register','button_register')", (aid,)).fetchone()
     if row is None:
         raise HTTPException(404, "群链接抢注任务不存在")
     user = str((body or {}).get("user") or "")
@@ -3897,7 +4011,7 @@ async def resolve_anomaly(aid: int, body: dict):
         db.commit()
         _maybe_notify_global_signin_summary()
         return {"ok": True, "action": action}
-    if row["type"] in ("scheduled_register", "link_register"):
+    if row["type"] in ("scheduled_register", "link_register", "button_register"):
         raise HTTPException(400, "该任务由触发条件执行，请确认配置后重新启用")
     if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         raise HTTPException(409, "TG 尚未登录")
@@ -4145,7 +4259,7 @@ async def get_logs(n: int = 60, kind: str = "", q: str = ""):
     kind = (kind or "").strip()
     if kind == "reply":
         where, params = "action IN ('reply','react','both')", []
-    elif kind in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register"):
+    elif kind in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register"):
         where, params = "action=?", [kind]
     else:
         where, params = "1=1", []
@@ -4170,7 +4284,7 @@ async def get_logs(n: int = 60, kind: str = "", q: str = ""):
     if q.strip():
         return {"hits": out, "counts": {}}
     counts = {"reply": 0, "signin": 0, "scheduled_register": 0, "grabcodes": 0, "redpacket": 0, "custom": 0,
-              "keepalive": 0, "link_register": 0}
+              "keepalive": 0, "link_register": 0, "button_register": 0}
     for r in get_account_db().execute("SELECT action, COUNT(*) c FROM hits GROUP BY action").fetchall():
         k = "reply" if r["action"] in ("reply", "react", "both") else r["action"]
         if k in counts:

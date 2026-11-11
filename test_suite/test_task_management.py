@@ -156,6 +156,24 @@ class TaskManagementTests(unittest.TestCase):
         self.assertEqual(before, self.snapshot())
         self.assertEqual((self.resets, self.invalidations), ([], []))
 
+    def test_button_register_export_import_keeps_config_without_credentials(self):
+        aid = self.add(type='button_register', announcement_kw='已开启定时注册',
+                       announcement_button='点击注册', command='/register', btn_text='注册',
+                       keywords='注册状态', success_kw='注册成功', success_reply_enabled=1,
+                       success_reply_text='拿下', success_reply_delay=5)
+        self.dbs['default'].execute('INSERT INTO settings VALUES(?,?)',
+                                    ('link_cred_' + str(aid), 'PRIVATE-REGISTRATION-CREDENTIAL'))
+        self.dbs['default'].commit()
+        response = self.client.get('/api/tasks/export')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('PRIVATE-REGISTRATION-CREDENTIAL', response.text)
+        imported = self.imp(response.json(), account='other', preview=False)
+        self.assertEqual(imported.status_code, 200, imported.text)
+        row = self.row(imported.json()['ids'][0], 'other')
+        for key in ('announcement_kw', 'announcement_button', 'command', 'success_reply_text', 'success_reply_delay'):
+            self.assertEqual(row[key], self.row(aid)[key])
+        self.assertEqual(row['enabled'], 0)
+
     def test_batch_default_apply_preserves_success(self):
         aid = self.add()
         db = self.dbs["default"]

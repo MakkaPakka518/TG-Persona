@@ -32,7 +32,7 @@ SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
     "poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay"
+    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button"
 ).split(","))
 # Credentials are stored per-account in settings, never in task rows/exports.
 INTEGER_LIMITS = {
@@ -48,15 +48,15 @@ APPLICABILITY = {
     **{k: {"signin"} for k in ("win_start", "win_end", "command_delay", "button_delay", "result_delay",
                                "refresh_buttons", "click_btn", "btn_text", "btn_emoji",
                                "click_times", "click_interval")},
-    "result_timeout": {"signin", "scheduled_register", "link_register"},
+    "result_timeout": {"signin", "scheduled_register", "link_register", "button_register"},
     "scheduled_at": {"scheduled_register"},
     "history_first": {"scheduled_register"},
     "poll_interval": {"keepalive", "grabcodes"},
     "cooldown": {"keepalive", "grabcodes", "redpacket"},
     "retries": {"signin", "custom", "keepalive"}, "chain_retry": {"custom"},
     "link_mode": {"link_register"}, "link_limit": {"link_register"}, "link_wait": {"link_register"},
-    "existing_kw": {"link_register"}, "success_reply_enabled": {"link_register"},
-    "success_reply_text": {"link_register"}, "success_reply_delay": {"link_register"},
+    "existing_kw": {"link_register", "button_register"}, "success_reply_enabled": {"link_register", "button_register"},
+    "success_reply_text": {"link_register", "button_register"}, "success_reply_delay": {"link_register", "button_register"},
 }
 RULE_COLUMNS = ("keywords", "regex", "action", "value", "reaction", "groups", "enabled")
 STEP_FIELDS = {
@@ -187,7 +187,7 @@ def _check_fields(data, allowed):
             maximum = 262144 if key == "custom_steps" else 16384
             if not isinstance(value, str) or len(value) > maximum:
                 _bad(f"{key} 必须为字符串且不超过 {maximum} 字符")
-            if key == "type" and value not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register"):
+            if key == "type" and value not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register"):
                 _bad("未知任务类型")
             if key == "action" and value not in ("reply", "send"):
                 _bad("任务 action 必须为 reply/send")

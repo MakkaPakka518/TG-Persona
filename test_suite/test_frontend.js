@@ -819,6 +819,31 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     app.window.confirm=()=>true;app.api=async(p,o)=>{requests.push([p,o]);return {ok:true,tested:true}};app.loadAutos=async()=>{};
     await ex('testAuto(88)');assert.deepStrictEqual(requests.map(x=>x[0]),['/api/autos/88/test']);assert.strictEqual(ex('autoTestBusy.size'),0);app.window.confirm=()=>false;
   });
+  await test('群按钮开注保存独立触发条件，默认关闭群回复并使用 /start',async()=>{
+    const form=html.slice(html.indexOf('id="af-button_register"'),html.indexOf('id="af-link_register"'));
+    assert(form.includes('brAnnouncement')&&form.includes('brAnnouncementButton'));
+    assert(!form.includes('history_first')&&!form.includes('关闭弹窗重试'));
+    ex("selectedAccount='default';accountEpoch++;cancelAutoEdit('button_register')");
+    assert.strictEqual(q('#brGroupReply').checked,false);assert.strictEqual(q('#brCommand').value,'/start');
+    q('#brName').value='Bot 公告';q('#brAnnouncement').value='已开启定时注册';q('#brUser').value='tester';q('#brSecret').value='offline-secret';
+    const requests=[];app.api=async(p,o)=>{requests.push([p,JSON.parse(o.body)]);return {ok:true,id:99}};app.loadAutos=async()=>{};
+    await ex("saveAuto('button_register')");
+    assert.strictEqual(requests[0][0],'/api/autos');assert.strictEqual(requests[0][1].type,'button_register');
+    assert.strictEqual(requests[0][1].command,'/start');assert.strictEqual(requests[0][1].announcement_button,'点击注册');
+    assert.strictEqual(requests[0][1].success_reply_enabled,0);assert.strictEqual(requests[0][1].enabled,0);
+    assert(!JSON.stringify(requests[0]).includes('offline-secret'));
+    assert.strictEqual(requests[1][0],'/api/autos/99/link-credential');
+  });
+  await test('群按钮开注编辑回填并保存原群回复、延迟和自定义指令',async()=>{
+    ex("selectedAccount='default';accountEpoch++;autos=[{id:99,type:'button_register',name:'公告',announcement_kw:'开放注册',announcement_button:'进入',command:'/register',btn_text:'注册',keywords:'注册状态',success_kw:'创建成功',existing_kw:'已有号',enabled:1,link_credential_set:true,success_reply_enabled:1,success_reply_text:'拿下',success_reply_delay:0}];editAutoItem(99)");
+    assert.strictEqual(q('#brCommand').value,'/register');assert.strictEqual(q('#brReplyDelay').value,'0');assert(q('#brGroupReply').checked);
+    assert(!q('#brGroupReplyFields').classList.contains('hidden'));assert.strictEqual(q('#brSecret').value,'');
+    const requests=[];app.api=async(p,o)=>{requests.push([p,JSON.parse(o.body)]);return {ok:true}};
+    await ex("saveAuto('button_register')");assert.strictEqual(requests.length,1);
+    assert.strictEqual(requests[0][0],'/api/autos/99');assert.strictEqual(requests[0][1].command,'/register');
+    assert.strictEqual(requests[0][1].success_reply_text,'拿下');assert.strictEqual(requests[0][1].success_reply_delay,0);
+    assert.strictEqual(requests[0][1].enabled,1);
+  });
   await test('结构化detail及Pydantic数组提取人话，不输出input或对象',async()=>{
     for(const [detail,want] of [[{message:'当前账号任务不存在',ids:[42],input:'mock-secret'},'当前账号任务不存在'],[[{msg:'Field required',input:'mock-secret',loc:['body','name']}],'请补齐必填项'],[[{msg:'Input should be a valid integer',input:'mock-secret'}],'请填写有效的整数']]){
       app.fetch=async()=>({ok:false,status:422,json:async()=>({detail})});await assert.rejects(()=>realApi('/api/autos/batch'),e=>e.message.includes(want)&&!e.message.includes('mock-secret')&&!e.message.includes('[object Object]'));
