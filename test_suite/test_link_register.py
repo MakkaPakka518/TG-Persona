@@ -80,6 +80,8 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hit["action"], "link_register")
         self.assertEqual(hit["ok"], 0)
         self.assertIn("TEST-30-Register_NEW2", hit["detail"])
+        self.b["notify_event"].assert_not_called()
+        self.b["send_notify"].assert_not_called()
 
     async def test_invalid_reply_without_payload_echo_stops(self):
         aid = await self.create()
@@ -94,6 +96,29 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         detail = json.loads(self.b["conn"].execute(
             "SELECT detail FROM hits ORDER BY id DESC").fetchone()["detail"])
         self.assertEqual(detail["status"], "unconfirmed")
+        self.b["notify_event"].assert_not_called()
+
+    async def test_existing_account_keyword_stops_relay_without_notification(self):
+        aid = await self.create(existing_kw="无法启用续期功能")
+        sends = []
+
+        async def send(_entity, text):
+            sends.append(text)
+            return SimpleNamespace(id=50)
+
+        self.b["client"] = SimpleNamespace(
+            send_message=AsyncMock(side_effect=send),
+            get_messages=AsyncMock(return_value=[message(
+                101, "很遗憾，您使用的是注册码，无法启用续期功能，请悉知")]))
+        ok = await self.b["run_link_register"](
+            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_FIRST"},
+                            {"bot": "testkky_makka_bot", "payload": "TEST-30-Register_SECOND"}])
+        self.assertFalse(ok)
+        self.assertEqual(sends, ["/start TEST-30-Register_FIRST"])
+        self.b["notify_event"].assert_not_called()
+        detail = json.loads(self.b["conn"].execute(
+            "SELECT detail FROM hits ORDER BY id DESC").fetchone()["detail"])
+        self.assertEqual(detail["status"], "existing_account")
 
     async def test_invalid_reply_after_short_wait_still_caught_by_long_window(self):
         aid = await self.create(link_wait=2, result_timeout=4)
@@ -172,7 +197,8 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
                                            get_messages=AsyncMock(side_effect=get_messages))
         ok = await self.b["run_link_register"](
             self.row(aid), [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_OK1"},
-                            {"bot": "testkky_makka_bot", "payload": "TEST-30-Register_NEVER2"}])
+                            {"bot": "testkky_makka_bot", "payload": "TEST-30-Register_NEVER2"}],
+            source_chat=-100123)
         self.assertTrue(ok)
         self.assertEqual(events, [("send", "/start TEST-30-Register_OK1"),
                                   ("send", "测试用户 测试安全码")])
@@ -181,6 +207,39 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hit["ok"], 1)
         self.assertNotIn("测试安全码", hit["detail"])
         self.b["send_notify"].assert_called_once()
+
+    async def test_success_can_reply_to_source_group(self):
+        aid = await self.create(success_reply_enabled=1, success_reply_text="拿下")
+        sends, phase = [], {"v": "card"}
+
+        async def send(entity, text):
+            sends.append((entity, text))
+            if text.startswith("测试用户"):
+                phase["v"] = "success"
+            return SimpleNamespace(id=50)
+
+        async def click():
+            phase["v"] = "ready"
+
+        button = SimpleNamespace(text="注册", click=AsyncMock(side_effect=click))
+
+        async def get_messages(_entity, **_kwargs):
+            if phase["v"] == "card":
+                return [message(101, "邀请卡片", buttons=[[button]])]
+            if phase["v"] == "success":
+                return [message(105, "注册成功")]
+            return [message(104, "您已进入注册状态")]
+
+        self.b["client"] = SimpleNamespace(send_message=AsyncMock(side_effect=send),
+                                           get_messages=AsyncMock(side_effect=get_messages))
+        ok = await self.b["run_link_register"](
+            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_OK1"}],
+            source_chat=-100123)
+        self.assertTrue(ok)
+        self.assertEqual(sends[-1], (-100123, "拿下"))
+        detail = json.loads(self.b["conn"].execute(
+            "SELECT detail FROM hits ORDER BY id DESC").fetchone()["detail"])
+        self.assertEqual(detail["group_reply"], "拿下")
 
     async def test_random_mode_sends_only_one_link(self):
         aid = await self.create(link_mode=0)
