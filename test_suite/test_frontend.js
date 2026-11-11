@@ -799,7 +799,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('群链接抢注表单与凭据分离保存，任务体不含安全码',async()=>{
     const form=html.slice(html.indexOf('id="af-link_register"'),html.indexOf('id="af-custom"'));
     for(const id of ['lkName','lkGroups','lkButton','lkReady','lkUser','lkSecret','lkMode','lkLimit','lkWwait','lkSuccess','lkFail','lkTimeout'])assert(form.includes('id="'+id+'"'));
-    assert(!form.includes('id="lkTarget"'));assert(form.includes('机器人从消息中的注册链接自动识别'));
+    assert(!form.includes('id="lkTarget"'));assert(form.includes('start=服务名-天数-Register_代码'));
     assert(form.includes('type="password"')&&form.includes('串行接力')&&form.includes('随机一条'));
     ex("selectedAccount='default';accountEpoch++;editAuto=null;editAutoAccount=null;cancelAutoEdit('link_register')");
     q('#lkName').value='链接抢注';q('#lkButton').value='注册';

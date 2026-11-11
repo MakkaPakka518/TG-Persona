@@ -1111,11 +1111,18 @@ def _parse_link_url(url):
             bot = parts[0].strip()
             query = parse_qs(parsed.query)
         payload = (query.get("start") or [""])[0].strip()
-        if not re.fullmatch(r"[A-Za-z0-9_]{4,32}", bot or "") or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", payload or ""):
+        if not re.fullmatch(r"[A-Za-z0-9_]{4,32}", bot or "") or not _is_register_payload(payload):
             return None
         return {"bot": bot.lower(), "payload": payload}
     except (ValueError, TypeError):
         return None
+
+
+def _is_register_payload(payload):
+    """Only service-days-Register_code payloads are registration links."""
+    return bool(re.fullmatch(
+        r"[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*-[1-9][0-9]{0,3}-Register_[A-Za-z0-9_-]{1,64}",
+        str(payload or "")))
 
 
 def _message_links(message):
@@ -1871,7 +1878,7 @@ async def run_link_register(a, links, test_only=False):
     credential = get_link_credential(a["id"])
     if not credential.get("u") or not credential.get("s"):
         return _task_failure(a, "请先在任务中填写注册用户名和安全码")
-    candidates = [item for item in (links or []) if item.get("payload")]
+    candidates = [item for item in (links or []) if _is_register_payload(item.get("payload"))]
     if not candidates:
         return _task_failure(a, "消息中没有可用的注册链接")
     runtime = _link_runtime_state()

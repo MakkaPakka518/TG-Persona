@@ -34,18 +34,23 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         return "https://t.me/testkky_makka_bot?start=" + payload
 
     def test_parses_links_from_text_entities_and_buttons(self):
-        text = "抢 " + self.link("A-1") + " 和 t.me/testkky_makka_bot?start=B-2"
-        hidden = SimpleNamespace(url="https://t.me/testkky_makka_bot?start=C-3")
-        button = SimpleNamespace(url="https://t.me/testkky_makka_bot?start=D-4")
-        other = SimpleNamespace(url="https://t.me/evil_bot?start=E-5")
+        text = "抢 " + self.link("TEST-30-Register_A1") + " 和 t.me/testkky_makka_bot?start=TEST-30-Register_B2"
+        hidden = SimpleNamespace(url="https://t.me/testkky_makka_bot?start=TEST-30-Register_C3")
+        button = SimpleNamespace(url="https://t.me/testkky_makka_bot?start=TEST-30-Register_D4")
+        other = SimpleNamespace(url="https://t.me/evil_bot?start=TEST-30-Register_E5")
         msg = SimpleNamespace(raw_text=text, entities=[hidden, other],
                               reply_markup=SimpleNamespace(rows=[
                                   SimpleNamespace(buttons=[button, SimpleNamespace(url="https://example.com")])]))
         links = self.b["_message_links"](msg)
-        self.assertEqual([item["payload"] for item in links], ["A-1", "B-2", "C-3", "E-5", "D-4"])
+        self.assertEqual([item["payload"] for item in links], [
+            "TEST-30-Register_A1", "TEST-30-Register_B2", "TEST-30-Register_C3",
+            "TEST-30-Register_E5", "TEST-30-Register_D4"])
         self.assertEqual(links[3]["bot"], "evil_bot")
         self.assertEqual(self.b["_message_links"](SimpleNamespace(raw_text="https://t.me/a/b?start=X")), [])
         self.assertEqual(self.b["_message_links"](SimpleNamespace(raw_text="https://t.me/x?start=short")), [])
+        for payload in ("appeal", "TEST-30-Other_code", "TEST-x-Register_code", "TEST-0-Register_code"):
+            self.assertEqual(self.b["_message_links"](SimpleNamespace(
+                raw_text=self.link(payload))), [])
 
     async def test_invalid_link_echo_advances_to_next_once(self):
         aid = await self.create()
@@ -54,26 +59,27 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         async def send(_entity, text):
             sends.append(text)
             events.append(("send", text))
-            if text == "/start NEW-2":
+            if text == "/start TEST-30-Register_NEW2":
                 phase["v"] = "new"
             return SimpleNamespace(id=50)
 
         async def get_messages(_entity, **_kwargs):
             if phase["v"] == "old":
-                return [message(101, "此 OLD-1 注册码已被使用")]
+                return [message(101, "此 TEST-30-Register_OLD1 注册码已被使用")]
             return [message(102, "已进入注册状态")]
 
         self.b["client"] = SimpleNamespace(send_message=AsyncMock(side_effect=send),
                                            get_messages=AsyncMock(side_effect=get_messages))
         ok = await self.b["run_link_register"](
-            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "OLD-1"},
-                            {"bot": "testkky_makka_bot", "payload": "NEW-2"}])
+            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_OLD1"},
+                            {"bot": "testkky_makka_bot", "payload": "TEST-30-Register_NEW2"}])
         self.assertFalse(ok)
-        self.assertEqual(events, [("send", "/start OLD-1"), ("send", "/start NEW-2")])
+        self.assertEqual(events, [("send", "/start TEST-30-Register_OLD1"),
+                                  ("send", "/start TEST-30-Register_NEW2")])
         hit = self.b["conn"].execute("SELECT action,ok,detail FROM hits ORDER BY id DESC").fetchone()
         self.assertEqual(hit["action"], "link_register")
         self.assertEqual(hit["ok"], 0)
-        self.assertIn("NEW-2", hit["detail"])
+        self.assertIn("TEST-30-Register_NEW2", hit["detail"])
 
     async def test_invalid_reply_without_payload_echo_stops(self):
         aid = await self.create()
@@ -81,8 +87,8 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
             send_message=AsyncMock(return_value=SimpleNamespace(id=100)),
             get_messages=AsyncMock(return_value=[message(101, "注册码已被使用")]))
         ok = await self.b["run_link_register"](
-            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "OLD-1"},
-                            {"bot": "testkky_makka_bot", "payload": "NEW-2"}])
+            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_OLD1"},
+                            {"bot": "testkky_makka_bot", "payload": "TEST-30-Register_NEW2"}])
         self.assertFalse(ok)
         self.assertEqual(self.b["client"].send_message.await_count, 1)
         detail = json.loads(self.b["conn"].execute(
@@ -102,17 +108,18 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
             polls["n"] += 1
             if polls["n"] < 8:
                 return []
-            if "NEW-2" in sent[-1]:
+            if "TEST-30-Register_NEW2" in sent[-1]:
                 return [message(200, "邀请卡片", buttons=[[SimpleNamespace(text="注册", click=AsyncMock())]])]
-            return [message(150, "OLD-1 注册码已被使用")]
+            return [message(150, "TEST-30-Register_OLD1 注册码已被使用")]
 
         self.b["client"] = SimpleNamespace(send_message=AsyncMock(side_effect=send),
                                            get_messages=AsyncMock(side_effect=get_messages))
         ok = await self.b["run_link_register"](
-            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "OLD-1"},
-                            {"bot": "testkky_makka_bot", "payload": "NEW-2"}])
+            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_OLD1"},
+                            {"bot": "testkky_makka_bot", "payload": "TEST-30-Register_NEW2"}])
         self.assertFalse(ok)
-        self.assertEqual(sent, ["/start", "/start OLD-1", "/start NEW-2"])
+        self.assertEqual(sent, ["/start", "/start TEST-30-Register_OLD1",
+                                "/start TEST-30-Register_NEW2"])
 
     async def test_ready_text_in_popup_skips_extra_wait(self):
         aid = await self.create(result_timeout=3)
@@ -133,7 +140,7 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         self.b["client"] = SimpleNamespace(send_message=AsyncMock(side_effect=send),
                                            get_messages=AsyncMock(side_effect=get_messages))
         ok = await self.b["run_link_register"](
-            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "OK-1"}])
+            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_OK1"}])
         self.assertTrue(ok)
         button.click.assert_awaited_once()
 
@@ -164,10 +171,11 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         self.b["client"] = SimpleNamespace(send_message=AsyncMock(side_effect=send),
                                            get_messages=AsyncMock(side_effect=get_messages))
         ok = await self.b["run_link_register"](
-            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "OK-1"},
-                            {"bot": "testkky_makka_bot", "payload": "NEVER-2"}])
+            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_OK1"},
+                            {"bot": "testkky_makka_bot", "payload": "TEST-30-Register_NEVER2"}])
         self.assertTrue(ok)
-        self.assertEqual(events, [("send", "/start OK-1"), ("send", "测试用户 测试安全码")])
+        self.assertEqual(events, [("send", "/start TEST-30-Register_OK1"),
+                                  ("send", "测试用户 测试安全码")])
         button.click.assert_awaited_once()
         hit = self.b["conn"].execute("SELECT ok,detail FROM hits ORDER BY id DESC").fetchone()
         self.assertEqual(hit["ok"], 1)
@@ -178,9 +186,9 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         aid = await self.create(link_mode=0)
         self.b["client"] = SimpleNamespace(
             send_message=AsyncMock(return_value=SimpleNamespace(id=100)),
-            get_messages=AsyncMock(return_value=[message(101, "注册码已被使用 B-2")]))
-        links = [{"bot": "testkky_makka_bot", "payload": "A-1"},
-                 {"bot": "testkky_makka_bot", "payload": "B-2"}]
+            get_messages=AsyncMock(return_value=[message(101, "注册码已被使用 TEST-30-Register_B2")]))
+        links = [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_A1"},
+                 {"bot": "testkky_makka_bot", "payload": "TEST-30-Register_B2"}]
         await self.b["run_link_register"](self.row(aid), links)
         self.assertEqual(self.b["client"].send_message.await_count, 1)
 
@@ -188,15 +196,15 @@ class LinkRegisterTests(unittest.IsolatedAsyncioTestCase):
         aid = await self.create()
         self.b["client"] = SimpleNamespace(
             send_message=AsyncMock(return_value=SimpleNamespace(id=50)),
-            get_messages=AsyncMock(return_value=[message(101, "A-1 注册码已被使用")]))
+            get_messages=AsyncMock(return_value=[message(101, "TEST-30-Register_A1 注册码已被使用")]))
         ok = await self.b["run_link_register"](
-            self.row(aid), [{"bot": "evil_bot", "payload": "A-1"}])
+            self.row(aid), [{"bot": "evil_bot", "payload": "TEST-30-Register_A1"}])
         self.assertFalse(ok)
         self.b["resolve_entity"].assert_awaited_with("@evil_bot")
         sent_before = self.b["client"].send_message.await_count
         self.b["_delete_link_credential"](aid)
         ok = await self.b["run_link_register"](
-            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "A-1"}])
+            self.row(aid), [{"bot": "testkky_makka_bot", "payload": "TEST-30-Register_A1"}])
         self.assertFalse(ok)
         self.assertEqual(self.b["client"].send_message.await_count, sent_before)
 
