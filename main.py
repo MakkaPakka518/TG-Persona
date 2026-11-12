@@ -1135,8 +1135,9 @@ def _knowledge_usage(trigger, on_demand, limit):
         return "relevant"
     runtime = get_runtime()
     now = time.monotonic()
-    last = runtime.ai_knowledge_last.get("global", 0)
-    if now - last >= 600 and random.random() < 0.15:
+    last = runtime.ai_knowledge_last.get("global")
+    # 没有记录表示本进程还没补充过；不能拿开机时长当已等待时间，否则新启动的机器前 10 分钟永不触发。
+    if (last is None or now - last >= 600) and random.random() < 0.15:
         runtime.ai_knowledge_last["global"] = now
         return "occasional"
     return None

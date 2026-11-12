@@ -171,6 +171,25 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
               start_time='00:00', end_time='23:59', provider_ids=provider, knowledge_on_demand=0))
         self.assertIn('ON_DEMAND_KNOWLEDGE', await prompt_for('哈哈哈'))
 
+    async def test_occasional_knowledge_works_immediately_after_fresh_boot(self):
+        """fresh host: monotonic() is small; empty history must not be treated as waiting."""
+        provider = await self.provider()
+        self.b['conn'].execute("INSERT INTO watched_groups VALUES('-1','群',0)")
+        self.b['conn'].commit()
+        self.b['_write_knowledge']('ON_DEMAND_KNOWLEDGE')
+        self.runtime.client = SimpleNamespace(get_messages=AsyncMock(return_value=[message(1, '今天好热')]),
+                                             send_message=AsyncMock(return_value=message(2, out=True)))
+        await self.b['create_ai_flock_job'](self.b['AIFlockJobInput'](
+            name='按需', groups='-1', prompt='聊天', start_time='00:00', end_time='23:59',
+            provider_ids=provider, knowledge_on_demand=1))
+        self.runtime.ai_knowledge_last.clear()
+        self.b['random'] = SimpleNamespace(random=lambda: 0.01, uniform=lambda a, b: a)
+        with patch.object(self.b['time'], 'monotonic', return_value=5.0):
+            self.b['_call_ai_any'] = AsyncMock(return_value='嗯')
+            with patch('asyncio.sleep', new=AsyncMock()):
+                await self.b['_run_ai_flock'](-1, '今天好热')
+        self.assertIn('ON_DEMAND_KNOWLEDGE', self.b['_call_ai_any'].await_args.args[0])
+
     async def test_knowledge_preview_modes_do_not_call_ai_or_write(self):
         self.b['_write_knowledge']('PREVIEW_KNOWLEDGE_' + '知' * 2000 + '_TAIL')
         ai = AsyncMock(side_effect=AssertionError('preview must not call AI'))
