@@ -83,7 +83,7 @@ def load_backend():
                          'AI_FLOCK_LEARNING_MESSAGE_CHARS', 'AI_FLOCK_LEARNING_SKILL_CHARS',
                          'AI_FLOCK_LEARNING_MAX_TOKENS', 'AI_FLOCK_LEARNING_UNLIMITED_MAX_TOKENS',
                           'AI_FLOCK_LEARNING_RANGES', 'SKILL_MAX_BYTES', 'KNOWLEDGE_MAX_BYTES', 'AI_FLOCK_KNOWLEDGE_CHARS',
-                         'AI_FLOCK_MEMORY_BLOCK_MAX_BYTES', 'AI_FLOCK_DISTILL_MAX_TOKENS'}
+                         'AI_FLOCK_MEMORY_BLOCK_MAX_BYTES', 'AI_FLOCK_DISTILL_MAX_TOKENS', '_KNOWLEDGE_INTENT'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -114,7 +114,7 @@ def load_backend():
     aliases = {'db': 'conn', 'auto_tasks': '_auto_running', 'running': '_running',
                'session_alerted': '_session_alerted', 'cache': '_cache', 'dialog_cache': '_dialog_cache'}
     dict_fields = {'cache','dialog_cache','running','tg_state','hits_count','last_hit_ts','flock_buf',
-                    'auto_last_ts','signin_plans','poll_last','auto_tasks','ai_flock_last','ai_flock_blocked'}
+                    'auto_last_ts','signin_plans','poll_last','auto_tasks','ai_flock_last','ai_flock_blocked','ai_knowledge_last'}
     set_fields = {'tasks','ai_flock_busy_groups','generated_message_ids'}
     class RuntimeFixture:
         id = 'default'

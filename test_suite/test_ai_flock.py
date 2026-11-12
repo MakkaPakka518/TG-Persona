@@ -59,6 +59,39 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('REMOVED SECRET',prompt);self.assertIn('VALID STYLE',prompt)
         db.execute('DELETE FROM watched_groups');db.execute("INSERT INTO watched_groups VALUES('-3','新群',0)");self.b['_reconcile_group_configuration'](db);db.commit();self.assertEqual(db.execute('SELECT enabled FROM ai_flock_jobs WHERE id=?',(keep,)).fetchone()[0],0);self.assertEqual(self.b['get_setting']('flock_learning_groups'),'');self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],0)
 
+    async def test_cross_midnight_job_active_on_both_days_and_stops_at_end(self):
+        provider=await self.provider();db=self.b['conn'];db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit();model=self.b['AIFlockJobInput']
+        job=(await self.b['create_ai_flock_job'](model(name='晚间',groups='-1',start_time='22:00',end_time='02:00',end_next_day=1,prompt='聊天',provider_ids=provider)))['id']
+        self.assertEqual((await self.b['list_ai_flock_jobs']())['jobs'][0]['end_next_day'],1)
+        for day,hour,minute,active in [(30,21,59,False),(30,22,0,True),(30,23,59,True),(31,0,0,True),(31,1,59,True),(31,2,0,False),(31,21,59,False),(31,22,0,True)]:
+            self.b['now_local']=lambda day=day,hour=hour,minute=minute:datetime(2026,10,day,hour,minute,tzinfo=timezone.utc)
+            source=self.b['_ai_flock_source']('-1');self.assertEqual(source['job_id'] if source else None,job if active else None)
+        await self.b['update_ai_flock_job'](job,model(name='白天',groups='-1',start_time='09:00',end_time='11:00',prompt='聊天',provider_ids=provider))
+        self.assertEqual((await self.b['list_ai_flock_jobs']())['jobs'][0]['end_next_day'],0)
+
+    async def test_cross_midnight_overlap_checks_early_hours_and_allows_adjacent_tasks(self):
+        provider=await self.provider();db=self.b['conn'];db.executemany("INSERT INTO watched_groups VALUES(?,?,0)",[('-1','一群'),('-2','二群')]);db.commit();model=self.b['AIFlockJobInput']
+        await self.b['create_ai_flock_job'](model(name='晚间',groups='-1',start_time='22:00',end_time='02:00',end_next_day=1,prompt='聊天',provider_ids=provider))
+        for start,end,next_day in [('01:00','03:00',0),('21:00','23:00',0),('23:00','01:00',1),('00:00','00:00',1)]:
+            with self.assertRaises(HTTPException) as conflict:
+                await self.b['create_ai_flock_job'](model(name='重叠',groups='-1',start_time=start,end_time=end,end_next_day=next_day,prompt='聊天',provider_ids=provider))
+            self.assertEqual(conflict.exception.status_code,409)
+        for groups,start,end,next_day in [('-1','02:00','03:00',0),('-1','20:00','22:00',0),('-2','22:00','02:00',1)]:
+            self.assertTrue((await self.b['create_ai_flock_job'](model(name='允许',groups=groups,start_time=start,end_time=end,end_next_day=next_day,prompt='聊天',provider_ids=provider)))['ok'])
+        db.execute('DELETE FROM ai_flock_jobs');db.commit()
+        await self.b['create_ai_flock_job'](model(name='凌晨',groups='-1',start_time='01:00',end_time='03:00',prompt='聊天',provider_ids=provider))
+        with self.assertRaises(HTTPException):
+            await self.b['create_ai_flock_job'](model(name='新增晚间',groups='-1',start_time='22:00',end_time='02:00',end_next_day=1,prompt='聊天',provider_ids=provider))
+
+    async def test_cross_midnight_time_validation_and_24_hour_window(self):
+        db=self.b['conn'];db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit();model=self.b['AIFlockJobInput']
+        for start,end,next_day in [('22:00','02:00',0),('10:00','10:00',0),('10:00','11:00',1),('24:00','01:00',1),('10:00','26:00',0),('22:00','02:00',2)]:
+            with self.assertRaises(HTTPException) as invalid:
+                await self.b['create_ai_flock_job'](model(name='无效',enabled=0,groups='-1',start_time=start,end_time=end,end_next_day=next_day))
+            self.assertEqual(invalid.exception.status_code,400)
+        for start,end,next_day in [('22:00','00:00',1),('00:00','00:00',1),('10:00','10:00',1)]:
+            self.assertTrue((await self.b['create_ai_flock_job'](model(name='边界',enabled=0,groups='-1',start_time=start,end_time=end,end_next_day=next_day)))['ok'])
+
     async def test_optional_persona_uses_skill_and_combines_when_present(self):
         provider=await self.provider();db=self.b['conn'];db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit();model=self.b['AIFlockJobInput']
         with self.assertRaises(HTTPException):

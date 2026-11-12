@@ -130,6 +130,39 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
                 await self.b['update_ai_flock_job'](job, model(name='超限', groups='-1', enabled=0,
                                                   knowledge_chars=budget))
 
+    async def test_on_demand_knowledge_only_for_questions_and_rate_limited_chat(self):
+        provider = await self.provider()
+        self.b['conn'].execute("INSERT INTO watched_groups VALUES('-1','群',0)")
+        self.b['conn'].commit()
+        self.b['_write_knowledge']('ON_DEMAND_KNOWLEDGE')
+        self.runtime.client = SimpleNamespace(get_messages=AsyncMock(return_value=[message(1, '嗯')]),
+                                             send_message=AsyncMock(return_value=message(2, out=True)))
+        model = self.b['AIFlockJobInput']
+        job = (await self.b['create_ai_flock_job'](model(name='按需', groups='-1', prompt='聊天',
+               start_time='00:00', end_time='23:59', provider_ids=provider, knowledge_on_demand=1)))['id']
+        self.assertEqual((await self.b['list_ai_flock_jobs']())['jobs'][0]['knowledge_on_demand'], 1)
+
+        async def prompt_for(trigger):
+            self.runtime.ai_flock_last.clear()
+            self.runtime.client.get_messages = AsyncMock(return_value=[message(1, trigger)])
+            self.b['_call_ai_any'] = AsyncMock(return_value='嗯')
+            with patch('asyncio.sleep', new=AsyncMock()):
+                await self.b['_run_ai_flock'](-1, trigger)
+            return self.b['_call_ai_any'].await_args.args[0]
+
+        for trigger in ('怎么配置反向代理', 'CF 522 怎么办', '请问有什么推荐'):
+            self.assertIn('ON_DEMAND_KNOWLEDGE', await prompt_for(trigger))
+        self.b['random'] = SimpleNamespace(random=lambda: 0.9, uniform=lambda a, b: a)
+        for trigger in ('哈哈哈', '今天好热', '晚安'):
+            self.assertNotIn('ON_DEMAND_KNOWLEDGE', await prompt_for(trigger))
+        self.b['random'] = SimpleNamespace(random=lambda: 0.01, uniform=lambda a, b: a)
+        self.assertIn('ON_DEMAND_KNOWLEDGE', await prompt_for('今天好热'))
+        self.assertNotIn('ON_DEMAND_KNOWLEDGE', await prompt_for('今天好热'))
+
+        await self.b['update_ai_flock_job'](job, model(name='按需', groups='-1', prompt='聊天',
+              start_time='00:00', end_time='23:59', provider_ids=provider, knowledge_on_demand=0))
+        self.assertIn('ON_DEMAND_KNOWLEDGE', await prompt_for('哈哈哈'))
+
     async def test_learning_never_reads_or_writes_knowledge(self):
         await self.provider()
         self.b['conn'].execute("INSERT INTO watched_groups VALUES('-1','群',0)")
@@ -146,16 +179,17 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runtime.knowledge_file.read_bytes(), before)
         self.b['_read_knowledge'].assert_not_called()
 
-    async def test_registration_sessions_keep_their_knowledge_budget(self):
+    async def test_registration_sessions_keep_their_knowledge_mode(self):
         await self.provider()
         for kind in ('link_register', 'button_register', 'code_register'):
             body = self.b['AutoIn'](type=kind, name=kind, groups='-1', target='@test_bot',
                    btn_text='注册', keywords='状态', success_kw='成功', ai_flock_enabled=1,
-                   ai_flock_knowledge_chars=-1)
+                   ai_flock_knowledge_chars=-1, ai_flock_knowledge_on_demand=1)
             row = (await self.b['create_auto'](body))['id']
             task = self.b['conn'].execute('SELECT * FROM automations WHERE id=?', (row,)).fetchone()
             self.assertTrue(self.b['_start_registration_ai_flock'](task, '-1'))
-            self.assertEqual(self.b['_ai_flock_source']('-1')['knowledge_chars'], -1)
+            source = self.b['_ai_flock_source']('-1')
+            self.assertEqual((source['knowledge_chars'], source['knowledge_on_demand']), (-1, 1))
 
 
 if __name__ == '__main__':

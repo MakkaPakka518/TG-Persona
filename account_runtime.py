@@ -93,6 +93,7 @@ class AccountRuntime:
     custom_trigger_task: object = None
     ai_flock_busy_groups: set = field(default_factory=set)
     ai_flock_last: dict = field(default_factory=dict)
+    ai_knowledge_last: dict = field(default_factory=dict)
     ai_flock_blocked: dict = field(default_factory=dict)
     ai_flock_waiting: int = 0
     generated_message_ids: set = field(default_factory=set)
@@ -305,6 +306,7 @@ class AccountRuntime:
             self.ai_flock_busy = False
             self.ai_flock_busy_groups.clear()
             self.ai_flock_last.clear()
+            self.ai_knowledge_last.clear()
             self.ai_flock_blocked.clear()
             self.ai_flock_waiting = 0
             self.generated_message_ids.clear()
