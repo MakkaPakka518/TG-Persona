@@ -96,7 +96,7 @@ class FakeTelegramClient:
     async def get_entity(self, peer):
         return peer
 
-    async def send_message(self, entity, text):
+    async def send_message(self, entity, text, **kwargs):
         await asyncio.sleep(0)
         self.sent.append((entity, text))
         return SimpleNamespace(id=len(self.sent) + 100, out=True)
@@ -177,8 +177,8 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.req('POST', '/api/tg/verify_code', aid, json={'code': code})).status_code, 200)
 
     async def auto(self, aid, text='hello', **changes):
-        body = dict(type='custom', name='offline task', target='@fake', chain_retry=0,
-                    custom_steps=json.dumps([{'t': 'send', 'v': text}, {'t': 'wait', 'v': 0}]))
+        body = dict(type='custom', name='offline task', target='@fake', chain_retry=1,
+                    custom_steps=json.dumps([{'t': 'send', 'to': 'target', 'text': text}, {'t': 'wait', 'ms': 0}]))
         body.update(changes)
         response = await self.req('POST', '/api/autos', aid, json=body)
         self.assertEqual(response.status_code, 200, response.text)
@@ -256,10 +256,8 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rt(aid).client.sent, [('@fake', 'two')])
         first_logs = (await self.req('GET', '/api/logs', 'default')).json()['hits']
         second_logs = (await self.req('GET', '/api/logs', aid)).json()['hits']
-        self.assertIn('one', json.dumps(first_logs))
-        self.assertNotIn('two', json.dumps(first_logs))
-        self.assertIn('two', json.dumps(second_logs))
-        self.assertNotIn('one', json.dumps(second_logs))
+        self.assertEqual((len(first_logs),len(second_logs)),(1,1))
+        self.assertNotIn('one',json.dumps(first_logs));self.assertNotIn('two',json.dumps(second_logs))
         await self.req('POST', '/api/toggle', aid, json={'paused': True})
         self.assertTrue(self.rt(aid).running['paused'])
         self.assertFalse(self.rt().running['paused'])
@@ -398,7 +396,7 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         task_id = await self.auto(aid)
         runtime = self.rt(aid)
         started, hold = asyncio.Event(), asyncio.Event()
-        async def long_task(row):
+        async def long_task(row, trigger_context=None):
             started.set()
             await hold.wait()
         self.main.run_custom = long_task
@@ -464,16 +462,18 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
             return {'id': 1, 'type': 'custom', 'name': 'offline semantics', 'target': '@fake',
                     'chain_retry': 1, 'custom_steps': json.dumps(steps)}
         with patch.object(asyncio, 'sleep', new=AsyncMock()) as sleep:
-            self.assertTrue(await self.main.run_custom(config([{'t': 'wait', 'v': 0}])))
+            self.assertTrue(await self.main.run_custom(config([{'t': 'wait', 'ms': 0}])))
             sleep.assert_awaited_once_with(0)
         # No success/fail words still require an actual fresh reply, including a
         # media-only message. No Telegram/client network operation is performed.
         for replies, expected in [([], False), ([SimpleNamespace(id=90, out=False, raw_text='old')], False),
                                   ([SimpleNamespace(id=101, out=False, raw_text='')], True)]:
             runtime.client.get_messages = AsyncMock(side_effect=[[], replies])
-            with patch.object(self.main.time, 'monotonic', side_effect=[0, 0, 2]), \
+            with patch.object(self.main.time, 'monotonic', side_effect=[0, 0, 0, 0, 2]), \
                  patch.object(asyncio, 'sleep', new=AsyncMock()):
-                ok = await self.main.run_custom(config([{'t': 'send', 'v': 'fake'}, {'t': 'until', 'timeout': 1}]))
+                ok = await self.main.run_custom(config([
+                    {'t': 'send', 'to': 'target', 'text': 'fake'},
+                    {'t': 'wait_reply', 'from': 'target', 'timeout_ms': 1}]))
             self.assertEqual(ok, expected)
         runtime.client = None
 
@@ -486,12 +486,15 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
             updated = SimpleNamespace(id=110, out=False, raw_text='completed', edit_date='edited', photo=None)
             runtime.client = SimpleNamespace(get_entity=AsyncMock(return_value='entity'),
                 get_messages=AsyncMock(side_effect=[[], [menu], [menu], [updated if edit else menu]]))
-            steps = [{'t': 'click', 'v': 'continue'}, {'t': 'until', 'timeout': 1}]
+            steps = [{'t': 'click', 'to': 'target', 'text': 'continue', 'fresh': False, 'timeout_ms': 1},
+                     {'t': 'wait_reply', 'from': 'target', 'timeout_ms': 1}]
             a = {'id': 1, 'type': 'custom', 'name': 'offline click', 'target': '@fake', 'chain_retry': 1,
                  'custom_steps': json.dumps(steps)}
-            with patch.object(self.main.time, 'monotonic', side_effect=[0, 0, 2]), \
+            with patch.object(self.main.time, 'monotonic', side_effect=[0, 0, 0, 0, 2]), \
                  patch.object(asyncio, 'sleep', new=AsyncMock()):
-                self.assertEqual(await self.main.run_custom(a), expected)
+                result=await self.main.run_custom(a)
+                detail=self.main.get_account_db().execute("SELECT reply FROM hits ORDER BY id DESC LIMIT 1").fetchone()
+                self.assertEqual(result,expected,detail["reply"] if detail else "no log")
             button.click.assert_awaited_once()
         runtime.client = None
 

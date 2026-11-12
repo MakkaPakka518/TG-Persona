@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>TG Persona · 人形分身面板</title>
 <style>
 :root{
@@ -439,6 +439,20 @@ html[data-theme="light"] .switch{background:#cbd6c5}
 .button-reply-toggle{display:flex;align-items:center;gap:8px;min-height:44px;margin-top:12px}.button-reply-toggle input{width:auto}
 #af-code_register .hint{font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 #af-code_register input:not([type=checkbox]),#af-code_register textarea,#af-code_register select,#af-code_register button{min-height:44px}
+#af-custom .autof-card{max-width:760px}
+#af-custom input:not([type=checkbox]),#af-custom textarea,#af-custom select,#af-custom button,#af-custom summary{min-height:44px}
+#af-custom .hint{color:var(--sub);font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+.custom-trigger-seg{overflow:visible;padding-bottom:0}.custom-trigger-seg button{flex:1;min-width:0;white-space:nowrap}
+.custom-time-grid{display:grid;grid-template-columns:1.5fr 1fr minmax(82px,.55fr);gap:8px}.custom-time-grid>div{min-width:0}
+.custom-checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
+label.custom-check{display:flex;align-items:center;gap:9px;min-height:44px;margin:0;padding:7px 10px;border:1px solid var(--hair);border-radius:8px;background:var(--panel2);font-size:12px;font-weight:500;cursor:pointer}
+label.custom-check input{width:20px;height:20px;flex:none}
+.custom-add-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.custom-add-grid button{min-width:0;padding-inline:8px}
+.custom-step-card{min-width:0;margin:10px 0;padding:13px;border:1px solid var(--hair2);border-radius:11px;background:rgba(6,25,20,.22)}
+.custom-step-card>b{display:block;margin-bottom:9px}.custom-step-card label{overflow-wrap:anywhere}
+.custom-step-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}.custom-step-actions button{min-width:0;padding-inline:6px}
+.custom-template-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:stretch}
+#stepCards:empty{display:none}#stepCards>.empty{margin-top:8px}
 @media(max-width:560px){
   header{gap:5px;padding:9px 8px}.logo{font-size:12px;gap:6px;white-space:nowrap}.logo .dot{width:7px;height:7px}#accountTop{max-width:96px!important;padding:7px 27px 7px 8px;font-size:11px}.icon{width:36px;height:36px}.pill{padding:7px 8px;border-radius:8px}#btnPanelOut{font-size:0}#btnPanelOut::before{content:"退出";font-size:11px}
   main{padding-inline:10px}.card{padding:13px;border-radius:15px}.ctl-div{margin-inline:-13px}.flex{gap:8px}.flex>div{min-width:min(125px,100%)}
@@ -449,6 +463,10 @@ html[data-theme="light"] .switch{background:#cbd6c5}
   #aListTimed .auto-actions button{min-height:44px}
   #foldTg input,#foldTg select,#foldTg button{min-height:44px}
   .water-ai-time{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:430px){
+  .custom-time-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.custom-time-grid>div:first-child{grid-column:1/-1}
+  .custom-add-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.custom-template-row{grid-template-columns:minmax(0,1fr)}
 }
 @media(max-width:340px){
   header{padding-inline:6px}.logo{font-size:11px;letter-spacing:.03em}.logo .dot{display:none}#accountTop{max-width:78px!important}.icon{width:34px;height:34px}#btnPanelOut{padding-inline:6px}
@@ -1026,29 +1044,61 @@ section.act,.fold.open .fold-b{animation:none}
         <div id="aListCustom"></div>
         <div class="empty" id="aEmptyCustom">暂无自定义任务,点上面按钮添加</div>
         <div class="autof" id="af-custom"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑自定义任务</b><button class="ghost" type="button" onclick="closeAutoForm('custom')">关闭</button></div><form onsubmit="saveAuto('custom');return false">
-          <label>任务名称</label>
-          <input type="text" id="cName" placeholder="如: 注册流程">
-          <label>目标(@机器人 或群ID)</label>
-          <input type="text" id="cTarget" placeholder="如: @invite_bot">
-          <label>步骤卡片（按顺序执行，最多 50 步）</label>
+          <label for="cName">任务名称</label>
+          <input type="text" id="cName" placeholder="如：注册流程" required>
+          <label for="cTarget">默认目标</label>
+          <input type="text" id="cTarget" placeholder="选填，如：@invite_bot、群 ID 或 {trigger.bot}">
+          <div class="hint">步骤填写 target 时使用这里；也可在每一步直接填写用户名、群 ID、source 或模板变量。</div>
+          <label>触发方式</label>
+          <div class="seg custom-trigger-seg" id="cTriggerSeg">
+            <button class="on" id="cTriggerManual" type="button" onclick="pickCustomTrigger('manual')">手动执行</button>
+            <button id="cTriggerSchedule" type="button" onclick="pickCustomTrigger('schedule')">定时一次</button>
+            <button id="cTriggerGroup" type="button" onclick="pickCustomTrigger('group')">监听群消息</button>
+          </div>
+          <div id="cTriggerScheduleFields" class="hidden">
+            <div class="custom-time-grid">
+              <div><label for="cTriggerDate">日期</label><input type="date" id="cTriggerDate"></div>
+              <div><label for="cTriggerTime">时分</label><input type="time" id="cTriggerTime" step="60" value="00:00"></div>
+              <div><label for="cTriggerSecond">秒</label><input type="number" id="cTriggerSecond" min="0" max="59" step="1" inputmode="numeric" value="0"></div>
+            </div>
+          </div>
+          <div id="cTriggerGroupFields" class="hidden">
+            <label>监听群</label><div class="hint" style="margin:0 0 8px">不选择则匹配全部监听群</div><div id="cGroups" class="grp-pick"></div>
+            <div class="flex">
+              <div><label for="cTriggerSender">发送者</label><select id="cTriggerSender"><option value="any">任何人</option><option value="bot">仅 Bot</option><option value="user">仅用户</option></select></div>
+              <div><label for="cTriggerLogic">条件关系</label><select id="cTriggerLogic"><option value="any">任一条件</option><option value="all">全部条件</option></select></div>
+            </div>
+            <label for="cTriggerText">消息文本条件</label><textarea id="cTriggerText" rows="2" placeholder="关键词或正则表达式"></textarea>
+            <label class="custom-check"><input type="checkbox" id="cTriggerTextRegex"> 消息文本使用正则</label>
+            <label for="cTriggerButton">按钮条件</label><input type="text" id="cTriggerButton" placeholder="按钮文字或正则表达式">
+            <label class="custom-check"><input type="checkbox" id="cTriggerButtonRegex"> 按钮条件使用正则</label>
+            <label for="cTriggerCooldown">同群冷却（秒）</label><input type="number" id="cTriggerCooldown" min="0" max="86400" step="1" inputmode="numeric" value="0">
+            <div class="hint">消息文本和按钮条件至少填写一项；冷却范围 0–86400 秒。</div>
+          </div>
+          <label for="cUser">用户名（选填）</label><input type="text" id="cUser" autocomplete="off" placeholder="编辑时留空沿用已保存值">
+          <label for="cSecret">安全码（选填）</label><input type="password" id="cSecret" autocomplete="new-password" placeholder="编辑时留空沿用已保存值">
+          <div class="hint">两项会单独安全保存，不进入任务列表、日志或导出文件。步骤使用 {credential.user} 或 {credential.secret} 时，未保存凭证的任务必须同时填写两项。</div>
+          <label>步骤卡片（按顺序执行，1–50 步）</label>
           <div id="stepCards"></div>
           <div id="stepError" class="hint" role="alert"></div>
-          <div class="flex" style="gap:6px;flex-wrap:wrap">
+          <div class="custom-add-grid">
             <button class="ghost" type="button" onclick="fillStep('send')">＋ 发送消息</button>
             <button class="ghost" type="button" onclick="fillStep('wait')">＋ 等待</button>
             <button class="ghost" type="button" onclick="fillStep('click')">＋ 点击按钮</button>
-            <button class="ghost" type="button" onclick="fillStep('until')">＋ 等待回复</button>
-            <button class="ghost" type="button" onclick="fillStep('manual')">＋ 人工验证等待</button>
+            <button class="ghost" type="button" onclick="fillStep('wait_reply')">＋ 等待回复</button>
+            <button class="ghost" type="button" onclick="fillStep('extract')">＋ 提取内容</button>
+            <button class="ghost" type="button" onclick="fillStep('captcha')">＋ 验证码</button>
           </div>
-          <label for="stepTemplate">示例模板（替换前会确认）</label>
-          <div class="flex"><select id="stepTemplate"><option value="basic">发命令 → 等待 → 点击 → 等回复</option><option value="manual">发命令 → 等人工处理后机器人确认</option></select><button class="ghost" type="button" onclick="applyStepTemplate()">使用模板</button></div>
-          <div class="hint">人工验证请自行到 Telegram 处理，这里只等待机器人的确认回复；不会识别或破解验证。</div>
-          <details id="stepAdvanced" style="margin-top:12px"><summary>高级：原始 JSON（可选；旧版配置无损保留）</summary>
-            <textarea id="cSteps" rows="5" oninput="readStepJSON()" placeholder="[]"></textarea>
-            <div class="hint">不认识 JSON 无需使用这里。旧版验证步骤仅保留，不提供新增入口。</div>
+          <div class="hint">可用变量：{trigger.text}、{trigger.chat_id}、{trigger.message_id}、{trigger.sender}、{trigger.button_text}、{trigger.button_url}、{trigger.bot}、{trigger.payload}、{credential.user}、{credential.secret}、{last.text}、{var.name}。随机占位符：{num:N}、{word:N}、{alpha:N}、{uuid}。</div>
+          <label for="stepTemplate">流程模板</label>
+          <div class="custom-template-row"><select id="stepTemplate"><option value="basic">基础 Bot 流程</option><option value="registration">监听注册链接流程</option><option value="scheduled">定时 Bot 流程</option></select><button class="ghost" type="button" onclick="applyStepTemplate()">替换为模板</button></div>
+          <details id="stepAdvanced" style="margin-top:12px"><summary>高级：严格格式原始 JSON</summary>
+            <textarea id="cSteps" rows="7" oninput="readStepJSON()" placeholder="[]"></textarea>
+            <div class="hint">仅接受最新的 send、wait、click、wait_reply、extract、captcha 格式；字段类型和名称必须完全符合步骤卡片。</div>
           </details>
           <div class="flex">
             <div><label>整条失败重试(1-5)</label><input type="number" id="cRetry" value="1" min="1" max="5"></div>
+            <div><label>限流延迟重试(0-5)</label><input type="number" id="cRetries" value="2" min="0" max="5"></div>
           </div>
           <div class="flex" style="margin-top:14px">
             <button class="btn" type="submit">保存</button>
@@ -1475,7 +1525,7 @@ function resetAccountCaches(){
   state={tg:{},logged_in:false,running:false,stats:{watched_groups:0,rules:0,hits:0}};
   autos=[];openedAutoIds.clear();persistAutoExpanded();autoStopBusy.clear();autoTestBusy.clear();autoStopAllBusy=false;syncStopAllButton();closeIconPicker();signinGlobalDirty=false;signinGlobalBusy=false;$('#signinGlobalSave').disabled=false;$('#signinGlobalResult').textContent='';renderSigninGlobal();
   allGroups=[];allRules=[];watchedGroups=[];ruleGroupSel.clear();
-  autoGroupSel.grabcodes.clear();autoGroupSel.redpacket.clear();selectedAutoIds.clear();
+  Object.values(autoGroupSel).forEach(sel=>sel.clear());selectedAutoIds.clear();
   editingRule=null;editAuto=null;editAutoAccount=null;ruleEditAccount=null;tgPhase='idle';window._prevLoggedIn=null;if(typeof resetAIAssistant==='function')resetAIAssistant();
   logQ='';logKind='reply';resetLogOpenState();anomalySeq++;anomalies=[];anomalyBusyIds.clear();clearTimeout(logQtimer);$('#logQ').value='';$('#gSearch').value='';
   batchBusy=false;exportBusy=false;$('#configExportAll').disabled=false;
@@ -1957,7 +2007,7 @@ function renderAutoList(type){
         <span data-task-icon="${a.id}"></span>
         <div class="grow"><div class="auto-title" title="${esc(a.name)}">${esc(a.name||'未命名任务')}</div>${['signin','scheduled_register'].includes(a.type)?`<div class="s" style="font-size:10px">${esc(autoWindow(a))}</div>`:''}${a.running===true?'<span class="tag pending" role="status">运行中</span>':a.queued===true?'<span class="tag pending" role="status">排队中</span>':''}${autoUnconfirmed(a)?'<span class="tag pending" role="status">待确认</span>':''}</div>
         <span class="tag ${a.enabled?'ok':'off'}">${a.enabled?'已启用':'已停用'}</span>
-        ${active?action('stop',a.running===true?'停止':'取消排队',(stopBusy||autoStopAllBusy)?'disabled':''):['signin','custom','keepalive'].includes(a.type)?action('run','执行'):''}
+        ${active?action('stop',a.running===true?'停止':'取消排队',(stopBusy||autoStopAllBusy)?'disabled':''):autoCanRun(a)?action('run','执行'):''}
         ${action('expand','▸',`aria-label="${open?'收起':'展开'}任务详情" aria-expanded="${open}"`)}
       </div>
 
@@ -1978,6 +2028,11 @@ function renderAutoList(type){
     else ({run:runAuto,test:testAuto,toggle:toggleAuto,edit:editAutoItem,duplicate:dupAuto,delete:delAuto}[action])?.(id);
   };
 }
+function autoCanRun(a){
+  if(['signin','keepalive'].includes(a.type))return true;
+  if(a.type!=='custom')return false;
+  try{return JSON.parse(a.custom_trigger||'{"mode":"manual"}').mode==='manual'}catch(e){return false}
+}
 function signinRecognitionMode(a){const mode=String(a?.signin_recognition_mode||'');return ['none','captcha','image'].includes(mode)?mode:(a?.signin_captcha?'captcha':'none')}
 function autoDesc(a){
   if(a.type==='code_register')return `群：${esc(a.groups)}；Bot：${esc(a.target)}；${Number(a.link_mode)===0?'随机一条':'串行最多 '+esc(String(a.link_limit??4))+' 条'}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒回群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
@@ -1996,7 +2051,10 @@ function autoDesc(a){
     const last=a.last_at?new Date((+a.last_at||0)*1000).toLocaleString('zh-CN'):'未发送';
     return `群:${esc(a.target)} · 每 ${ivTxt} 一条 · ${a.cooldown>0?a.cooldown+' 秒后删除':'不删除'} · 上次:${esc(last)}`;
   }
-  return `${esc(a.target||'--')} · ${(a.custom_steps||'').split('"t"').length-1} 步${a.chain_retry>1?' · 重试'+a.chain_retry:''}`;
+  let trigger='未知触发',count=0;
+  try{const value=typeof a.custom_trigger==='string'?JSON.parse(a.custom_trigger):a.custom_trigger;trigger={manual:'手动触发',schedule:'定时触发',group:'监听群触发'}[value?.mode]||trigger}catch(e){}
+  try{const value=typeof a.custom_steps==='string'?JSON.parse(a.custom_steps):a.custom_steps;count=Array.isArray(value)?value.length:0}catch(e){}
+  return `${trigger}；${count} 步${a.chain_retry>1?'；重试 '+esc(String(a.chain_retry))+' 次':''}`;
 }
 function assistantBlock(a){
   if(!['signin','custom','keepalive'].includes(a.type))return '';
@@ -2071,8 +2129,9 @@ function editAutoItem(id){
     $('#gBot').value=a.target||'';$('#gProbe').value=a.command||'/start';$('#gPoll').value=a.poll_interval||0;
     pickGrabAct(a.action);$('#gCancel').style.display='inline-block';
   }else if(t==='custom'){
-    $('#cName').value=a.name;$('#cTarget').value=a.target;setVisualSteps(a.custom_steps||'[]');
-    $('#cRetry').value=a.chain_retry||1;$('#cCancel').style.display='inline-block';
+    $('#cName').value=a.name;$('#cTarget').value=a.target||'';setCustomTrigger(a.custom_trigger||'{"mode":"manual"}');setVisualSteps(typeof a.custom_steps==='string'?a.custom_steps:JSON.stringify(a.custom_steps||[]));
+    $('#cUser').value='';$('#cSecret').value='';
+    $('#cRetry').value=a.chain_retry||1;$('#cRetries').value=a.retries??2;$('#cCancel').style.display='inline-block';
   }else if(t==='keepalive'){
     $('#kName').value=a.name;$('#kTarget').value=a.target;$('#kText').value=a.reply_text||'';
     const iv=+a.poll_interval||86400;
@@ -2094,7 +2153,7 @@ function cancelAutoEdit(t){
     scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkAiFlock').checked=false;$('#lkAiFlockMinutes').value='5';$('#lkAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;$('#lkAiFlockFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
-    custom:()=>{$('#cName').value='';$('#cTarget').value='';setVisualSteps('[]');$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cCancel').style.display='none'},
+    custom:()=>{$('#cName').value='';$('#cTarget').value='';setCustomTrigger('{"mode":"manual"}');setVisualSteps('[]');$('#cUser').value='';$('#cSecret').value='';$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cRetries').value=2;$('#cCancel').style.display='none'},
     code_register:()=>{$('#crName').value='';$('#crGroup').value='';$('#crBot').value='';$('#crButton').value='注册';$('#crReady').value='已进入注册状态';$('#crExisting').value='无法启用续期功能';$('#crUser').value='';$('#crSecret').value='';$('#crMode').value='1';$('#crLimit').value=4;$('#crWait').value=3;$('#crSuccess').value='成功';$('#crFail').value='';$('#crTimeout').value=30;$('#crGroupReply').checked=false;$('#crReplyText').value='';$('#crReplyDelay').value=5;$('#crReplyFields').classList.add('hidden');$('#crAiFlock').checked=false;$('#crAiFlockMinutes').value=5;$('#crAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;$('#crAiFlockFields').classList.add('hidden');$('#crCancel').style.display='none'},
     button_register:()=>{$('#brName').value='';setAutoGroups('button_register','');$('#brAnnouncement').value='定时注册';$('#brAnnouncementButton').value='点击注册';$('#brCommand').value='/start';$('#brButton').value='创建';$('#brReady').value='注册状态';$('#brExisting').value='';$('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value='成功';$('#brFail').value='';$('#brTimeout').value=30;$('#brGroupReply').checked=true;$('#brReplyText').value='拿下！';$('#brReplyDelay').value=5;$('#brGroupReplyFields').classList.remove('hidden');$('#brAiFlock').checked=false;$('#brAiFlockMinutes').value=5;$('#brAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;$('#brAiFlockFields').classList.add('hidden');$('#brCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'},
@@ -2106,29 +2165,133 @@ function pickGrabAct(v){
   $('#gActSend').classList.toggle('ghost',v!=='send');$('#gActSend').classList.toggle('btn',v==='send');
 }
 // ---------- 可视化步骤编辑器 ----------
-let visualSteps=[], stepsError='';
+let visualSteps=[],stepsError='',customTriggerMode='manual';
 const STEP_HINTS={
-  send:{t:'send',v:'/start'},wait:{t:'wait',v:'2000'},
-  click:{t:'click',v:'按钮文字',any:false,ai:false},
-  until:{t:'until',success:'成功',fail:'失败',timeout:30000},
-  manual:{t:'until',success:'验证通过',fail:'验证失败',timeout:300000}
+  send:{t:'send',to:'target',text:'/start',reply:false},
+  wait:{t:'wait',ms:2000},
+  click:{t:'click',to:'target',text:'',emoji:'',index:0,any:false,ai:false,fresh:true,timeout_ms:30000},
+  wait_reply:{t:'wait_reply',from:'target',success:'成功',fail:'',regex:false,timeout_ms:30000,save:''},
+  extract:{t:'extract',from:'last.text',regex:'',group:1,save:'value'},
+  captcha:{t:'captcha',from:'target',length:4,send_to:'target',template:'{captcha}'}
 };
-const STEP_TEMPLATES={basic:[STEP_HINTS.send,STEP_HINTS.wait,STEP_HINTS.click,STEP_HINTS.until],manual:[STEP_HINTS.send,STEP_HINTS.manual]};
+const STEP_FIELDS={
+  send:['t','to','text','reply'],wait:['t','ms'],click:['t','to','text','emoji','index','any','ai','fresh','timeout_ms'],
+  wait_reply:['t','from','success','fail','regex','timeout_ms','save'],extract:['t','from','regex','group','save'],captcha:['t','from','length','send_to','template']
+};
+const STEP_NAMES={send:'发送消息',wait:'等待',click:'点击按钮',wait_reply:'等待回复',extract:'提取内容',captcha:'识别验证码'};
+function cloneJSON(value){return JSON.parse(JSON.stringify(value))}
+function nextScheduleTrigger(){
+  const date=new Date(Date.now()+3600000),pad=value=>String(value).padStart(2,'0');
+  return {mode:'schedule',at:`${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`};
+}
+const STEP_TEMPLATES={
+  basic:()=>({trigger:{mode:'manual'},steps:[STEP_HINTS.send,STEP_HINTS.wait,{...STEP_HINTS.click,text:'开始'},STEP_HINTS.wait_reply]}),
+  registration:()=>({trigger:{mode:'group',groups:[],sender:'any',logic:'any',text:'',text_regex:false,button:'注册',button_regex:false,cooldown:30},steps:[
+    {...STEP_HINTS.send,to:'{trigger.bot}',text:'/start {trigger.payload}'},
+    {...STEP_HINTS.wait_reply,from:'{trigger.bot}',success:'注册'},
+    {...STEP_HINTS.click,to:'{trigger.bot}',text:'注册'},
+    {...STEP_HINTS.wait_reply,from:'{trigger.bot}',success:'用户名'},
+    {...STEP_HINTS.send,to:'{trigger.bot}',text:'{credential.user}'},
+    {...STEP_HINTS.wait_reply,from:'{trigger.bot}',success:'安全码'},
+    {...STEP_HINTS.send,to:'{trigger.bot}',text:'{credential.secret}'},
+    {...STEP_HINTS.wait_reply,from:'{trigger.bot}',success:'成功',fail:'失败'}
+  ],target:'{trigger.bot}'}),
+  scheduled:()=>({trigger:nextScheduleTrigger(),steps:[STEP_HINTS.send,STEP_HINTS.wait,{...STEP_HINTS.click,text:'开始'},STEP_HINTS.wait_reply]})
+};
+function triggerIssue(trigger){
+  if(!trigger||typeof trigger!=='object'||Array.isArray(trigger))return '触发条件必须是 JSON 对象';
+  const fields={manual:['mode'],schedule:['mode','at'],group:['mode','groups','sender','logic','text','text_regex','button','button_regex','cooldown']}[trigger.mode];
+  if(!fields)return '请选择有效的触发方式';
+  const extra=Object.keys(trigger).find(key=>!fields.includes(key)),missing=fields.find(key=>!Object.prototype.hasOwnProperty.call(trigger,key));
+  if(extra)return '触发条件包含未知字段：'+extra;if(missing)return '触发条件缺少字段：'+missing;
+  if(trigger.mode==='schedule'){
+    if(!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(trigger.at))return '定时触发需要精确到秒的日期和时间';
+    const [date]=trigger.at.split('T'),[year,month,day]=date.split('-').map(Number),parsed=new Date(trigger.at);
+    if(Number.isNaN(parsed.getTime())||parsed.getFullYear()!==year||parsed.getMonth()+1!==month||parsed.getDate()!==day)return '定时触发日期无效';
+  }
+  if(trigger.mode==='group'){
+    if(!Array.isArray(trigger.groups)||trigger.groups.length>50||trigger.groups.some(value=>typeof value!=='string')||new Set(trigger.groups).size!==trigger.groups.length)return '监听群必须是不重复的字符串列表，最多 50 个';
+    if(!['any','bot','user'].includes(trigger.sender))return '请选择有效的发送者类型';
+    if(!['any','all'].includes(trigger.logic))return '请选择有效的条件关系';
+    if(typeof trigger.text!=='string'||typeof trigger.button!=='string'||typeof trigger.text_regex!=='boolean'||typeof trigger.button_regex!=='boolean')return '群消息条件字段类型不正确';
+    if(!trigger.text.trim()&&!trigger.button.trim())return '监听群触发至少填写消息文本或按钮条件';
+    if(trigger.text.length>1024||trigger.button.length>1024)return '触发条件最长 1024 个字符';
+    if(!Number.isInteger(trigger.cooldown)||trigger.cooldown<0||trigger.cooldown>86400)return '同群冷却须为 0–86400 秒的整数';
+  }
+  return '';
+}
+function parseCustomTrigger(raw){
+  let trigger=raw;
+  if(typeof raw==='string'){try{trigger=JSON.parse(raw)}catch(e){throw new Error('触发条件 JSON 无法读取')}}
+  const issue=triggerIssue(trigger);if(issue)throw new Error(issue);return trigger;
+}
+function pickCustomTrigger(mode){
+  if(!['manual','schedule','group'].includes(mode))return;customTriggerMode=mode;
+  for(const value of ['manual','schedule','group']){const button=$('#cTrigger'+value[0].toUpperCase()+value.slice(1));button.classList.toggle('on',value===mode);button.setAttribute('aria-pressed',String(value===mode))}
+  $('#cTriggerScheduleFields').classList.toggle('hidden',mode!=='schedule');$('#cTriggerGroupFields').classList.toggle('hidden',mode!=='group');
+}
+function setCustomTrigger(raw){
+  const trigger=parseCustomTrigger(raw);pickCustomTrigger(trigger.mode);
+  autoGroupSel.custom.clear();renderAutoGroups('custom');$('#cTriggerDate').value='';$('#cTriggerTime').value='00:00';$('#cTriggerSecond').value='0';$('#cTriggerSender').value='any';$('#cTriggerLogic').value='any';$('#cTriggerText').value='';$('#cTriggerTextRegex').checked=false;$('#cTriggerButton').value='';$('#cTriggerButtonRegex').checked=false;$('#cTriggerCooldown').value='0';
+  if(trigger.mode==='schedule'){
+    const [date,time='00:00:00']=trigger.at.split('T'),parts=time.split(':');$('#cTriggerDate').value=date;$('#cTriggerTime').value=parts.slice(0,2).join(':');$('#cTriggerSecond').value=parts[2]||'0';
+  }else if(trigger.mode==='group'){
+    autoGroupSel.custom=new Set(trigger.groups);renderAutoGroups('custom');$('#cTriggerSender').value=trigger.sender;$('#cTriggerLogic').value=trigger.logic;
+    $('#cTriggerText').value=trigger.text;$('#cTriggerTextRegex').checked=trigger.text_regex;$('#cTriggerButton').value=trigger.button;$('#cTriggerButtonRegex').checked=trigger.button_regex;$('#cTriggerCooldown').value=trigger.cooldown;
+  }
+}
+function buildCustomTrigger(){
+  if(customTriggerMode==='manual')return {mode:'manual'};
+  if(customTriggerMode==='schedule'){
+    const date=$('#cTriggerDate').value.trim(),time=$('#cTriggerTime').value.trim(),second=Number($('#cTriggerSecond').value);
+    const trigger={mode:'schedule',at:/^\d{4}-\d{2}-\d{2}$/.test(date)&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)&&Number.isInteger(second)&&second>=0&&second<=59?date+'T'+time+':'+String(second).padStart(2,'0'):''};
+    const issue=triggerIssue(trigger);if(issue)throw new Error(issue);return trigger;
+  }
+  const trigger={mode:'group',groups:[...autoGroupSel.custom],sender:$('#cTriggerSender').value,logic:$('#cTriggerLogic').value,text:$('#cTriggerText').value, text_regex:$('#cTriggerTextRegex').checked,button:$('#cTriggerButton').value,button_regex:$('#cTriggerButtonRegex').checked,cooldown:Number($('#cTriggerCooldown').value)};
+  const issue=triggerIssue(trigger);if(issue)throw new Error(issue);return trigger;
+}
 function parseSteps(text){
   let list;try{list=JSON.parse(text.trim()||'[]')}catch(e){throw new Error('高级步骤内容无法读取，请检查格式，或使用示例模板重新开始')}
   if(!Array.isArray(list))throw new Error('步骤应是一组按顺序排列的卡片');
   if(list.length>50)throw new Error('最多支持 50 个步骤，请先删除多余步骤');
   return list;
 }
+function stepsUseCredential(list,target=''){return /\{credential\.(?:user|secret)\}/.test(target)||list.some(step=>step&&typeof step==='object'&&Object.values(step).some(value=>typeof value==='string'&&/\{credential\.(?:user|secret)\}/.test(value)))}
+function stepsUseDefaultTarget(list){return list.some(step=>step&&typeof step==='object'&&['to','from','send_to'].some(key=>step[key]==='target'))}
+function stepsUseTrigger(list,target=''){return target==='source'||target.includes('{trigger.')||list.some(step=>step&&typeof step==='object'&&Object.entries(step).some(([key,value])=>typeof value==='string'&&(value.startsWith('trigger.')||value.includes('{trigger.')||(['to','from','send_to'].includes(key)&&value==='source'))))}
+function templateIssue(value){
+  for(const match of String(value||'').matchAll(/\{([^{}]+)\}/g)){
+    const name=match[1],random=name.match(/^(?:num|word|alpha):(\d+)$/i);
+    if(random){if(Number(random[1])>256)return '随机占位符长度不能超过 256';continue}
+    if(name==='uuid'||['trigger.text','trigger.chat_id','trigger.message_id','trigger.sender','trigger.button_text','trigger.button_url','trigger.bot','trigger.payload','credential.user','credential.secret','last.text','captcha','code'].includes(name)||/^var\.[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name))continue;
+    return '不支持变量 {'+name+'}';
+  }
+  return '';
+}
 function stepIssue(list,requireOne=false){
   if(list.length>50)return '最多支持 50 个步骤';
   if(requireOne&&!list.length)return '请至少添加一个步骤';
   for(let i=0;i<list.length;i++){
-    const s=list[i];if(!s||typeof s!=='object'||Array.isArray(s))continue; // 原有未知数据保留，由后端最终验证
-    if(s.t==='send'&&(typeof s.v!=='string'||!s.v.trim()))return '第 '+(i+1)+' 步：请填写要发送的消息';
-    const ms=s.t==='wait'?s.v:s.t==='until'?s.timeout:undefined;
-    if((s.t==='wait'||s.t==='until')&&(ms===undefined||ms===null||String(ms).trim()===''||!Number.isFinite(Number(ms))||Number(ms)<0||!Number.isSafeInteger(Number(ms))))return '第 '+(i+1)+' 步：等待时间须为不小于 0 的秒数，最多保留三位小数';
-    if(s.t==='until'&&!String(s.success??'').trim()&&!String(s.fail??'').trim())return '第 '+(i+1)+' 步：请至少填写一种机器人确认或失败关键词';
+    const s=list[i],prefix='第 '+(i+1)+' 步：';if(!s||typeof s!=='object'||Array.isArray(s))return prefix+'步骤必须是 JSON 对象';
+    const fields=STEP_FIELDS[s.t];if(!fields)return prefix+'不支持步骤类型 '+String(s.t||'（空）');
+    const missing=fields.find(key=>!Object.prototype.hasOwnProperty.call(s,key)),extra=Object.keys(s).find(key=>!fields.includes(key));
+    if(missing)return prefix+'缺少字段 '+missing;if(extra)return prefix+'包含未知字段 '+extra;
+    const strings={send:['to','text'],click:['to','text','emoji'],wait_reply:['from','success','fail','save'],extract:['from','regex','save'],captcha:['from','send_to','template']}[s.t]||[];
+    if(strings.some(key=>typeof s[key]!=='string'))return prefix+'文本字段类型不正确';
+    const booleans={send:['reply'],click:['any','ai','fresh'],wait_reply:['regex']}[s.t]||[];
+    if(booleans.some(key=>typeof s[key]!=='boolean'))return prefix+'开关字段类型不正确';
+    const integers={wait:['ms'],click:['index','timeout_ms'],wait_reply:['timeout_ms'],extract:['group'],captcha:['length']}[s.t]||[];
+    if(integers.some(key=>!Number.isInteger(s[key])))return prefix+'数值字段必须是整数';
+    if(s.t==='send'&&!s.text.trim())return prefix+'请填写要发送的消息';
+    if(['send','click'].includes(s.t)&&!s.to.trim()||s.t==='wait_reply'&&!s.from.trim()||s.t==='extract'&&!s.from.trim()||s.t==='captcha'&&(!s.from.trim()||!s.send_to.trim()))return prefix+'步骤目标或来源不能为空';
+    if(s.t==='wait'&&(s.ms<0||s.ms>3600000))return prefix+'等待时间须为 0–3600 秒';
+    if((s.t==='click'||s.t==='wait_reply')&&(s.timeout_ms<1||s.timeout_ms>3600000))return prefix+'等待上限须为 0.001–3600 秒';
+    if(s.t==='click'&&(s.index<0||s.index>100))return prefix+'按钮序号须为 0–100';
+    if(s.t==='extract'&&(!s.regex.trim()||!s.save.trim()||s.group<0||s.group>20))return prefix+'请填写提取正则和变量名，分组须为 0–20';
+    if(s.t==='captcha'&&(s.length<1||s.length>16))return prefix+'验证码长度须为 1–16';
+    for(const value of strings){const issue=templateIssue(s[value]);if(issue)return prefix+issue}
+    if(s.t==='click'&&s.ai&&[s.to,s.text,s.emoji].some(value=>value.includes('{credential.')))return prefix+'AI 选按钮不能使用账号凭据变量';
+    if(['wait_reply','extract'].includes(s.t)&&s.save&&!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(s.save))return prefix+'变量名只能使用字母、数字和下划线，且不能以数字开头';
   }
   return '';
 }
@@ -2139,42 +2302,48 @@ function readStepJSON(){
   try{visualSteps=parseSteps($('#cSteps').value);stepsError=stepIssue(visualSteps);$('#stepError').textContent=stepsError;renderStepCards()}
   catch(e){stepsError=e.message;$('#stepError').textContent=stepsError;$('#stepCards').replaceChildren()}
 }
-function setVisualSteps(text){$('#cSteps').value=text||'[]';readStepJSON()}
-function stepField(card,index,key,labelText,type='text',milliseconds=false){
-  const s=visualSteps[index], label=document.createElement('label'),input=document.createElement(type==='textarea'?'textarea':'input');
-  label.textContent=labelText;if(type!=='textarea')input.type=type;
+function setVisualSteps(value){$('#cSteps').value=typeof value==='string'?(value||'[]'):JSON.stringify(value||[]);readStepJSON()}
+function stepField(parent,index,key,labelText,type='text',options={}){
+  const s=visualSteps[index],label=document.createElement('label'),input=document.createElement(type==='textarea'?'textarea':'input');
+  if(type!=='textarea')input.type=type;
   const value=s[key];
-  if(type==='checkbox'){input.checked=!!value;input.style.width='auto'}
-  else input.value=milliseconds?(value==null?'':Number(value)/1000):String(value??'');
-  if(type==='number'){input.min='0';input.step='0.001'}
+  if(type==='checkbox'){
+    input.checked=!!value;input.style.width='auto';label.className='custom-check';label.appendChild(input);const text=document.createElement('span');text.textContent=labelText;label.appendChild(text);
+  }else{label.textContent=labelText;input.value=options.milliseconds?(value==null?'':Number(value)/1000):String(value??'');label.appendChild(input)}
+  if(type==='number'){input.min=String(options.min??0);input.step=String(options.step??1);input.inputMode=options.decimal?'decimal':'numeric'}
   input.addEventListener(type==='checkbox'?'change':'input',()=>{
     let v=type==='checkbox'?input.checked:input.value;
-    if(milliseconds){const n=Number(v)*1000;v=String(v).trim()===''?'':(Math.abs(n-Math.round(n))<1e-7?Math.round(n):n);if(typeof s[key]==='string')v=String(v)}
+    if(type==='number')v=String(v).trim()===''?'':Number(v)*(options.milliseconds?1000:1);
+    if(options.milliseconds&&typeof v==='number'&&Math.abs(v-Math.round(v))<1e-7)v=Math.round(v);
     s[key]=v;syncStepJSON();
   });
-  label.appendChild(input);card.appendChild(label);
+  parent.appendChild(label);
 }
 function renderStepCards(){
   const box=$('#stepCards');box.replaceChildren();
   if(!visualSteps.length){box.textContent='还没有步骤，点下方按钮添加，或使用示例模板';return}
   visualSteps.forEach((s,i)=>{
-    const card=document.createElement('div');card.className='card';
-    const title=document.createElement('b'),rawType=s&&typeof s==='object'?s.t:'';
-    const allowed={send:['t','v'],wait:['t','v'],click:['t','v','any','ai'],until:['t','v','success','fail','timeout']}[rawType];
-    const type=allowed&&Object.keys(s).every(k=>allowed.includes(k))?rawType:'';
-    const names={send:'发送消息',wait:'等待',click:'点击按钮',until:'等待回复 / 人工验证等待'};
-    title.textContent=(i+1)+'. '+(names[type]||'旧版验证步骤（保留）');card.appendChild(title);
-    if(type==='send')stepField(card,i,'v','消息文本','textarea');
-    if(type==='wait')stepField(card,i,'v','等待（秒，0 表示立即继续）','number',true);
-    if(type==='click'){
-      stepField(card,i,'v','按钮文字（可留空沿用原匹配方式）');stepField(card,i,'any','匹配任意按钮（兼容原 any）','checkbox');
-      // 不新增 AI/验证能力；旧 ai 原样保留，只展示说明，不自动改写。
-      if(Object.prototype.hasOwnProperty.call(s,'ai')){const note=document.createElement('div');note.className='hint';note.textContent='原 ai 参数：'+String(s.ai)+'（保留；可在高级模式查看）';card.appendChild(note)}
+    const card=document.createElement('div');card.className='custom-step-card';
+    const title=document.createElement('b'),type=s&&typeof s==='object'&&STEP_FIELDS[s.t]?s.t:'';title.textContent=(i+1)+'. '+(STEP_NAMES[type]||'无效步骤');card.appendChild(title);
+    if(type==='send'){
+      stepField(card,i,'to','发送目标（target、source、用户名、群 ID 或模板）');stepField(card,i,'text','消息文本','textarea');stepField(card,i,'reply','作为回复发送','checkbox');
     }
-    if(type==='until'){stepField(card,i,'success','机器人确认 / 成功关键词');stepField(card,i,'fail','失败关键词（可选）');stepField(card,i,'timeout','最长等待（秒）','number',true)}
-    const known={send:['t','v'],wait:['t','v'],click:['t','v','any','ai'],until:['t','v','success','fail','timeout']}[type];
-    if(!known||Object.keys(s).some(k=>!known.includes(k))){const note=document.createElement('div');note.className='hint';note.textContent='未展示的旧版配置已原样保留；可在高级 JSON 查看和编辑。';card.appendChild(note)}
-    const actions=document.createElement('div');actions.className='flex';actions.style.gap='8px';
+    if(type==='wait')stepField(card,i,'ms','等待（秒）','number',{milliseconds:true,step:.001,decimal:true});
+    if(type==='click'){
+      stepField(card,i,'to','目标（target、用户名、群 ID 或模板）');stepField(card,i,'text','按钮文字');stepField(card,i,'emoji','按钮表情');stepField(card,i,'index','按钮序号（0 为第一个）','number',{min:0,step:1});
+      const checks=document.createElement('div');checks.className='custom-checks';stepField(checks,i,'any','匹配任意按钮','checkbox');stepField(checks,i,'ai','由 AI 选择按钮','checkbox');stepField(checks,i,'fresh','只使用最新按钮','checkbox');card.appendChild(checks);
+      stepField(card,i,'timeout_ms','等待按钮上限（秒）','number',{milliseconds:true,step:.001,decimal:true});
+    }
+    if(type==='wait_reply'){
+      stepField(card,i,'from','回复来源（target、source、用户名、群 ID 或模板）');stepField(card,i,'success','成功条件（留空且失败条件也为空时接受任意新回复）');stepField(card,i,'fail','失败条件');stepField(card,i,'regex','条件使用正则','checkbox');stepField(card,i,'timeout_ms','最长等待（秒）','number',{milliseconds:true,step:.001,decimal:true});stepField(card,i,'save','保存为变量名（选填，之后用 {var.name}）');
+    }
+    if(type==='extract'){
+      stepField(card,i,'from','提取来源（如 last.text、trigger.text 或模板）');stepField(card,i,'regex','提取正则');stepField(card,i,'group','正则分组','number',{min:0,step:1});stepField(card,i,'save','保存为变量名');
+    }
+    if(type==='captcha'){
+      stepField(card,i,'from','验证码所在聊天（target、source、用户名、群 ID 或模板）');stepField(card,i,'length','验证码长度','number',{min:1,step:1});stepField(card,i,'send_to','发送目标（target、source、用户名、群 ID 或模板）');stepField(card,i,'template','发送模板（可留空只保存结果；使用 {captcha} 或 {code}）');
+    }
+    const actions=document.createElement('div');actions.className='custom-step-actions';
     for(const [label,offset] of [['上移',-1],['下移',1],['删除',0]]){const b=document.createElement('button');b.type='button';b.className=offset?'ghost':'danger';b.textContent=label;b.disabled=offset!==0&&(i+offset<0||i+offset>=visualSteps.length);b.addEventListener('click',()=>offset?moveStep(i,offset):removeStep(i));actions.appendChild(b)}
     card.appendChild(actions);box.appendChild(card);
   });
@@ -2188,12 +2357,11 @@ function fillStep(k){
 function moveStep(index,offset){const next=index+offset;if(index<0||next<0||index>=visualSteps.length||next>=visualSteps.length)return;[visualSteps[index],visualSteps[next]]=[visualSteps[next],visualSteps[index]];syncStepJSON();renderStepCards()}
 function removeStep(index){if(index<0||index>=visualSteps.length)return;visualSteps.splice(index,1);syncStepJSON();renderStepCards()}
 function applyStepTemplate(){
-  const key=$('#stepTemplate').value;if(!STEP_TEMPLATES[key])return;
-  if($('#cSteps').value.trim()&&$('#cSteps').value.trim()!=='[]'&&!window.confirm('使用模板会替换现有步骤。确定替换？'))return;
-  visualSteps=JSON.parse(JSON.stringify(STEP_TEMPLATES[key]));syncStepJSON();renderStepCards();
+  const key=$('#stepTemplate').value,factory=STEP_TEMPLATES[key];if(!factory||!window.confirm('模板会替换当前触发条件和全部步骤。确定继续？'))return;
+  const template=cloneJSON(factory());setCustomTrigger(template.trigger);visualSteps=template.steps;if(template.target)$('#cTarget').value=template.target;syncStepJSON();renderStepCards();
 }
-const autoGroupSel={grabcodes:new Set(),redpacket:new Set(),link_register:new Set(),button_register:new Set()};
-const AUTO_GROUP_BOX={grabcodes:'gGroups',redpacket:'pGroups',link_register:'lkGroups',button_register:'brGroups'};
+const autoGroupSel={grabcodes:new Set(),redpacket:new Set(),link_register:new Set(),button_register:new Set(),custom:new Set()};
+const AUTO_GROUP_BOX={grabcodes:'gGroups',redpacket:'pGroups',link_register:'lkGroups',button_register:'brGroups',custom:'cGroups'};
 for(const [type,id] of Object.entries(AUTO_GROUP_BOX))$('#'+id).addEventListener('click',e=>{const b=e.target.closest('[data-auto-group]');if(b&&$('#'+id).contains(b))toggleAutoGroup(type,b.dataset.autoGroup)});
 function renderAutoGroups(type){
   const box=document.getElementById(AUTO_GROUP_BOX[type]);
@@ -2230,7 +2398,7 @@ function openAutoForm(type){
   el.classList.add('show');
   if(!editAutoAccount)editAutoAccount=accountContext();
   if(type==='signin'){renderSigninIconPreview();syncSigninWindow()}
-  if(type==='custom')readStepJSON();
+  if(type==='custom'){readStepJSON();renderAutoGroups('custom')}
   if(type==='code_register')renderCodeGroupOptions();
   document.body.style.overflow='hidden';
 }
@@ -2343,12 +2511,22 @@ async function saveAuto(type){
     if((user&&!secret)||(!user&&secret)||((!wasEditing||!editAuto.link_credential_set)&&(!user||!secret)))return toast('请同时填写注册用户名和安全码',1);
     if(user&&secret)linkCredential={user,secret};
   }else if(type==='custom'){
-    let steps;
-    try{steps=parseSteps($('#cSteps').value)}catch(e){return toast(e.message,1)}
+    let steps,trigger;
+    try{steps=parseSteps($('#cSteps').value);trigger=buildCustomTrigger()}catch(e){return toast(e.message,1)}
     const issue=stepIssue(steps,true);if(issue)return toast(issue,1);
-    body={type,name:$('#cName').value.trim(),target:$('#cTarget').value.trim(),custom_steps:JSON.stringify(steps),
-      chain_retry:+$('#cRetry').value||1};
-    if(!body.name||!body.target)return toast('请填写名称和目标',1);
+    body={type,name:$('#cName').value.trim(),target:$('#cTarget').value.trim(),custom_trigger:JSON.stringify(trigger),custom_steps:JSON.stringify(steps),
+      chain_retry:+$('#cRetry').value||1,retries:Number($('#cRetries').value)};
+    if(!body.name)return toast('请填写任务名称',1);
+    const targetIssue=templateIssue(body.target);if(targetIssue)return toast('默认目标：'+targetIssue,1);
+    if(/\{var\.|\{last\.text\}|\{captcha\}|\{code\}/.test(body.target))return toast('默认目标不能使用运行中才产生的变量，请改到对应步骤的目标中',1);
+    if(stepsUseDefaultTarget(steps)&&!body.target)return toast('步骤使用了 target，请填写默认目标',1);
+    if(trigger.mode!=='group'&&stepsUseTrigger(steps,body.target))return toast('只有监听群触发可使用 trigger 变量或 source 目标',1);
+    if(!Number.isInteger(body.chain_retry)||body.chain_retry<1||body.chain_retry>5||!Number.isInteger(body.retries)||body.retries<0||body.retries>5)return toast('整条失败重试须为 1–5，限流延迟重试须为 0–5',1);
+    const user=$('#cUser').value.trim(),secret=$('#cSecret').value,credentialSet=wasEditing&&!!editAuto.link_credential_set;
+    if((user&&!secret)||(!user&&secret))return toast('用户名和安全码需同时填写；编辑时两项留空表示沿用已保存值',1);
+    if(stepsUseCredential(steps,body.target)&&!credentialSet&&(!user||!secret))return toast('步骤使用了账号凭证，请同时填写用户名和安全码',1);
+    if(stepsUseCredential(steps,body.target)&&!wasEditing)body.enabled=0;
+    if(user&&secret)linkCredential={user,secret};
   }else if(type==='keepalive'){
     const iv=(+$('#kEvery').value||1)*(+$('#kUnit').value||86400);
     body={type,name:$('#kName').value.trim(),target:$('#kTarget').value.trim(),
@@ -2369,7 +2547,7 @@ async function saveAuto(type){
     if(!isCurrentAccount(assistantFormDraft.account))return toast('草稿所属账号已切换',1);
     body={...taskConfig(assistantFormDraft.draft),...body,enabled:0};
   }
-  if(editAuto){url='/api/autos/'+editAuto.id;body=Object.assign(body,{enabled:editAuto.enabled})}
+  if(editAuto){url='/api/autos/'+editAuto.id;const disableForNewCredential=type==='custom'&&linkCredential&&!editAuto.link_credential_set;body=Object.assign(body,{enabled:disableForNewCredential?0:editAuto.enabled})}
   try{
     const saved=await api(url,{method:wasEditing?'PUT':'POST',body:JSON.stringify(body),_account:c});
     if(!isCurrentAccount(c))return;
@@ -2389,6 +2567,7 @@ $('#sClickBtn').addEventListener('change',function(){$('#sBtnWrap').classList.to
 $('#sRecognitionMode').addEventListener('change',syncSigninRecognitionFields);
 function toggleClosedRetryFields(){$('#trClosedRetryFields').classList.toggle('hidden',!$('#trClosedRetry').checked)}
 $('#trClosedRetry').addEventListener('change',toggleClosedRetryFields);
+$('#af-custom').addEventListener('focusin',event=>{if(window.innerWidth<=560&&event.target.matches('input,textarea,select'))setTimeout(()=>event.target.scrollIntoView({behavior:'smooth',block:'center'}),300)});
 function toggleLinkReplyFields(){$('#lkGroupReplyFields').classList.toggle('hidden',!$('#lkGroupReply').checked)}
 $('#lkGroupReply').addEventListener('change',toggleLinkReplyFields);
 function syncRegistrationAIFlock(prefix){const box=$('#'+prefix+'AiFlock'),on=box.checked;if(on&&!aiProviders.some(provider=>provider.enabled)){box.checked=false;toast('请先到设置添加并启用 AI API',1)}$('#'+prefix+'AiFlockFields').classList.toggle('hidden',!box.checked)}
@@ -2532,8 +2711,8 @@ async function exportConfig(selected){
 }
 
 // ---------- AI 助手：所有保存和应用均由用户确认 ----------
-const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_provider_ids,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled'.split(',');
-const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',result_delay:'结果判断前延迟（秒）',result_timeout:'等待最终回复上限（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',signin_recognition_mode:'图片处理',signin_image_prompt:'图片识别提示词',signin_image_action:'图片识别动作',ai_provider_ids:'识别 API',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
+const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,scheduled_at,click_btn,btn_text,btn_emoji,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_provider_ids,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,groups,keywords,action,reply_text,poll_interval,custom_trigger,custom_steps,chain_retry,cooldown,enabled'.split(',');
+const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',scheduled_at:'计划时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',result_delay:'结果判断前延迟（秒）',result_timeout:'等待最终回复上限（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',signin_recognition_mode:'图片处理',signin_image_prompt:'图片识别提示词',signin_image_action:'图片识别动作',ai_provider_ids:'识别 API',custom_trigger:'触发条件',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
 const AI_RANGES={command_delay:[0,120],button_delay:[0,120],result_delay:[0,120],result_timeout:[1,300],refresh_buttons:[0,1],click_times:[1,20],click_interval:[50,3000],retries:[0,5],poll_interval:[60,7776000]};
 const AI_TEXT_FIELDS=['win_start','win_end','success_kw','fail_kw','btn_text','btn_emoji','command'];
 let aiDraft=null,aiDraftBusy=false,aiDraftSeq=0,assistantFormDraft=null,aiDiagnoses=new Map();
@@ -2549,8 +2728,17 @@ function aiSuggestionValid(s,type){
 function syncAIDraftButtons(){const ready=!!aiDraft&&!aiDraftBusy&&isCurrentAccount(aiDraft.account);$('#aiDraftBtn').disabled=aiDraftBusy;$('#aiDraftFill').disabled=!ready;$('#aiDraftSave').disabled=!ready}
 function invalidateAIDraft(){aiDraftSeq++;aiDraft=null;syncAIDraftButtons();$('#aiDraftResult').textContent=''}
 function resetAIAssistant(){aiDraftSeq++;aiDraftBusy=false;aiDraft=null;assistantFormDraft=null;aiDiagnoses.clear();$('#aiDraftText').value='';$('#aiDraftResult').textContent='';syncAIDraftButtons()}
+function readableCustomTrigger(value){
+ try{const trigger=typeof value==='string'?JSON.parse(value):value;if(trigger.mode==='manual')return '手动执行';if(trigger.mode==='schedule')return '定时一次：'+trigger.at;if(trigger.mode==='group')return '监听群消息：'+(trigger.groups?.length?trigger.groups.join('、'):'全部监听群')+'，'+(trigger.logic==='all'?'全部条件':'任一条件')+'，冷却 '+trigger.cooldown+' 秒'}catch(e){}return '请在触发条件中核对';
+}
+function readableCustomSteps(value){
+ try{return (typeof value==='string'?JSON.parse(value):value).map((step,index)=>{
+   const detail={send:(step.to||'默认目标')+' ← '+step.text,wait:String(step.ms/1000)+' 秒',click:(step.to||'默认目标')+' / '+(step.text||step.emoji||('序号 '+step.index)),wait_reply:(step.from||'默认目标')+' / '+(step.success||step.fail),extract:step.regex+' → '+step.save,captcha:(step.from||'默认来源')+' → '+(step.send_to||'默认目标')}[step.t]||'';
+   return `${index+1}. ${STEP_NAMES[step.t]||step.t}${detail?'：'+detail:''}`;
+  }).join('\n')}catch(e){return '请在步骤编辑器核对'}
+}
 function readableAIDraft(d){
- const rows=[d.summary||'任务草稿'];for(const [k,v] of Object.entries(d.draft||{})){if(v===''||v==null||(k==='signin_image_prompt'&&d.draft?.signin_recognition_mode!=='image'))continue;let value=v;if(k==='type')value=AUTO_TYPE[v]||v;if(k==='enabled')value='停用（复核后手动开启）';if(k==='custom_steps'){try{value=JSON.parse(v).map((s,i)=>`${i+1}. ${{send:'发送',wait:'等待（毫秒）',click:'点击',until:'等待回复'}[s.t]||s.t}：${s.v??s.success??''}`).join('\n')}catch(e){value='请在步骤编辑器核对'}}rows.push((AI_LABELS[k]||k)+'：'+String(value))}
+ const rows=[d.summary||'任务草稿'];for(const [k,v] of Object.entries(d.draft||{})){if(v===''||v==null||(k==='signin_image_prompt'&&d.draft?.signin_recognition_mode!=='image'))continue;let value=v;if(k==='type')value=AUTO_TYPE[v]||v;if(k==='enabled')value='停用（复核后手动开启）';if(k==='custom_trigger')value=readableCustomTrigger(v);if(k==='custom_steps')value=readableCustomSteps(v);rows.push((AI_LABELS[k]||k)+'：'+String(value))}
  if(Array.isArray(d.warnings))rows.push('\n注意：\n'+d.warnings.map(String).join('\n'));rows.push('耗时：'+testElapsed(d.elapsed_ms));return rows.join('\n');
 }
 async function generateAIDraft(){
@@ -2585,8 +2773,8 @@ function applyDraftToForm(d){
     $('#sKw').value=typeof d.success_kw==='string'?d.success_kw:'';$('#sFw').value=typeof d.fail_kw==='string'?d.fail_kw:'';
     $('#sPts').value=typeof d.points_pat==='string'?d.points_pat:'';$('#sRetries').value=d.retries??2;
   }else if(type==='custom'){
-    $('#cName').value=String(d.name||'AI 任务');$('#cTarget').value=String(d.target||'');setVisualSteps(String(d.custom_steps||'[]'));
-    $('#cRetry').value=d.chain_retry??1;
+    $('#cName').value=String(d.name||'AI 任务');$('#cTarget').value=String(d.target||'');setCustomTrigger(d.custom_trigger||'{"mode":"manual"}');setVisualSteps(d.custom_steps||'[]');$('#cUser').value='';$('#cSecret').value='';
+    $('#cRetry').value=d.chain_retry??1;$('#cRetries').value=d.retries??2;
   }else{
     $('#kName').value=String(d.name||'AI 任务');$('#kTarget').value=String(d.target||'');$('#kText').value=String(d.reply_text||'');
     const iv=+d.poll_interval||86400,unit=iv%86400===0?86400:(iv%3600===0?3600:60);
@@ -2601,6 +2789,9 @@ function fillAIDraft(){
 }
 async function saveAIDraft(){
   if(!aiDraft||aiDraftBusy||!isCurrentAccount(aiDraft.account))return;
+  if(aiDraft.draft.type==='custom'){
+    try{if(stepsUseCredential(parseSteps(typeof aiDraft.draft.custom_steps==='string'?aiDraft.draft.custom_steps:JSON.stringify(aiDraft.draft.custom_steps||[]))))return toast('草稿使用账号凭证，请先填入表单并填写用户名和安全码',1)}catch(e){return toast(e.message,1)}
+  }
   if(!window.confirm('保存为停用任务？不会发送 Telegram 消息，确认无误后需手动启用。'))return;
   const c=aiDraft.account,draft=taskConfig(aiDraft.draft);aiDraftBusy=true;syncAIDraftButtons();
   delete draft.id;draft.enabled=0;draft.signin_captcha=0;draft.signin_recognition_mode='none';draft.signin_image_action='reply';draft.ai_provider_ids='';

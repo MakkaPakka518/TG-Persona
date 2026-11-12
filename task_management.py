@@ -26,12 +26,13 @@ from typing import Any, Literal, List, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
+from custom_workflow import canonical_steps, canonical_trigger, parse_steps, uses_credentials
 
 MAX_BYTES = 2 * 1024 * 1024
 SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
-    "poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
+    "poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
     "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt"
 ).split(","))
 # Credentials are stored per-account in settings, never in task rows/exports.
@@ -61,10 +62,6 @@ APPLICABILITY = {
     "ai_provider_ids": {"signin"},
 }
 RULE_COLUMNS = ("keywords", "regex", "action", "value", "reaction", "groups", "enabled")
-STEP_FIELDS = {
-    "send": {"t", "v"}, "wait": {"t", "v"}, "click": {"t", "v", "ai", "any"},
-    "captcha": {"t", "v", "send"}, "until": {"t", "timeout", "success", "fail"},
-}
 
 
 class StrictModel(BaseModel):
@@ -140,38 +137,6 @@ def _regex(value):
         _bad("正则表达式无效")
 
 
-def _steps(text):
-    try:
-        steps = json.loads(text)
-    except (ValueError, RecursionError):
-        _bad("custom_steps 必须是旧版步骤 JSON 数组")
-    if not isinstance(steps, list) or not 1 <= len(steps) <= 200:
-        _bad("custom_steps 需包含 1-200 个步骤")
-    for step in steps:
-        if not isinstance(step, dict) or not isinstance(step.get("t"), str):
-            _bad("步骤需包含 t 类型")
-        kind = step["t"]
-        if kind not in STEP_FIELDS or set(step) - STEP_FIELDS[kind]:
-            _bad("步骤只支持旧版 send/wait/click/captcha/until 配置字段")
-        for key, value in step.items():
-            if key in ("ai", "any"):
-                if type(value) not in (bool, int) or value not in (0, 1):
-                    _bad("步骤 ai/any 必须为布尔值或 0/1")
-            elif (key == "v" and kind in ("wait", "captcha")) or key == "timeout":
-                # Older editors also emitted digit strings for v/timeout.
-                if not (type(value) is int or (isinstance(value, str) and value.isascii() and value.isdigit())):
-                    _bad("步骤时长/长度必须为整数")
-                if isinstance(value, str) and len(value) > 9:
-                    _bad("步骤数值超长")
-                low, high = (1, 16) if kind == "captcha" else (0 if kind == "wait" else 1, 86400000)
-                if not low <= int(value) <= high:
-                    _bad("步骤时长/长度超出范围")
-                step[key] = int(value)
-            elif not isinstance(value, str) or len(value) > 16384:
-                _bad("步骤文本必须为字符串且不超过 16384 字符")
-    return json.dumps(steps, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-
-
 def _check_fields(data, allowed):
     if set(data) - set(allowed):
         _bad("包含不支持的任务字段（凭据、ID 和执行状态禁止导入/修改）")
@@ -186,7 +151,7 @@ def _check_fields(data, allowed):
                 _bad(f"{key} 必须为 0-120 的有限秒数")
             result[key] = float(value)
         else:
-            maximum = 262144 if key == "custom_steps" else 16384
+            maximum = 262144 if key in ("custom_steps", "custom_trigger") else 16384
             if not isinstance(value, str) or len(value) > maximum:
                 _bad(f"{key} 必须为字符串且不超过 {maximum} 字符")
             if key == "type" and value not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register"):
@@ -204,7 +169,15 @@ def _check_fields(data, allowed):
             if key == "points_pat" and value:
                 _regex(value)
             if key == "custom_steps" and value.strip():
-                result[key] = _steps(value)
+                try:
+                    result[key] = canonical_steps(value)
+                except ValueError:
+                    _bad("自定义工作流步骤配置无效")
+            if key == "custom_trigger" and value.strip():
+                try:
+                    result[key] = canonical_trigger(value)
+                except ValueError:
+                    _bad("自定义工作流触发条件无效")
     return result
 
 
@@ -256,8 +229,6 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
         checked = _check_fields(data, cols)
         try:
             model = auto_model.model_validate(checked)
-            if model.type == "custom" and not model.target.strip():
-                _bad("自定义任务需要填写目标")
             validate_auto(model)
         except HTTPException:
             raise
@@ -287,10 +258,11 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
         if locked:
             raise HTTPException(409, {"message": "任务正在执行，未修改配置", "ids": locked})
 
-    def after_commit(ids, warnings):
+    def after_commit(ids, warnings, clear_success_ids=()):
+        clear_success_ids = set(clear_success_ids)
         for aid in dict.fromkeys(ids):
             try:
-                reset_schedule(aid, clear_success=False)
+                reset_schedule(aid, clear_success=aid in clear_success_ids)
             except Exception:
                 warnings.append(f"任务 {aid} 配置已保存，但计划重置失败；请刷新计划")
         try:
@@ -313,6 +285,16 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
             patch = {}
         updated, skipped, candidates = [], [], []
         for row in rows:
+            if body.action == "enable" and row["type"] == "custom":
+                try:
+                    needs_credential = (uses_credentials(parse_steps(row["custom_steps"]))
+                                        or "{credential." in str(row.get("target") or ""))
+                except ValueError:
+                    needs_credential = True
+                if needs_credential:
+                    skipped.append({"id": row["id"], "name": row["name"], "type": row["type"],
+                                    "reason": "含账号凭据变量，请保存凭据后单独启用"})
+                    continue
             applicable = {k: v for k, v in patch.items() if row["type"] in APPLICABILITY[k]}
             ignored = [k for k in patch if k not in applicable]
             if ignored:
@@ -335,13 +317,17 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
                     for aid, changes in candidates:
                         if body.action == "delete":
                             db.execute("DELETE FROM automations WHERE id=?", (aid,))
+                            db.execute("DELETE FROM settings WHERE key=?", ("link_cred_" + str(aid),))
+                            db.execute("DELETE FROM registration_events WHERE task_id=?", (aid,))
                         else:
                             # Field identifiers originate solely from APPLICABILITY/enabled.
                             db.execute("UPDATE automations SET " + ",".join(k + "=?" for k in changes) + " WHERE id=?",
                                        [*changes.values(), aid])
             except sqlite3.Error:
                 raise HTTPException(409, "数据库写入冲突，批量配置已全部回滚")
-            after_commit([a for a, _ in candidates], warnings)
+            changed_custom = [aid for aid, changes in candidates
+                              if set(changes) & {"custom_steps", "custom_trigger"}]
+            after_commit([a for a, _ in candidates], warnings, changed_custom)
         return {"ok": True, "preview": body.preview, "action": body.action, "updated": updated,
                 "updated_count": len(updated),
                 "deleted_count": len(updated) if body.action == "delete" and not body.preview else 0,
@@ -401,7 +387,17 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
                 datetime.fromisoformat(data.exported_at.replace("Z", "+00:00"))
             except ValueError:
                 _bad("exported_at 必须为 ISO 8601 时间")
-        tasks = [prepare(task, cols) for task in data.automations]
+        tasks = []
+        for task in data.automations:
+            if body.activate:
+                tasks.append(prepare(task, cols))
+                continue
+            requested_enabled = task.get("enabled", auto_model().enabled)
+            if type(requested_enabled) is not int or requested_enabled not in (0, 1):
+                _bad("enabled 必须为 0-1 的整数")
+            normalized = prepare({**task, "enabled": 0}, cols)
+            normalized["enabled"] = requested_enabled
+            tasks.append(normalized)
         rules = []
         for rule in data.rules:
             item = rule.model_dump()
@@ -436,6 +432,11 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
         for task in tasks:
             fingerprint = _fingerprint(task)
             saved = task if body.activate else {**task, "enabled": 0}
+            if (saved["type"] == "custom" and saved["enabled"] and
+                    (uses_credentials(parse_steps(saved["custom_steps"]))
+                     or "{credential." in saved["target"])):
+                saved = {**saved, "enabled": 0}
+                warnings.append(f"自定义任务 {saved['name']} 使用账号凭据变量；凭据不随配置导入，已保持停用")
             saved_fingerprint = _fingerprint(saved)
             # Compare original configuration BEFORE applying safe disabled defaults;
             # also recognize a previous disabled import of this exact backup.
@@ -471,6 +472,7 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
                     if body.mode == "replace":
                         unlocked(set(running_ids()) | {r["id"] for r in old})
                         db.execute("DELETE FROM automations")
+                        db.execute("DELETE FROM registration_events")
                         db.execute("DELETE FROM settings WHERE key LIKE 'link_cred_%'")
                         if body.include_rules:
                             db.execute("DELETE FROM rules")

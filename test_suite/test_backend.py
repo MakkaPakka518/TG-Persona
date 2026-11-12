@@ -28,6 +28,9 @@ from typing import Optional
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 import zlib
+from custom_workflow import (canonical_steps, canonical_trigger, group_matches, parse_steps,
+                             parse_trigger, redact as redact_custom, render_template, search_pattern,
+                             uses_credentials, uses_default_target, uses_trigger_context, validate_template)
 
 SOURCE = Path(__file__).resolve().parents[1] / 'main.py'
 
@@ -86,7 +89,13 @@ def load_backend():
                   _ai_cfg={}, _ai_rr={}, _ai_usage_guard=threading.Lock(),
                  TRUSTED_PROXIES=(), _auto_running={}, signin_plans={}, poll_last={}, auto_last_ts={},
                  _session_alerted=False, tg_state={'phase': 'ready', 'me': {'id': 1}, 'err': None},
-                 _running={'paused': True}, client=SimpleNamespace(), notify_event=Mock(), send_notify=Mock())
+                  _running={'paused': True}, client=SimpleNamespace(), notify_event=Mock(), send_notify=Mock())
+    names.update(canonical_steps=canonical_steps, canonical_trigger=canonical_trigger,
+                 group_matches=group_matches, parse_steps=parse_steps, parse_trigger=parse_trigger,
+                 redact_custom=redact_custom, render_template=render_template, search_pattern=search_pattern,
+                 uses_credentials=uses_credentials, uses_default_target=uses_default_target,
+                 uses_trigger_context=uses_trigger_context,
+                 validate_template=validate_template)
     aliases = {'db': 'conn', 'auto_tasks': '_auto_running', 'running': '_running',
                'session_alerted': '_session_alerted', 'cache': '_cache', 'dialog_cache': '_dialog_cache'}
     dict_fields = {'cache','dialog_cache','running','tg_state','hits_count','last_hit_ts','flock_buf',
@@ -475,8 +484,11 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.b['_await_signin_captcha']('entity', min_id=100), (None, None))
         self.b['client'].download_media.assert_not_awaited()
 
-    async def test_custom_send_until_does_not_use_old_success(self):
-        aid = await self.create(type='custom', custom_steps=json.dumps([{'t': 'send', 'v': '/start'}, {'t': 'until', 'success': 'success', 'timeout': 1}]))
+    async def test_custom_send_wait_reply_does_not_use_old_success(self):
+        aid = await self.create(type='custom', custom_steps=json.dumps([
+            {'t': 'send', 'to': 'target', 'text': '/start', 'reply': False},
+            {'t': 'wait_reply', 'from': 'target', 'success': 'success', 'fail': '',
+             'regex': False, 'timeout_ms': 1, 'save': ''}]))
         self.b['client'].get_messages.return_value = [message(90, 'success')]
         with patch.object(time, 'monotonic', side_effect=[0, 2]), \
              patch.object(asyncio, 'sleep', new=AsyncMock()):
@@ -485,10 +497,159 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.b['conn'].execute('SELECT ok FROM hits ORDER BY id DESC').fetchone()[0], 0)
 
     async def test_custom_old_captcha_not_recognized(self):
-        aid = await self.create(type='custom', custom_steps=json.dumps([{'t': 'send', 'v': '/start'}, {'t': 'captcha'}]))
+        aid = await self.create(type='custom', custom_steps=json.dumps([
+            {'t': 'send', 'to': 'target', 'text': '/start', 'reply': False},
+            {'t': 'captcha', 'from': 'target', 'length': 4, 'send_to': 'target', 'template': ''}]))
         self.b['client'].get_messages.return_value = [message(90, photo=object())]
         self.assertFalse(await self.b['run_custom'](self.row(aid)))
         self.b['client'].download_media.assert_not_awaited()
+
+    async def test_custom_variables_credentials_extract_and_redacted_logs(self):
+        aid = await self.create(type='custom', enabled=0,
+            custom_trigger=json.dumps({'mode':'group','text':'launch'}), custom_steps=json.dumps([
+            {'t':'send','to':'target','text':'{credential.user}:{credential.secret}:{trigger.text}'},
+            {'t':'wait_reply','from':'target','success':'token=(\\w+)','regex':True,'save':'reply'},
+            {'t':'extract','from':'last.text','regex':'token=(\\w+)','group':1,'save':'token'},
+            {'t':'send','to':'target','text':'saved={var.token}'},
+        ]))
+        self.b['set_link_credential'](aid, 'alice', 'PRIVATE-SECRET')
+        reply = message(101, 'token=ABC')
+        self.b['client'].get_messages.side_effect = [[], [reply]]
+        self.assertTrue(await self.b['run_custom'](self.row(aid), {'text':'launch'}))
+        sent = [call.args[1] for call in self.b['client'].send_message.await_args_list]
+        self.assertEqual(sent, ['alice:PRIVATE-SECRET:launch', 'saved=ABC'])
+        log_row = self.b['conn'].execute('SELECT reply,detail FROM hits ORDER BY id DESC').fetchone()
+        self.assertNotIn('PRIVATE-SECRET', log_row['reply'] + log_row['detail'])
+
+        with self.assertRaises(HTTPException):
+            await self.create(type='custom', custom_steps=json.dumps([
+                {'t':'send','to':'target','text':'{var.never_set}'}]))
+
+        source = await self.create(type='custom', target='', custom_trigger=json.dumps({'mode':'group','text':'reply'}), custom_steps=json.dumps([
+            {'t':'send','to':'source','text':'reply {trigger.sender}','reply':True}]))
+        self.b['client'].send_message.reset_mock()
+        self.b['client'].get_messages.side_effect = None
+        self.b['client'].get_messages.return_value = []
+        self.assertTrue(await self.b['run_custom'](self.row(source),
+                                                   {'chat_id':'-100123','message_id':77,'sender':'bob'}))
+        self.b['client'].send_message.assert_awaited_once_with('entity', 'reply bob', parse_mode=None, reply_to=77)
+
+    async def test_custom_click_and_captcha_steps_use_fresh_messages(self):
+        button = SimpleNamespace(text='Continue', click=AsyncMock())
+        menu = message(101, 'menu', buttons=[[button]])
+        aid = await self.create(type='custom', custom_steps=json.dumps([
+            {'t':'click','to':'target','text':'Continue','timeout_ms':1000}]))
+        self.b['client'].get_messages.side_effect = [[], [menu], [menu]]
+        self.assertTrue(await self.b['run_custom'](self.row(aid)))
+        button.click.assert_awaited_once()
+
+        picture = message(102, 'captcha', photo=object())
+        captcha = await self.create(type='custom', custom_steps=json.dumps([
+            {'t':'captcha','from':'target','length':4,'send_to':'target','template':'code={captcha}'}]))
+        self.b['client'].get_messages.side_effect = [[], [picture]]
+        self.b['recognize_image_text'] = AsyncMock(return_value='7391')
+        self.b['client'].send_message.reset_mock()
+        self.assertTrue(await self.b['run_custom'](self.row(captcha)))
+        self.b['client'].send_message.assert_awaited_once_with('entity', 'code=7391', parse_mode=None)
+
+    async def test_custom_click_uses_buttons_on_just_matched_reply(self):
+        button = SimpleNamespace(text='Continue', click=AsyncMock())
+        reply = message(101, 'choose now', buttons=[[button]])
+        aid = await self.create(type='custom', custom_steps=json.dumps([
+            {'t':'wait_reply','from':'target','success':'choose'},
+            {'t':'click','to':'target','text':'Continue','fresh':True}]))
+        self.b['client'].get_messages.side_effect = [[], [reply], [reply]]
+        self.assertTrue(await self.b['run_custom'](self.row(aid)))
+        button.click.assert_awaited_once()
+
+    async def test_custom_group_trigger_queues_button_and_start_context(self):
+        self.b['_running']['paused'] = False
+        self.b['conn'].execute("INSERT INTO watched_groups(chat_id,name) VALUES('-100123','fixture')")
+        aid = await self.create(type='custom', target='', custom_trigger=json.dumps({
+            'mode':'group','sender':'bot','logic':'all','text':'launch','button':'Register','cooldown':10}),
+            custom_steps=json.dumps([{'t':'wait','ms':0}]))
+        raw_button = SimpleNamespace(text='Register', url='https://t.me/example_bot?start=payload')
+        msg = message(55, 'LAUNCH now')
+        msg.reply_markup = SimpleNamespace(rows=[SimpleNamespace(buttons=[raw_button])])
+        event = SimpleNamespace(message=msg, raw_text=msg.raw_text, id=55, chat_id=-100123,
+                                is_group=True, out=False,
+                                sender=SimpleNamespace(bot=True, username='announce_bot'))
+        self.b['_queue_auto'] = Mock(return_value=True)
+        self.b['conn'].execute("UPDATE automations SET retry_count=5,next_run_at=999,last_status='failed' WHERE id=?",(aid,));self.b['conn'].commit()
+        await self.b['on_auto_event'](event)
+        await self.b['get_runtime']().custom_trigger_task
+        call = self.b['_queue_auto'].call_args
+        self.assertEqual(call.args[0], aid)
+        context = call.kwargs['trigger_context']
+        self.assertEqual((context['button_text'], context['button_url']), ('Register', raw_button.url))
+        self.assertEqual((context['bot'], context['payload']), ('example_bot', 'payload'))
+        self.assertEqual(context['sender'], 'announce_bot')
+        self.assertEqual((self.row(aid)['retry_count'],self.row(aid)['next_run_at'],self.row(aid)['last_status']),(0,0,''))
+
+    async def test_custom_trigger_worker_serializes_without_dropping_busy_events(self):
+        entered=asyncio.Event();release=asyncio.Event();seen=[]
+        async def handle(event):
+            seen.append(event)
+            if len(seen)==1:
+                entered.set();await release.wait()
+        self.b['_on_custom_group_event']=handle
+        first,second=object(),object();self.b['_queue_custom_trigger_event'](first);await entered.wait()
+        self.b['_queue_custom_trigger_event'](second);release.set()
+        await self.b['get_runtime']().custom_trigger_task
+        self.assertEqual(seen,[first,second])
+
+    async def test_custom_schedule_runs_once_and_disables(self):
+        self.b['tzinfo'] = lambda: timezone.utc
+        trigger = json.dumps({'mode':'schedule','at':'2026-10-30T09:00:01'})
+        aid = await self.create(type='custom', target='', custom_trigger=trigger,
+                                custom_steps=json.dumps([{'t':'wait','ms':0}]))
+        with self.assertRaises(HTTPException):
+            await self.b['run_auto_now'](aid)
+        self.advance(1)
+        self.b['_scheduled_register_tick']()
+        await self.b['_auto_runtime_state']().auto_queue_task
+        self.assertEqual((self.row(aid)['enabled'], self.row(aid)['last_status']), (0, 'success'))
+
+    async def test_custom_schedule_floodwait_stays_enabled_for_retry(self):
+        self.b['tzinfo'] = lambda: timezone.utc
+        trigger = json.dumps({'mode':'schedule','at':'2026-10-30T10:00:00'})
+        aid = await self.create(type='custom', target='', retries=1, custom_trigger=trigger,
+                                custom_steps=json.dumps([{'t':'wait','ms':0}]))
+        self.b['run_custom'] = AsyncMock(side_effect=self.b['_RetryLater'](60))
+        result = await self.b['_execute_auto'](aid, False)
+        self.assertTrue(result['retry'])
+        self.assertEqual((self.row(aid)['enabled'], self.row(aid)['last_status']), (1, 'failed'))
+        self.b['run_custom'] = AsyncMock(return_value=True);self.advance(61)
+        self.b['_scheduled_register_tick']();await self.b['_auto_runtime_state']().auto_queue_task
+        self.assertEqual((self.row(aid)['enabled'], self.row(aid)['last_status']), (0, 'success'))
+
+    async def test_custom_ordinary_failure_is_not_replayed_by_delayed_retry(self):
+        aid = await self.create(type='custom', retries=5,
+                                custom_steps=json.dumps([{'t':'wait','ms':0}]))
+        self.b['run_custom'] = AsyncMock(return_value=False)
+        result = await self.b['_execute_auto'](aid, False)
+        self.assertFalse(result['retry'])
+
+    async def test_custom_credentials_gate_run_toggle_list_duplicate_and_delete(self):
+        aid = await self.create(type='custom', enabled=0, custom_steps=json.dumps([
+            {'t':'send','to':'target','text':'{credential.user} {credential.secret}'}]))
+        with self.assertRaises(HTTPException):
+            await self.b['run_auto_now'](aid)
+        with self.assertRaises(HTTPException):
+            await self.b['toggle_auto'](aid)
+        await self.b['save_link_credential'](aid, {'user':'alice','secret':'PRIVATE'})
+        await self.b['toggle_auto'](aid)
+        self.assertTrue((await self.b['list_autos']())['autos'][0]['link_credential_set'])
+        copied = (await self.b['duplicate_auto'](aid))['id']
+        self.assertEqual(self.b['get_link_credential'](copied), {'u':'alice','s':'PRIVATE'})
+        await self.b['delete_auto'](aid)
+        self.assertEqual(self.b['get_link_credential'](aid), {})
+
+    async def test_custom_trigger_variables_require_group_mode(self):
+        for patch in ({'target':'source'}, {'target':'{trigger.unknown}'},
+                      {'custom_steps':json.dumps([{'t':'extract','from':'source','regex':'(.)','group':1,'save':'x'}])}):
+            with self.subTest(patch=patch), self.assertRaises(HTTPException):
+                await self.create(type='custom', **{'custom_steps':json.dumps([{'t':'wait','ms':0}]), **patch})
 
     async def test_poll_records_probe_min_id_ast(self):
         node = next(n for n in ast.parse(SOURCE.read_text()).body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'poll_loop')

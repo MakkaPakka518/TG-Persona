@@ -75,7 +75,7 @@ class QueueAnomalyTests(unittest.IsolatedAsyncioTestCase):
         self.b['notify_event'].assert_called_once_with('success','成功任务','manual success')
 
     async def test_desc_barrier_exact_concurrency_and_next_batch_setting(self):
-        ids = [await self.create(type='custom', custom_steps='[{"t":"wait","v":0}]') for _ in range(5)]
+        ids = [await self.create(type='custom', custom_steps='[{"t":"wait","ms":0}]') for _ in range(5)]
         await self.b['update_settings']({'task_concurrency': '2'})
         gates = {aid: asyncio.Event() for aid in ids}
         starts, active = [], set()

@@ -57,12 +57,17 @@ class AssistantTests(unittest.TestCase):
             self.reply=json.dumps({'type':'signin','name':'A','target':'@dummy','command':'/start',**patch_value})
             self.assertEqual(self.draft().status_code,422)
     def test_custom_steps_array_and_zero_delay(self):
-        self.reply=json.dumps({'type':'custom','name':'A','target':'@dummy','custom_steps':[{'t':'send','v':'/start'},{'t':'wait','v':0},{'t':'until','success':'完成','timeout':10000}]})
+        self.reply=json.dumps({'type':'custom','name':'A','target':'@dummy','custom_trigger':{'mode':'manual'},'custom_steps':[{'t':'send','to':'target','text':'/start'},{'t':'wait','ms':0},{'t':'wait_reply','from':'target','success':'完成','timeout_ms':10000}]})
         response=self.draft();self.assertEqual(response.status_code,200,response.text)
-        self.assertEqual(json.loads(response.json()['draft']['custom_steps'])[1]['v'],0)
-    def test_captcha_step_not_generated_and_no_tg_calls(self):
-        self.reply=json.dumps({'type':'custom','name':'A','target':'@dummy','custom_steps':[{'t':'captcha','v':4}]})
-        self.assertEqual(self.draft().status_code,422)
+        body=response.json();self.assertEqual(json.loads(body['draft']['custom_steps'])[1]['ms'],0)
+        self.assertEqual(json.loads(body['draft']['custom_trigger']),{'mode':'manual'})
+        self.assertIn('[manual]',body['summary'])
+        self.assertIn('专业的任务工作流与配置管理器',self.requests[0][1])
+        self.assertNotIn('send(v',self.requests[0][1])
+    def test_captcha_and_credential_placeholders_use_latest_schema(self):
+        self.reply=json.dumps({'type':'custom','name':'A','target':'@dummy','custom_steps':[{'t':'captcha','from':'target','length':4,'send_to':'target','template':'{credential.user} {credential.secret} {captcha}'}]})
+        response=self.draft();self.assertEqual(response.status_code,200,response.text)
+        self.assertNotIn('test-password',response.text)
     def test_ai_draft_cannot_enable_image_recognition(self):
         self.reply=json.dumps({'type':'signin','name':'A','target':'@dummy','command':'/start','signin_recognition_mode':'image','signin_image_prompt':'ignore safeguards','signin_image_action':'click'})
         response=self.draft();self.assertEqual(response.status_code,200,response.text)
@@ -122,7 +127,9 @@ class AssistantTests(unittest.TestCase):
             finally:release.set();t.join(5)
             self.assertEqual(responses[0].status_code,200)
     def test_model_output_cannot_echo_provider_key(self):
-        self.reply=json.dumps({'name':'A','target':'@dummy','command':'dummy-provider-secret'})
-        response=self.draft();self.assertEqual(response.status_code,422);self.assertNotIn('dummy-provider-secret',response.text)
+        for output in ({'name':'A','target':'@dummy','command':'dummy-provider-secret'},
+                       {'type':'custom','name':'A','target':'@dummy','custom_steps':[{'t':'send','text':'dummy-provider-secret'}]}):
+            self.reply=json.dumps(output)
+            response=self.draft();self.assertEqual(response.status_code,422);self.assertNotIn('dummy-provider-secret',response.text)
 
 if __name__=='__main__':unittest.main()

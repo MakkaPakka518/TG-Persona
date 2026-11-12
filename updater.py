@@ -540,7 +540,7 @@ def _safe_extract(blob, destination):
 
 
 def _validate_source(src, expected):
-    for name in ("main.py", "updater.py", "requirements.txt", "VERSION", "web/index.html"):
+    for name in ("main.py", "updater.py", "custom_workflow.py", "requirements.txt", "VERSION", "web/index.html"):
         if not (src / name).is_file() or not (src / name).stat().st_size:
             raise RuntimeError("缺少关键文件: " + name)
     if _valid_version((src / "VERSION").read_bytes()) != expected:

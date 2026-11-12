@@ -62,6 +62,10 @@ from pydantic import BaseModel, Field
 
 import updater
 import data_migration
+from custom_workflow import (canonical_steps, canonical_trigger, group_matches,
+                             parse_steps, parse_trigger, redact as redact_custom,
+                             render_template, search_pattern, uses_credentials,
+                             uses_default_target, uses_trigger_context, validate_template)
 from account_runtime import (AccountError, AccountRegistry, account_locked,
                              get_runtime, open_database, secure_files, use_runtime)
 
@@ -161,6 +165,7 @@ def db_init(database=None):
             cooldown INTEGER DEFAULT 30,        -- 同群同任务冷却(秒)
             poll_interval INTEGER DEFAULT 0,    -- grabcodes: 轮询探测开注间隔(秒,0=关闭仅监听)
             custom_steps TEXT DEFAULT '',       -- custom: 多步任务 JSON
+            custom_trigger TEXT DEFAULT '{"mode":"manual"}',
             chain_retry INTEGER DEFAULT 1,      -- custom: 任务链级重试
             fail_kw TEXT DEFAULT '',            -- signin: 失败关键词(回复含它判失败重试)
             is_chat INTEGER DEFAULT 0,          -- signin: 目标是群组而非机器人
@@ -181,6 +186,7 @@ def db_init(database=None):
         ("points_pat", "TEXT DEFAULT ''"),
         ("poll_interval", "INTEGER DEFAULT 0"),
         ("custom_steps", "TEXT DEFAULT ''"),
+        ("custom_trigger", "TEXT DEFAULT '{\"mode\":\"manual\"}'"),
         ("chain_retry", "INTEGER DEFAULT 1"),
         ("signin_captcha", "INTEGER DEFAULT 0"),
         ("btn_emoji", "TEXT DEFAULT ''"),
@@ -1481,6 +1487,53 @@ def _message_links(message):
     return links
 
 
+def _custom_start_link(url):
+    """Parse a generic Telegram bot start link without registration-specific rules."""
+    from urllib.parse import parse_qs, urlsplit
+    try:
+        value = str(url or "").strip()
+        parsed = urlsplit(value if "://" in value else "https://" + value)
+        if parsed.scheme == "tg" and parsed.netloc.lower() == "resolve":
+            query = parse_qs(parsed.query)
+            bot = (query.get("domain") or [""])[0]
+        elif parsed.scheme in ("http", "https") and parsed.netloc.lower() in ("t.me", "telegram.me", "www.t.me"):
+            parts = [part for part in parsed.path.split("/") if part]
+            if len(parts) != 1:
+                return None
+            bot, query = parts[0], parse_qs(parsed.query)
+        else:
+            return None
+        payload = (query.get("start") or query.get("startapp") or [""])[0]
+        if not re.fullmatch(r"[A-Za-z0-9_]{4,32}", bot or "") or not payload or len(payload) > 256:
+            return None
+        return {"bot": bot.lower(), "payload": payload}
+    except (TypeError, ValueError):
+        return None
+
+
+def _custom_event_buttons(message):
+    buttons = []
+    for row in (getattr(getattr(message, "reply_markup", None), "rows", None) or []):
+        for button in (getattr(row, "buttons", None) or []):
+            buttons.append({"text": str(getattr(button, "text", "") or ""),
+                            "url": str(getattr(button, "url", "") or getattr(getattr(button, "type", None), "url", "") or "")})
+    return buttons
+
+
+def _custom_event_start(message, buttons, matching=None):
+    urls = []
+    if matching and matching.get("url"):
+        urls.append(matching["url"])
+    urls.extend(button["url"] for button in buttons if button.get("url"))
+    urls.extend(re.findall(r"(?:https?://)?(?:t\.me|telegram\.me)/[^\s<>\"'）)]+|tg://resolve\?[^\s<>\"'）)]+",
+                           str(getattr(message, "raw_text", "") or ""), re.I))
+    for url in urls:
+        link = _custom_start_link(str(url).rstrip(".,;:!?。，；：！？"))
+        if link:
+            return link
+    return {"bot": "", "payload": ""}
+
+
 def _link_bot(target):
     return str(target or "").strip().lstrip("@").lower()
 
@@ -1571,6 +1624,7 @@ async def on_auto_event(event):
     """抢注 / 抢红包:监控群出现触发关键词时自动行动"""
     if get_runtime().running["paused"] or not event.is_group or event.out:
         return
+    _queue_custom_trigger_event(event)
     autos = get_account_db().execute(
         "SELECT * FROM automations WHERE enabled=1 AND type IN ('grabcodes','redpacket')"
     ).fetchall()
@@ -1657,6 +1711,95 @@ async def on_auto_event(event):
             log.warning("自动化操作失败(群=%s): %s", chat, e)
         except Exception:
             log.exception("自动化执行异常")
+
+
+async def _on_custom_group_event(event):
+    autos = get_account_db().execute(
+        "SELECT * FROM automations WHERE enabled=1 AND type='custom'").fetchall()
+    if not autos:
+        return
+    message = getattr(event, "message", event)
+    chat = str(event.chat_id)
+    text = str(getattr(event, "raw_text", "") or "")
+    buttons = _custom_event_buttons(message)
+    watched = {row["chat_id"] for row in get_account_db().execute("SELECT chat_id FROM watched_groups")}
+    sender = getattr(event, "sender", None)
+    if sender is None and hasattr(event, "get_sender"):
+        try:
+            sender = await event.get_sender()
+        except Exception:
+            sender = None
+    sender_kind = "bot" if getattr(sender, "bot", False) else "user"
+    sender_name = await sender_name_of(event)
+    if not sender_name and sender is not None:
+        sender_name = (str(getattr(sender, "username", "") or "") or
+                       str(getattr(sender, "first_name", "") or "") or
+                       str(getattr(sender, "id", "") or ""))
+    deadline = time.monotonic() + 0.35
+    for auto in autos:
+        if time.monotonic() > deadline:
+            log.warning("自定义任务触发匹配超过单条消息预算，剩余任务已跳过")
+            break
+        try:
+            trigger = parse_trigger(auto["custom_trigger"])
+        except ValueError:
+            continue
+        if trigger["mode"] != "group" or trigger["sender"] not in ("any", sender_kind):
+            continue
+        if trigger["groups"]:
+            in_scope = chat in trigger["groups"]
+            if not in_scope:
+                for group in trigger["groups"]:
+                    if group.startswith("@") and str(getattr(await resolve_entity(group), "id", "")) == chat:
+                        in_scope = True
+                        break
+            if not in_scope:
+                continue
+        elif chat not in watched:
+            continue
+        matched, button = group_matches(trigger, text, buttons)
+        if not matched:
+            continue
+        key = (chat, auto["id"])
+        now = time.monotonic()
+        if now - get_runtime().auto_last_ts.get(key, -1e9) < trigger["cooldown"]:
+            continue
+        link = _custom_event_start(message, buttons, button)
+        context = {"text": text, "chat_id": chat, "message_id": int(event.id),
+                   "sender": sender_name, "button_text": (button or {}).get("text", ""),
+                   "button_url": (button or {}).get("url", ""), **link}
+        if _queue_auto(auto["id"], trigger_context=context):
+            get_account_db().execute(
+                "UPDATE automations SET retry_count=0,retry_day='',next_run_at=0,last_status='' WHERE id=?",
+                (auto["id"],))
+            get_account_db().commit()
+            get_runtime().auto_last_ts[key] = now
+
+
+def _queue_custom_trigger_event(event):
+    runtime = get_runtime()
+    if not isinstance(getattr(runtime, "custom_trigger_pending", None), list):
+        runtime.custom_trigger_pending = []
+    if len(runtime.custom_trigger_pending) >= 32:
+        log.warning("自定义任务触发队列已满，忽略最新群消息")
+        return
+    runtime.custom_trigger_pending.append(event)
+    worker = getattr(runtime, "custom_trigger_task", None)
+    if worker is None or worker.done():
+        runtime.custom_trigger_task = runtime.spawn(_custom_trigger_worker())
+
+
+async def _custom_trigger_worker():
+    runtime = get_runtime()
+    try:
+        while runtime.custom_trigger_pending:
+            event = runtime.custom_trigger_pending.pop(0)
+            try:
+                await _on_custom_group_event(event)
+            except Exception:
+                log.exception("自定义任务触发匹配异常")
+    finally:
+        runtime.custom_trigger_task = None
 
 
 async def on_link_event(event):
@@ -2515,24 +2658,25 @@ async def run_button_register(a, bot, source_chat):
 
 
 
-async def _select_btn_ai(btns, hint):
+async def _select_btn_ai(btns, hint, credential=None):
     """AI 从按钮列表中选择应点击的按钮,返回按钮对象;AI 未开启或无配置返回 None"""
     if get_setting("ai_enabled", "0") != "1":
         return None
-    flat = [b.text for row in btns for b in row]
-    if not flat:
+    choices = [(button, redact_custom(button.text or "", credential)) for row in btns for button in row]
+    if not choices:
         return None
     try:
+        flat = [label for _, label in choices]
+        safe_hint = redact_custom(hint, credential)
         ans = await _call_ai_any(
-            f"以下是一个 Telegram 内联键盘的按钮: {flat}\n根据提示「{hint}」选择应点击的那个按钮,只输出按钮上的原文,不要任何解释",
+            f"以下是一个 Telegram 内联键盘的按钮: {flat}\n根据提示「{safe_hint}」选择应点击的那个按钮,只输出按钮上的原文,不要任何解释",
             max_tokens=30)
         ans = ans.strip().strip('"').strip("'")
-        for row in btns:
-            for b in row:
-                if (b.text or "").strip() == ans or ans in (b.text or ""):
-                    return b
+        for button, label in choices:
+            if label.strip() == ans or ans in label:
+                return button
     except Exception as e:
-        log.warning("AI 选按钮失败: %s", e)
+        log.warning("AI 选按钮失败: %s", redact_custom(e, credential))
     return None
 
 
@@ -2640,131 +2784,198 @@ async def _await_signin_captcha(ent, timeout=25, min_id=0, baseline=None):
     return message, image
 
 
-async def run_custom(a):
-    """自定义多步任务:send/wait/click/captcha/until,链级重试"""
-    target = str(a["target"] or "").strip()
+def _custom_context(trigger_context, credential):
+    trigger = {key: "" for key in ("text", "chat_id", "message_id", "sender", "button_text",
+                                           "button_url", "bot", "payload")}
+    trigger.update({key: value for key, value in (trigger_context or {}).items() if key in trigger})
+    return {"trigger": trigger,
+            "credential": ({"user": credential["u"], "secret": credential["s"]} if credential else {}),
+            "last": {}, "var": {}}
+
+
+def _custom_value(value, context):
+    rendered = render_template(render_placeholders(value), context)
+    if len(rendered) > 16384:
+        raise ValueError("模板渲染结果过长")
+    return rendered
+
+
+async def run_custom(a, trigger_context=None):
+    """Execute only the canonical custom workflow schema."""
     try:
-        steps = json.loads(a["custom_steps"] or "[]")
-    except Exception:
-        steps = []
-    if not target or not steps:
-        return _task_failure(a, "自定义任务缺少目标或步骤")
-    ent = await resolve_entity(target)
-    if ent is None:
-        return _task_failure(a, "自定义任务目标解析失败")
-    # 无初始 send 的链也必须从启动时的水位开始,不能用历史成功/键盘/图片。
-    recent = await get_runtime().client.get_messages(ent, limit=1)
-    min_id = max((m.id for m in recent), default=0)
+        steps = parse_steps(a["custom_steps"])
+    except ValueError as error:
+        return _task_failure(a, str(error))
+    credential = get_link_credential(a["id"])
+    target_template = str(a["target"] or "")
+    needs_credential = uses_credentials(steps) or any(
+        token in target_template for token in ("{credential.user}", "{credential.secret}"))
+    if needs_credential and not credential:
+        return _task_failure(a, "任务引用了凭据变量，但未保存用户名和安全码")
     chain = max(1, min(int(a["chain_retry"] or 1), 5))
     final_desc, final_ok = "", False
-    for attempt in range(chain):
-        log_desc = []
-        baseline = None  # only a current click action can authorize edit replies
-        ok = True
+
+    for _attempt in range(chain):
+        context = _custom_context(trigger_context, credential)
+        watermarks, baselines, entities, reply_messages = {}, {}, {}, {}
+        last_destination = ""
+        log_desc, ok = [], True
+
+        async def destination(raw):
+            rendered = _custom_value(raw, context).strip()
+            if rendered == "target":
+                rendered = _custom_value(str(a["target"] or ""), context).strip()
+            is_source = rendered == "source"
+            if is_source:
+                rendered = str(context["trigger"].get("chat_id") or "").strip()
+            if not rendered:
+                raise ValueError("目标变量为空")
+            if rendered not in entities:
+                entity = await resolve_entity(rendered)
+                if entity is None:
+                    raise ValueError("目标解析失败")
+                entities[rendered] = entity
+                recent = await get_runtime().client.get_messages(entity, limit=1)
+                watermarks[rendered] = max((m.id for m in recent), default=0)
+                baselines[rendered] = None
+            return rendered, entities[rendered], is_source
+
         try:
-            for s in steps:
-                t = s.get("t")
-                if t == "send":
-                    text = render_placeholders(str(s.get("v") or ""))
-                    sent_msg = await get_runtime().client.send_message(ent, text)
-                    min_id = sent_msg.id
-                    baseline = None
-                    log_desc.append(f"发送「{text}」")
-                elif t == "wait":
-                    ms = max(0, int(1000 if s.get("v") is None else s["v"]))
-                    await asyncio.sleep(ms / 1000)
-                    log_desc.append(f"等待{ms}ms")
-                elif t == "click":
-                    m, btns = await _find_latest_buttons(ent, min_id=min_id)
-                    if not btns:
-                        raise Exception("未找到带按钮的消息")
-                    b = None
-                    if s.get("ai"):
-                        b = await _select_btn_ai(btns, str(s.get("v") or "下一步"))
-                    if not b and s.get("any") and btns and btns[0]:
-                        b = btns[0][0]
-                    if not b:
-                        b = _find_btn(btns, str(s.get("v") or ""))
-                    if not b:
-                        raise Exception("未找到匹配按钮")
-                    baseline = await _message_snapshot(ent)
-                    min_id = max([min_id, m.id] + list(baseline))
-                    await b.click()
-                    log_desc.append(f"点击按钮「{b.text}」")
-                elif t == "captcha":
-                    length = max(1, min(int(s.get("v") or 4), 16))
-                    img = None
-                    try:
-                        msgs = await get_runtime().client.get_messages(ent, limit=5)
-                        for m in msgs:
-                            if m.out or m.id <= min_id:
-                                continue
-                            if getattr(m, "photo", None) or getattr(m, "media", None):
-                                img = await get_runtime().client.download_media(m, file=bytes)
-                                if img:
-                                    break
-                    except Exception:
-                        pass
-                    if not img:
-                        raise Exception("未找到验证码图片")
-                    ans = await recognize_image_text(img, length)
-                    if not ans:
-                        raise Exception("验证码识别失败(未配置 AI 或本地 OCR 不可用)")
-                    log_desc.append(f"识别验证码「{ans}」")
-                    send_txt = str(s.get("send") or "")
-                    if send_txt:
-                        sent_msg = await get_runtime().client.send_message(ent, render_placeholders(send_txt).replace("{code}", ans))
-                        log_desc.append(f"发送「{send_txt}」")
-                    else:
-                        sent_msg = await get_runtime().client.send_message(ent, ans)
-                    min_id = sent_msg.id
-                    baseline = None
-                elif t == "until":
-                    timeout = max(1, int(s.get("timeout") or 30000))
-                    succ = str(s.get("success") or "")
-                    fail = str(s.get("fail") or "")
-                    deadline = time.monotonic() + timeout / 1000
-                    matched, failed = False, False
+            for step in steps:
+                kind = step["t"]
+                if kind == "send":
+                    dest, entity, is_source = await destination(step["to"])
+                    text = _custom_value(step["text"], context)
+                    kwargs = {}
+                    if is_source and step["reply"] and context["trigger"].get("message_id"):
+                        kwargs["reply_to"] = int(context["trigger"]["message_id"])
+                    sent = await get_runtime().client.send_message(entity, text, parse_mode=None, **kwargs)
+                    watermarks[dest], baselines[dest] = sent.id, None
+                    reply_messages.pop(dest, None)
+                    log_desc.append("send: ok")
+                elif kind == "wait":
+                    await asyncio.sleep(step["ms"] / 1000)
+                    log_desc.append("wait: ok")
+                elif kind == "click":
+                    dest, entity, _ = await destination(step["to"])
+                    deadline = time.monotonic() + step["timeout_ms"] / 1000
+                    selected = message = None
+                    exact_reply = reply_messages.pop(dest, None) if step["fresh"] else None
                     while time.monotonic() < deadline:
-                        rt, reply = await _fetch_reply(ent, min_id=min_id, baseline=baseline)
-                        rl = rt.lower()
-                        if fail and any(k.strip().lower() in rl for k in re.split(r"[,，]", fail) if k.strip()):
-                            failed = True
+                        if exact_reply is not None:
+                            message, exact_reply = exact_reply, None
+                            try:
+                                buttons = await message.get_buttons()
+                            except Exception:
+                                buttons = []
+                        else:
+                            message, buttons = await _find_latest_buttons(
+                                entity, min_id=watermarks[dest] if step["fresh"] else 0)
+                        flat = [button for row in buttons for button in row]
+                        if buttons and step["ai"]:
+                            selected = await _select_btn_ai(buttons, _custom_value(step["text"] or "下一步", context), credential)
+                        if not selected and buttons and (step["text"] or step["emoji"]):
+                            selected = _find_btn(buttons, _custom_value(step["text"], context),
+                                                 _custom_value(step["emoji"], context))
+                        if not selected and flat and step["any"]:
+                            selected = flat[0]
+                        if (not selected and not (step["text"] or step["emoji"] or step["any"] or step["ai"])
+                                and len(flat) > step["index"]):
+                            selected = flat[step["index"]]
+                        if selected:
                             break
-                        if succ and any(k.strip().lower() in rl for k in re.split(r"[,，]", succ) if k.strip()):
-                            matched = True
-                        elif not succ and not fail and reply is not None:
-                            matched = True
-                        if matched:
-                            # Consume this reply so a consecutive until does not
-                            # immediately reuse it (later same-message edits count).
-                            min_id = max(min_id, reply.id)
-                            baseline = dict(baseline or {})
-                            baseline[reply.id] = _message_signature(reply)
-                            break
-                        await asyncio.sleep(2)
-                    if failed:
-                        raise Exception(f"回复含失败词「{fail}」")
-                    if not matched:
-                        raise Exception(f"等待回复超时({timeout}ms)")
-                    log_desc.append(f"收到期望回复({succ or fail or '任意'})")
-        except Exception as e:
+                        await asyncio.sleep(min(1, max(0, deadline - time.monotonic())))
+                    if not selected:
+                        raise ValueError("等待匹配按钮超时")
+                    baselines[dest] = await _message_snapshot(entity)
+                    watermarks[dest] = max([watermarks[dest], message.id] + list(baselines[dest]))
+                    await selected.click()
+                    log_desc.append("click: ok")
+                elif kind == "wait_reply":
+                    dest, entity, _ = await destination(step["from"])
+                    deadline = time.monotonic() + step["timeout_ms"] / 1000
+                    reply = None
+                    while time.monotonic() < deadline:
+                        text, candidate = await _fetch_reply(entity, watermarks[dest], baselines[dest])
+                        if candidate is not None:
+                            failed = (bool(search_pattern(step["fail"], text)) if step["regex"] else step["fail"].lower() in text.lower()) if step["fail"] else False
+                            matched = (bool(search_pattern(step["success"], text)) if step["regex"] else step["success"].lower() in text.lower()) if step["success"] else not step["fail"]
+                            if failed:
+                                raise ValueError("回复命中失败条件")
+                            if matched:
+                                reply = candidate
+                                context["last"]["text"] = text
+                                reply_messages[dest] = candidate
+                                if step["save"]:
+                                    context["var"][step["save"]] = text
+                                last_destination = dest
+                                watermarks[dest] = max(watermarks[dest], candidate.id)
+                                baselines[dest] = dict(baselines[dest] or {})
+                                baselines[dest][candidate.id] = _message_signature(candidate)
+                                break
+                        await asyncio.sleep(min(1, max(0, deadline - time.monotonic())))
+                    if reply is None:
+                        raise ValueError("等待回复超时")
+                    log_desc.append("wait_reply: ok")
+                elif kind == "extract":
+                    source = step["from"]
+                    if source == "last.text":
+                        text = str(context["last"].get("text") or "")
+                    elif source.startswith(("trigger.", "var.")) or source in ("captcha", "code"):
+                        text = render_template("{" + source + "}", context)
+                    elif "{" in source:
+                        text = _custom_value(source, context)
+                    else:
+                        dest, entity, _ = await destination(source)
+                        text = context["last"]["text"] if last_destination == dest else ""
+                        if not text:
+                            text, reply = await _fetch_reply(entity, watermarks[dest], baselines[dest])
+                            if reply is not None:
+                                watermarks[dest] = max(watermarks[dest], reply.id)
+                    match = search_pattern(step["regex"], text)
+                    if not match or step["group"] > (match.re.groups or 0):
+                        raise ValueError("提取正则未匹配指定分组")
+                    context["var"][step["save"]] = match.group(step["group"])
+                    context["last"]["text"] = text
+                    log_desc.append("extract: ok")
+                elif kind == "captcha":
+                    dest, entity, _ = await destination(step["from"])
+                    captcha_message, image, _ = await _await_signin_image(
+                        entity, timeout=25, min_id=watermarks[dest], baseline=baselines[dest])
+                    if not image:
+                        raise ValueError("未找到本轮验证码图片")
+                    answer = await recognize_image_text(image, step["length"])
+                    if not answer:
+                        raise ValueError("验证码识别失败")
+                    context["captcha"] = answer
+                    context["code"] = answer
+                    watermarks[dest] = max(watermarks[dest], captcha_message.id)
+                    if step["template"]:
+                        send_dest, send_entity, _ = await destination(step["send_to"])
+                        sent = await get_runtime().client.send_message(
+                            send_entity, _custom_value(step["template"], context), parse_mode=None)
+                        watermarks[send_dest], baselines[send_dest] = sent.id, None
+                    log_desc.append("captcha: ok")
+        except errors.FloodWaitError as error:
+            raise _RetryLater(error.seconds) from error
+        except Exception as error:
             ok = False
-            log_desc.append(f"失败: {e}")
-        final_desc = " → ".join(log_desc)
+            log_desc.append("failed: " + redact_custom(error, credential)[:160])
+        final_desc = " -> ".join(log_desc)
         if ok:
             final_ok = True
             break
-    hits_desc = final_desc[:200] or "执行完成"
+
+    target = str(a["target"] or context["trigger"].get("chat_id") or "")
+    summary = final_desc[:200] or "执行完成"
     add_hit("custom", final_ok, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
-            content=f"自定义任务: {a['name']}", reply=final_desc,
-            detail={"kind": "custom", "task": a["name"], "bot": target, "steps": final_desc,
-                    "ok": final_ok})
+            content=f"自定义任务: {a['name']}", reply=summary,
+            detail={"kind": "custom", "task": a["name"], "steps": summary, "ok": final_ok})
     if final_ok:
-        notify_event("success", a["name"], hits_desc)
+        notify_event("success", a["name"], summary)
     else:
-        _notify_task_failure(a, hits_desc)
-    log.info("自定义任务%s 任务=%s 目标=%s", "成功" if final_ok else "失败", a["name"], target)
+        _notify_task_failure(a, summary)
+    log.info("自定义任务%s 任务=%s", "成功" if final_ok else "失败", a["name"])
     return final_ok
 
 
@@ -2976,14 +3187,23 @@ def _finish_auto_reservation(aid):
     runtime.auto_stop_requested.discard(aid)
 
 
-def _queue_auto(aid, manual=False):
+def _queue_auto(aid, manual=False, trigger_context=None):
     """Reserve one task synchronously and let the account dispatcher batch it."""
     runtime = _auto_runtime_state()
     if aid in runtime.auto_tasks or aid in runtime.auto_queued or aid in runtime.auto_workers:
         return False
+    context = None
+    if trigger_context is not None:
+        allowed = {"text", "chat_id", "message_id", "sender", "button_text", "button_url", "bot", "payload"}
+        if not isinstance(trigger_context, dict) or set(trigger_context) - allowed:
+            raise ValueError("invalid trigger context")
+        context = {key: value for key, value in trigger_context.items()
+                   if isinstance(value, (str, int)) and not isinstance(value, bool)}
+        if len(context) != len(trigger_context) or any(len(str(value)) > 4096 for value in context.values()):
+            raise ValueError("invalid trigger context")
     completion = asyncio.get_running_loop().create_future()
     runtime.auto_tasks[aid] = completion
-    runtime.auto_pending.append({"id": aid, "manual": bool(manual)})
+    runtime.auto_pending.append({"id": aid, "manual": bool(manual), "trigger": context})
     runtime.auto_queued.add(aid)
     runtime.auto_stop_requested.discard(aid)
     runtime.auto_queue_wakeup.set()
@@ -3043,7 +3263,7 @@ async def _auto_dispatcher():
                             _finish_auto_reservation(aid)
                             continue
                         runtime.auto_queued.discard(aid)
-                        worker = runtime.spawn(_execute_auto(aid, item["manual"]))
+                        worker = runtime.spawn(_execute_auto(aid, item["manual"], item["trigger"])) if item.get("trigger") is not None else runtime.spawn(_execute_auto(aid, item["manual"]))
                         runtime.auto_workers[aid] = worker
                         workers.append((item, worker))
                     if not workers:
@@ -3053,7 +3273,7 @@ async def _auto_dispatcher():
                         aid = item["id"]
                         runtime.auto_workers.pop(aid, None)
                         if isinstance(result, dict) and result.get("retry") and aid not in runtime.auto_stop_requested:
-                            retries.append({"id": aid, "manual": False,
+                            retries.append({"id": aid, "manual": False, "trigger": item.get("trigger"),
                                             "next_at": int(result.get("next_at") or time.time())})
                             runtime.auto_queued.add(aid)
                         else:
@@ -3078,12 +3298,13 @@ async def _auto_dispatcher():
             runtime.auto_queue_task = runtime.spawn(_auto_dispatcher())
 
 
-async def _execute_auto(aid, manual=False):
+async def _execute_auto(aid, manual=False, trigger_context=None):
     """Execute one attempt; the dispatcher alone decides coordinated retries."""
     a = None
     result = {"retry": False, "next_at": 0}
     notice = {"id": aid, "message": "", "unconfirmed": False, "aggregate": False}
     notice_token = _failure_context.set(notice)
+    retry_later = False
     try:
         a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
         if a is None or (not manual and not a["enabled"]):
@@ -3129,8 +3350,9 @@ async def _execute_auto(aid, manual=False):
             elif a["type"] == "link_register":
                 return result  # only triggered by on_link_event
             else:
-                ok = bool(await run_custom(a))
+                ok = bool(await run_custom(a, trigger_context))
         except _RetryLater as e:
+            retry_later = True
             backoff = max(backoff, e.seconds)
             _task_failure(a, "Telegram 限流,至少 %s 秒后重试" % backoff)
         except asyncio.CancelledError:
@@ -3170,7 +3392,16 @@ async def _execute_auto(aid, manual=False):
                     next_at = finished + max(backoff, max(60, int(a["poll_interval"] or 60)))
                 get_account_db().execute("UPDATE automations SET next_run_at=?,last_status=? WHERE id=?",
                              (next_at, status, aid))
-            if a["type"] == "scheduled_register":
+            custom_schedule = False
+            if a["type"] == "custom":
+                try:
+                    custom_schedule = parse_trigger(a["custom_trigger"])["mode"] == "schedule"
+                except ValueError:
+                    pass
+            retry = (not manual and not ok and status == "failed" and not exhausted and
+                     (a["type"] in ("signin", "keepalive") or (a["type"] == "custom" and retry_later))
+                     and aid not in _auto_runtime_state().auto_stop_requested)
+            if a["type"] == "scheduled_register" or (custom_schedule and not retry):
                 get_account_db().execute("UPDATE automations SET enabled=0,next_run_at=0 WHERE id=?", (aid,))
             get_account_db().commit()
             if not ok and status not in ("interrupted", "stopped") and (exhausted or status == "unconfirmed" or manual):
@@ -3179,8 +3410,6 @@ async def _execute_auto(aid, manual=False):
                 if changed.rowcount and not notice["aggregate"]:
                     suffix = "本日停止自动重发，请人工确认" if status == "unconfirmed" else "本轮重试已结束" if exhausted else "手动执行失败"
                     notify_event("fail", a["name"], (notice["message"] or "任务未成功") + "；" + suffix)
-            retry = (not manual and not ok and status == "failed" and not exhausted and
-                     a["type"] in ("signin", "keepalive") and aid not in _auto_runtime_state().auto_stop_requested)
             result = {"retry": retry, "next_at": next_at}
         return result
     finally:
@@ -3236,9 +3465,24 @@ def _scheduled_register_tick():
     if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         return
     due = now_local().strftime("%Y-%m-%dT%H:%M:%S")
-    rows = get_account_db().execute(
+    rows = list(get_account_db().execute(
         "SELECT id FROM automations WHERE enabled=1 AND type='scheduled_register' "
-        "AND scheduled_at!='' AND scheduled_at<=? AND last_attempt=0 ORDER BY id DESC", (due,)).fetchall()
+        "AND scheduled_at!='' AND scheduled_at<=? AND last_attempt=0 ORDER BY id DESC", (due,)).fetchall())
+    now = int(time.time())
+    for custom in get_account_db().execute(
+            "SELECT id,custom_trigger,last_attempt,last_status,next_run_at,retry_count,retries "
+            "FROM automations WHERE enabled=1 AND type='custom' ORDER BY id DESC"):
+        try:
+            trigger = parse_trigger(custom["custom_trigger"])
+        except ValueError:
+            continue
+        if trigger["mode"] != "schedule":
+            continue
+        first_attempt = custom["last_attempt"] == 0 and trigger["at"] <= due
+        pending_retry = (custom["last_status"] == "failed" and custom["next_run_at"] <= now
+                         and custom["retry_count"] < 1 + max(0, min(int(custom["retries"] or 0), 5)))
+        if first_attempt or pending_retry:
+            _queue_auto(custom["id"])
     runtime = _auto_runtime_state()
     for row in rows:
         aid = row["id"]
@@ -3920,6 +4164,7 @@ class AutoIn(BaseModel):
     reply_text: str = ""          # 回复/命令文本,{code} 提取邀请码
     poll_interval: int = 0        # grabcodes: 轮询间隔(秒,0=关闭)
     custom_steps: str = ""        # custom: 步骤 JSON
+    custom_trigger: str = '{"mode":"manual"}'
     chain_retry: int = 1          # custom: 链级重试
     cooldown: int = 30
     enabled: int = 1
@@ -4051,21 +4296,31 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "轮询间隔需在 10-86400 秒之间")
     if body.type == "custom":
         try:
-            steps = json.loads(body.custom_steps or "[]")
-            if not isinstance(steps, list) or not steps:
-                raise ValueError
-            for s in steps:
-                if not isinstance(s, dict) or s.get("t") not in ("send", "wait", "click", "captcha", "until"):
-                    raise ValueError
-        except Exception:
-            raise HTTPException(400, "步骤配置无效(格式: [{\"t\":\"send\",\"v\":\"/start\"},...])")
+            steps = parse_steps(body.custom_steps)
+            trigger = parse_trigger(body.custom_trigger)
+            validate_template(body.target)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+        if not 1 <= body.chain_retry <= 5:
+            raise HTTPException(400, "任务链重试次数需为 1-5")
+        if uses_default_target(steps) and not body.target.strip():
+            raise HTTPException(400, "步骤使用了 target，请填写默认目标")
+        if any(token in body.target for token in ("{var.", "{last.text}", "{captcha}", "{code}")):
+            raise HTTPException(400, "默认目标不能引用运行中才产生的变量，请在对应步骤中填写动态目标")
+        if trigger["mode"] != "group" and (uses_trigger_context(steps)
+                or "{trigger." in body.target or body.target == "source"):
+            raise HTTPException(400, "只有监听群触发可使用 trigger 变量或 source 目标")
+        if body.enabled and trigger["mode"] == "schedule":
+            scheduled = datetime.strptime(trigger["at"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=tzinfo())
+            if scheduled <= now_local():
+                raise HTTPException(400, "自定义任务执行时间必须晚于当前面板时间")
     if body.cooldown < 0 or body.cooldown > 86400:
         raise HTTPException(400, "冷却秒数无效")
 
 
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
-              "groups,keywords,action,reply_text,poll_interval,custom_steps,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
+              "groups,keywords,action,reply_text,poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
               "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt")
 
 
@@ -4078,7 +4333,8 @@ def _auto_vals(body: AutoIn, extra=None):
         body.success_kw.strip(), body.fail_kw.strip(),
         body.points_pat.strip(), body.is_chat, body.retries, body.signin_captcha,
         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
-        body.poll_interval, body.custom_steps.strip(), body.chain_retry,
+        body.poll_interval, canonical_steps(body.custom_steps) if body.type == "custom" else body.custom_steps.strip(),
+        canonical_trigger(body.custom_trigger) if body.type == "custom" else body.custom_trigger.strip(), body.chain_retry,
         body.cooldown, body.enabled, body.command_delay, body.button_delay, body.refresh_buttons, body.icon_url.strip(),
         body.result_delay, body.result_timeout, body.scheduled_at.strip(), body.history_first,
         body.link_mode, body.link_limit, body.link_wait, body.existing_kw.strip(),
@@ -4122,6 +4378,9 @@ async def list_autos():
 @app.post("/api/autos")
 async def create_auto(body: AutoIn):
     _valid_auto(body)
+    if (body.type == "custom" and body.enabled and
+            (uses_credentials(body.custom_steps) or "{credential." in body.target)):
+        raise HTTPException(400, "引用账号凭据的自定义任务请先停用保存，再填写用户名和安全码")
     cur = get_account_db().execute(
         f"INSERT INTO automations({_AUTO_COLS},created_at) VALUES({','.join('?' * (len(_AUTO_COLS.split(',')) + 1))})",
         _auto_vals(body, [int(time.time())]),
@@ -4139,6 +4398,10 @@ async def update_auto(aid: int, body: AutoIn):
     previous = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
     if previous is None:
         raise HTTPException(404, "任务不存在")
+    if (body.type == "custom" and body.enabled and
+            (uses_credentials(body.custom_steps) or "{credential." in body.target)
+            and not get_link_credential(aid)):
+        raise HTTPException(400, "任务引用了凭据变量，请先保存用户名和安全码")
     cols = _AUTO_COLS.split(",")
     get_account_db().execute(
         f"UPDATE automations SET {','.join(c + '=?' for c in cols)} WHERE id=?",
@@ -4147,7 +4410,9 @@ async def update_auto(aid: int, body: AutoIn):
     get_account_db().commit()
     changed = any(previous[key] != value for key, value in (
         ("type", body.type), ("target", body.target.strip()), ("command", body.command.strip()),
-        ("reply_text", body.reply_text.strip()), ("custom_steps", body.custom_steps.strip()),
+        ("reply_text", body.reply_text.strip()),
+        ("custom_steps", canonical_steps(body.custom_steps) if body.type == "custom" else body.custom_steps.strip()),
+        ("custom_trigger", canonical_trigger(body.custom_trigger) if body.type == "custom" else body.custom_trigger.strip()),
         ("scheduled_at", body.scheduled_at.strip()), ("btn_text", body.btn_text.strip()),
         ("keywords", body.keywords.strip()), ("success_kw", body.success_kw.strip()),
         ("history_first", body.history_first)))
@@ -4163,6 +4428,18 @@ async def toggle_auto(aid: int):
     if not r:
         raise HTTPException(404, "任务不存在")
     v = 0 if r["enabled"] else 1
+    if v and r["type"] == "custom":
+        try:
+            trigger, steps = parse_trigger(r["custom_trigger"]), parse_steps(r["custom_steps"])
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+        if trigger["mode"] == "schedule":
+            scheduled = datetime.strptime(trigger["at"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=tzinfo())
+            if scheduled <= now_local():
+                raise HTTPException(400, "执行时间已过，请编辑任务后再启用")
+        if (uses_credentials(steps) or any(token in str(r["target"] or "")
+                for token in ("{credential.user}", "{credential.secret}"))) and not get_link_credential(aid):
+            raise HTTPException(400, "任务引用了凭据变量，请先保存用户名和安全码")
     if v and r["type"] == "scheduled_register":
         try:
             scheduled = datetime.strptime(r["scheduled_at"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=tzinfo())
@@ -4201,6 +4478,7 @@ async def delete_auto(aid: int):
         raise HTTPException(409, "任务正在执行,请完成后再删除")
     _forget_auto_schedule(aid)
     get_account_db().execute("DELETE FROM automations WHERE id=?", (aid,))
+    get_account_db().execute("DELETE FROM registration_events WHERE task_id=?", (aid,))
     get_account_db().commit()
     _delete_link_credential(aid)
     return {"ok": True}
@@ -4208,9 +4486,9 @@ async def delete_auto(aid: int):
 
 @app.post("/api/autos/{aid}/link-credential")
 async def save_link_credential(aid: int, body: dict):
-    row = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('link_register','button_register','code_register')", (aid,)).fetchone()
+    row = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('link_register','button_register','code_register','custom')", (aid,)).fetchone()
     if row is None:
-        raise HTTPException(404, "群链接抢注任务不存在")
+        raise HTTPException(404, "需要凭据的任务不存在")
     user = str((body or {}).get("user") or "")
     secret = str((body or {}).get("secret") or "")
     if len(user) > 256 or len(secret) > 256:
@@ -4230,6 +4508,16 @@ async def run_auto_now(aid: int):
         raise HTTPException(404, "该类型任务不可手动执行或不存在")
     if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         raise HTTPException(409, "TG 尚未登录")
+    if a["type"] == "custom":
+        try:
+            trigger, steps = parse_trigger(a["custom_trigger"]), parse_steps(a["custom_steps"])
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from None
+        if trigger["mode"] != "manual":
+            raise HTTPException(400, "只有手动触发的自定义任务可立即运行")
+        if (uses_credentials(steps) or any(token in str(a["target"] or "")
+                for token in ("{credential.user}", "{credential.secret}"))) and not get_link_credential(aid):
+            raise HTTPException(400, "任务引用了凭据变量，请先保存用户名和安全码")
     if not _queue_auto(aid, manual=True):
         raise HTTPException(409, "任务正在执行,请勿重复提交")
     return {"ok": True, "running": False, "queued": True}

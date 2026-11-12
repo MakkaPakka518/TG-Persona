@@ -24,7 +24,7 @@ DEFAULT = {
 
 def archive(files=None, specials=()):
     files = files if files is not None else {
-        "root/main.py": b"x = 2\n", "root/updater.py": b"x = 2\n",
+        "root/main.py": b"x = 2\n", "root/updater.py": b"x = 2\n", "root/custom_workflow.py": b"x = 2\n",
         "root/requirements.txt": b"example>=1\n", "root/VERSION": b"1.1.0\n",
         "root/web/index.html": b"new panel",
         "root/new.txt": b"introduced", "root/newdir/child": b"introduced",

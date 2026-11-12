@@ -89,6 +89,8 @@ class AccountRuntime:
     last_hit_ts: dict = field(default_factory=dict)
     flock_buf: dict = field(default_factory=dict)
     ai_flock_busy: bool = False
+    custom_trigger_pending: list = field(default_factory=list)
+    custom_trigger_task: object = None
     ai_flock_busy_groups: set = field(default_factory=set)
     ai_flock_last: dict = field(default_factory=dict)
     ai_flock_blocked: dict = field(default_factory=dict)
@@ -269,6 +271,8 @@ class AccountRuntime:
             self.ai_flock_busy_groups.clear()
             self.ai_flock_last.clear()
             self.ai_flock_blocked.clear()
+            self.custom_trigger_pending.clear()
+            self.custom_trigger_task = None
             self.session_alerted = False
             if secure_storage and not self.storage_error:
                 secure_directory(self.directory)

@@ -676,38 +676,62 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   const ex=s=>vm.runInContext(s,app),copy=x=>JSON.parse(JSON.stringify(x));
   ex(js.replace(/\nbootstrap\(\);\s*$/,''));
   const realApi=app.api, realLogLoader=app.loadLogs;
-  const mockConfig=(name='纯配置')=>({format:'tg-persona-config',schema_version:1,account:{id:'default',label:'默认'},automations:[{type:'custom',name,target:'@dummy',custom_steps:'[{"t":"send","v":"/start"}]',enabled:1}],rules:[],watched_groups:[]});
+  const mockConfig=(name='纯配置')=>({format:'tg-persona-config',schema_version:1,account:{id:'default',label:'默认'},automations:[{type:'custom',name,target:'@dummy',custom_trigger:'{"mode":"manual"}',custom_steps:'[{"t":"send","to":"target","text":"/start","reply":false}]',enabled:1}],rules:[],watched_groups:[]});
   function useConfig(data=mockConfig()){q('#configFile').files=[{name:'backup.json',type:'application/json',size:1024}];ex('readConfigFile()');readers.at(-1).complete(JSON.stringify(data))}
   function resetBatch(kind='window'){ex('batchBusy=false;selectedAutoIds=new Set([1,2]);invalidateBatchPreview()');q('#batchKind').value=kind;q('#batchStart').value='08:00';q('#batchEnd').value='12:00';q('#batchEvery').value='1';q('#batchUnit').value='60'}
-  await test('完整脚本可离线初始化，JSON高级折叠且没有新增验证码入口',async()=>{
-    assert(html.includes('<details id="stepAdvanced"'));assert(!html.includes("fillStep('captcha')"));
-    assert(html.includes('人工验证等待'));assert(html.includes('最多 50 步'));
+  await test('自定义表单只提供最新六类步骤、严格JSON和移动触控约束',async()=>{
+    const form=html.slice(html.indexOf('id="af-custom"'),html.indexOf('id="af-keepalive"'));
+    for(const type of ['send','wait','click','wait_reply','extract','captcha'])assert(form.includes("fillStep('"+type+"')"));
+    for(const legacy of ["fillStep('until')","fillStep('manual')",'旧版配置无损保留'])assert(!form.includes(legacy));
+    assert(form.includes('custom_trigger')===false);assert(form.includes('严格格式原始 JSON'));assert(html.includes('viewport-fit=cover'));assert(html.includes('#af-custom input:not([type=checkbox])'));
   });
-  await test('旧步骤所有未知字段、captcha及字符串数值无损往返',async()=>{
-    const old=[{t:'send',v:'/start',extra:{nested:[0,false]}},{t:'wait',v:'0000',legacy:1},{t:'click',v:'',any:true,ai:'legacy-value',extra:'x'},{t:'captcha',v:'4',send:'',other:{x:7}},{t:'until',success:'成功',fail:'失败',timeout:'0',legacy:false},{t:'future',payload:[1,2]},null];
-    app.fixture=old;ex('setVisualSteps(JSON.stringify(fixture));syncStepJSON()');assert.deepStrictEqual(JSON.parse(q('#cSteps').value),old);
-    const titles=q('#stepCards').children.map(c=>c.children[0].textContent);assert(titles.includes('4. 旧版验证步骤（保留）'));
-    ex("fillStep('captcha')");assert.deepStrictEqual(JSON.parse(q('#cSteps').value),old);
+  await test('手动、秒级定时和监听群触发完整往返',async()=>{
+    ex("setCustomTrigger('{\"mode\":\"manual\"}')");assert.deepStrictEqual(copy(ex('buildCustomTrigger()')),{mode:'manual'});
+    const schedule={mode:'schedule',at:'2026-12-03T09:08:07'};app.fixture=schedule;ex('setCustomTrigger(JSON.stringify(fixture))');assert.strictEqual(q('#cTriggerDate').value,'2026-12-03');assert.strictEqual(q('#cTriggerTime').value,'09:08');assert.strictEqual(q('#cTriggerSecond').value,'07');assert.deepStrictEqual(copy(ex('buildCustomTrigger()')),schedule);
+    const group={mode:'group',groups:['-1001','-1002'],sender:'bot',logic:'all',text:'开放.*注册',text_regex:true,button:'立即注册',button_regex:false,cooldown:45};app.fixture=group;ex('setCustomTrigger(JSON.stringify(fixture))');assert.deepStrictEqual(copy(ex('[...autoGroupSel.custom]')),group.groups);assert.deepStrictEqual(copy(ex('buildCustomTrigger()')),group);
+    assert(!q('#cTriggerGroupFields').classList.contains('hidden'));assert(q('#cTriggerScheduleFields').classList.contains('hidden'));
   });
-  await test('步骤排序、删除、零秒及毫秒转换实时写回JSON',async()=>{
-    ex("setVisualSteps('[{\"t\":\"wait\",\"v\":\"1000\"},{\"t\":\"send\",\"v\":\"/start\"}]')");
-    const input=q('#stepCards').children[0].children[1].children[0];input.value='0';input.listeners.input();assert.strictEqual(JSON.parse(q('#cSteps').value)[0].v,'0');
-    input.value='0.125';input.listeners.input();assert.strictEqual(JSON.parse(q('#cSteps').value)[0].v,'125');
-    ex('moveStep(0,1)');assert.strictEqual(JSON.parse(q('#cSteps').value)[1].t,'wait');ex('removeStep(0)');assert.strictEqual(JSON.parse(q('#cSteps').value).length,1);
-    ex('moveStep(0,-1)');assert.strictEqual(JSON.parse(q('#cSteps').value)[0].v,'125');
+  await test('六类步骤卡展示全部新类型，秒数精确转成毫秒并可排序删除',async()=>{
+    ex("setVisualSteps('[]')");for(const type of ['send','wait','click','wait_reply','extract','captcha'])ex("fillStep('"+type+"')");
+    let list=JSON.parse(q('#cSteps').value);assert.deepStrictEqual(list.map(step=>step.t),['send','wait','click','wait_reply','extract','captcha']);
+    assert.deepStrictEqual(q('#stepCards').children.map(card=>card.children[0].textContent),['1. 发送消息','2. 等待','3. 点击按钮','4. 等待回复','5. 提取内容','6. 识别验证码']);
+    const waitInput=q('#stepCards').children[1].children[1].children[0];waitInput.value='0.125';waitInput.listeners.input();assert.strictEqual(JSON.parse(q('#cSteps').value)[1].ms,125);
+    ex('moveStep(1,1)');assert.strictEqual(JSON.parse(q('#cSteps').value)[2].ms,125);ex('removeStep(2)');assert.strictEqual(JSON.parse(q('#cSteps').value).length,5);
   });
-  await test('模板替换有确认，人工验证仅until且等待零不回退默认',async()=>{
-    q('#stepTemplate').value='manual';const before=q('#cSteps').value;ex('applyStepTemplate()');assert.strictEqual(q('#cSteps').value,before);
-    app.window.confirm=()=>true;ex('applyStepTemplate()');const list=JSON.parse(q('#cSteps').value);assert.deepStrictEqual(list.map(s=>s.t),['send','until']);
-    assert(!list.some(s=>s.t==='captcha'));ex('visualSteps[1].timeout=0;syncStepJSON()');assert.strictEqual(JSON.parse(q('#cSteps').value)[1].timeout,0);
-    q('#stepTemplate').value='basic';ex('applyStepTemplate()');assert.deepStrictEqual(JSON.parse(q('#cSteps').value).map(s=>s.t),['send','wait','click','until']);
+  await test('严格步骤校验逐步编号并拒绝旧字段、错误类型和上限',async()=>{
+    assert(ex("stepIssue([{t:'wait',ms:-1}],true)").startsWith('第 1 步：'));
+    assert(ex("stepIssue([{t:'send',to:'',text:'',reply:false}],true)").includes('第 1 步：请填写'));
+    assert(ex("stepIssue([{t:'wait',ms:0,v:0}],true)").includes('第 1 步：包含未知字段 v'));
+    assert(ex("stepIssue([{t:'captcha',from:'last.text',length:'4',send_to:'',template:'{code}'}],true)").includes('第 1 步：数值字段必须是整数'));
+    assert(ex("stepIssue([{...STEP_HINTS.click,timeout_ms:0}],true)").includes('等待上限'));
+    assert(ex("stepIssue([{...STEP_HINTS.extract,regex:'(.)',save:'bad name'}],true)").includes('变量名'));
+    assert(ex("stepIssue([{...STEP_HINTS.click,ai:true,text:'{credential.secret}'}],true)").includes('AI 选按钮'));
+    assert(ex("triggerIssue({mode:'schedule',at:'2026-02-30T09:00:00'})").includes('日期无效'));
+    assert.throws(()=>ex("parseSteps(JSON.stringify(Array.from({length:51},()=>({t:'wait',ms:0}))))"),/50/);
+    ex("setVisualSteps(JSON.stringify(Array.from({length:50},()=>({t:'wait',ms:0}))));fillStep('wait')");assert.strictEqual(JSON.parse(q('#cSteps').value).length,50);
   });
-  await test('步骤上限、非法时间与空发送用人话拒绝保存',async()=>{
-    ex("setVisualSteps(JSON.stringify(Array.from({length:50},()=>({t:'wait',v:'0'}))));fillStep('wait')");assert.strictEqual(JSON.parse(q('#cSteps').value).length,50);
-    assert(ex("stepIssue([{t:'wait',v:-1}],true)").includes('等待时间'));assert(ex("stepIssue([{t:'send',v:' '}],true)").includes('发送的消息'));
-    assert.throws(()=>ex("parseSteps(JSON.stringify(Array.from({length:51},()=>({t:'wait',v:0}))))"),/50/);
-    q('#cName').value='零等待';q('#cTarget').value='@dummy';q('#cRetry').value='1';ex("setVisualSteps('[{\"t\":\"wait\",\"v\":0}]');editAuto=null;editAutoAccount=accountContext()");let body;
-    app.api=async(p,o)=>{body=JSON.parse(o.body);return {}};app.loadAutos=async()=>{};await ex("saveAuto('custom')");assert.strictEqual(JSON.parse(body.custom_steps)[0].v,0);
+  await test('三个模板都确认替换，注册链接模板使用触发变量和凭证',async()=>{
+    ex("setVisualSteps(JSON.stringify([{t:'wait',ms:1}]))");q('#stepTemplate').value='basic';const before=q('#cSteps').value;app.window.confirm=()=>false;ex('applyStepTemplate()');assert.strictEqual(q('#cSteps').value,before);
+    app.window.confirm=()=>true;ex('applyStepTemplate()');assert.deepStrictEqual(JSON.parse(q('#cSteps').value).map(step=>step.t),['send','wait','click','wait_reply']);assert.deepStrictEqual(copy(ex('buildCustomTrigger()')),{mode:'manual'});
+    q('#stepTemplate').value='registration';ex('applyStepTemplate()');const registration=q('#cSteps').value;assert(registration.includes('{trigger.bot}')&&registration.includes('{trigger.payload}')&&registration.includes('{credential.user}')&&registration.includes('{credential.secret}'));assert.strictEqual(copy(ex('buildCustomTrigger()')).mode,'group');assert.strictEqual(q('#cTarget').value,'{trigger.bot}');
+    q('#stepTemplate').value='scheduled';ex('applyStepTemplate()');assert.strictEqual(copy(ex('buildCustomTrigger()')).mode,'schedule');assert(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(copy(ex('buildCustomTrigger()')).at));
+  });
+  await test('自定义任务精确保存触发与步骤，凭证只通过独立POST发送',async()=>{
+    ex("cancelAutoEdit('custom');editAutoAccount=accountContext()");q('#cName').value='凭证流程';q('#cTarget').value='{trigger.bot}';q('#cRetry').value='2';q('#cUser').value='测试用户';q('#cSecret').value='test-secret';
+    const trigger={mode:'group',groups:[],sender:'any',logic:'any',text:'',text_regex:false,button:'注册',button_regex:false,cooldown:30};const steps=[{t:'send',to:'{trigger.bot}',text:'/start {trigger.payload}',reply:false},{t:'send',to:'{trigger.bot}',text:'{credential.user}',reply:false},{t:'send',to:'{trigger.bot}',text:'{credential.secret}',reply:false}];app.triggerFixture=trigger;app.stepsFixture=steps;ex('setCustomTrigger(JSON.stringify(triggerFixture));setVisualSteps(JSON.stringify(stepsFixture))');
+    const requests=[];app.api=async(p,o)=>{requests.push([p,JSON.parse(o.body)]);return {ok:true,id:88}};app.loadAutos=async()=>{};await ex("saveAuto('custom')");
+    assert.deepStrictEqual(requests,[['/api/autos',{type:'custom',name:'凭证流程',target:'{trigger.bot}',custom_trigger:JSON.stringify(trigger),custom_steps:JSON.stringify(steps),chain_retry:2,retries:2,enabled:0}],['/api/autos/88/link-credential',{user:'测试用户',secret:'test-secret'}]]);
+  });
+  await test('自定义任务编辑、空凭证保留、重置及恶意文本均完整安全',async()=>{
+    const trigger={mode:'schedule',at:'2026-12-03T09:08:07'},steps=[{t:'send',to:'@dummy',text:'<img src=x onerror=bad()>',reply:true},{t:'wait_reply',from:'@dummy',success:'完成',fail:'失败',regex:false,timeout_ms:1234,save:'reply'}];app.customTask={id:44,type:'custom',name:'编辑任务',target:'@dummy',custom_trigger:JSON.stringify(trigger),custom_steps:JSON.stringify(steps),chain_retry:3,retries:1,enabled:1,link_credential_set:true};
+    ex('autos=[customTask];editAutoItem(44)');assert.deepStrictEqual(copy(ex('buildCustomTrigger()')),trigger);assert.deepStrictEqual(JSON.parse(q('#cSteps').value),steps);assert.strictEqual(q('#cUser').value,'');assert.strictEqual(q('#cSecret').value,'');assert.strictEqual(q('#stepCards').children[0].children[2].children[0].value,steps[0].text);
+    const requests=[];app.api=async(p,o)=>{requests.push([p,JSON.parse(o.body)]);return {ok:true}};app.loadAutos=async()=>{};await ex("saveAuto('custom')");assert.deepStrictEqual(requests,[['/api/autos/44',{type:'custom',name:'编辑任务',target:'@dummy',custom_trigger:JSON.stringify(trigger),custom_steps:JSON.stringify(steps),chain_retry:3,retries:1,enabled:1}]]);
+    ex("cancelAutoEdit('custom')");assert.deepStrictEqual(copy(ex('buildCustomTrigger()')),{mode:'manual'});assert.strictEqual(q('#cSteps').value,'[]');assert.strictEqual(q('#cTarget').value,'');assert.strictEqual(ex('autoGroupSel.custom.size'),0);
+  });
+  await test('启用中的自定义任务首次添加凭据会先停用再独立保存凭据',async()=>{
+    const trigger={mode:'group',groups:[],sender:'any',logic:'any',text:'注册',text_regex:false,button:'',button_regex:false,cooldown:0},steps=[{t:'send',to:'{trigger.bot}',text:'{credential.user} {credential.secret}',reply:false}];
+    app.customTask={id:45,type:'custom',name:'首次凭据',target:'{trigger.bot}',custom_trigger:JSON.stringify(trigger),custom_steps:JSON.stringify(steps),chain_retry:1,retries:2,enabled:1,link_credential_set:false};ex('autos=[customTask];editAutoItem(45)');q('#cUser').value='user';q('#cSecret').value='secret';
+    const requests=[];app.api=async(p,o)=>{requests.push([p,JSON.parse(o.body)]);return {ok:true}};app.loadAutos=async()=>{};await ex("saveAuto('custom')");assert.strictEqual(requests[0][1].enabled,0);assert.deepStrictEqual(requests[1],['/api/autos/45/link-credential',{user:'user',secret:'secret'}]);
   });
   await test('批量全选取消计数跨各任务类型且间隔单位转秒',async()=>{
     ex("autos=[{id:1,type:'signin'},{id:2,type:'keepalive'},{id:3,type:'custom'}];selectAllAutos(true)");assert.strictEqual(q('#autoSelectedCount').textContent,'已选 3 项');assert(q('#autoSelectAll').checked);
@@ -902,7 +926,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     }
   });
   await test('旧账号同ID任务保存不写新账号，已发PUT不关新表单',async()=>{
-    ex("selectedAccount='a';accountEpoch++;editAuto={id:42,type:'custom',enabled:1};editAutoAccount=accountContext()");q('#cName').value='任务A';q('#cTarget').value='@dummy';q('#cRetry').value='1';ex("setVisualSteps('[{\"t\":\"wait\",\"v\":0}]')");let done,request;
+    ex("selectedAccount='a';accountEpoch++;editAuto={id:42,type:'custom',enabled:1};editAutoAccount=accountContext()");q('#cName').value='任务A';q('#cTarget').value='@dummy';q('#cRetry').value='1';ex("setCustomTrigger('{\"mode\":\"manual\"}');setVisualSteps('[{\"t\":\"wait\",\"ms\":0}]')");let done,request;
     app.api=(p,o)=>{request=[p,o];return new Promise(r=>done=r)};const pending=ex("saveAuto('custom')");assert.strictEqual(request[0],'/api/autos/42');assert.strictEqual(request[1]._account.id,'a');
     ex("selectedAccount='b';accountEpoch++;editAuto={id:42,type:'custom',enabled:0};editAutoAccount=accountContext()");q('#cName').value='任务B';done({ok:true});await pending;assert.strictEqual(q('#cName').value,'任务B');assert.strictEqual(ex('editAuto.enabled'),0);
     ex("editAutoAccount={id:'a',epoch:0}");let sent=0;app.api=async()=>{sent++;return {}};await ex("saveAuto('custom')");assert.strictEqual(sent,0);
@@ -1027,6 +1051,13 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     const markup=q('#aListSign').innerHTML;for(const token of ['data-auto-action="select"','data-task-icon="7"','签到卡片','已启用','data-auto-action="run"','data-auto-action="expand"','aria-expanded="false"','data-auto-action="toggle"','data-auto-action="edit"','data-auto-action="duplicate"','data-auto-action="delete"'])assert(markup.includes(token));
     assert(!markup.includes('auto-details'));assert(!markup.includes('测试详情'));assert(!markup.includes('命令后'));assert(!markup.includes('onclick='));assert.strictEqual(ex('openedAutoIds.size'),0);
   });
+  await test('自定义任务卡摘要显示触发模式和准确步骤数',async()=>{
+    for(const [mode,label] of [['manual','手动触发'],['schedule','定时触发'],['group','监听群触发']]){
+      app.summaryTask={type:'custom',target:'@dummy',custom_trigger:JSON.stringify(mode==='schedule'?{mode,at:'2026-12-03T09:08:07'}:mode==='group'?{mode,groups:[],sender:'any',logic:'any',text:'注册',text_regex:false,button:'',button_regex:false,cooldown:0}:{mode}),custom_steps:JSON.stringify([{t:'wait',ms:0},{t:'send',to:'target',text:'/start',reply:false}]),chain_retry:1};
+      const summary=ex('autoDesc(summaryTask)');assert(summary.includes(label));assert(summary.includes('2 步'));
+      assert.strictEqual(ex('autoCanRun(summaryTask)'),mode==='manual');
+    }
+  });
   await test('展开显示原配置当前账号有效窗口上次执行结果，错误回复详情全部转义',async()=>{
     const attack='<img src=x onerror=bad()>';app.cardTask.last_result={ts:1710000000,ok:0,reply:attack,detail:{error:attack}};ex('toggleAutoExpanded(7)');const markup=q('#aListSign').innerHTML;
     for(const token of ['aria-expanded="true"','命令后','归属当前账号：当前账号（default）','有效窗口：单任务窗口 08:00–12:00','上次执行：','失败','实际回复：','详情：','&lt;img'])assert(markup.includes(token));assert(!markup.includes('<img src=x'));ex('toggleAutoExpanded(7)');assert(!q('#aListSign').innerHTML.includes('auto-details'));
@@ -1080,8 +1111,18 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     await ex('generateAIDraft()');assert.strictEqual(requests.length,1);assert.strictEqual(requests[0][0],'/api/ai/task-draft');assert.strictEqual(requests[0][2].id,'default');
     assert(q('#aiDraftResult').textContent.includes('<img'));assert(q('#aiDraftResult').textContent.includes('命令后等待（秒）'));assert(q('#aiDraftResult').textContent.includes('核对后启用'));assert(!q('#aiDraftBtn').disabled);
   });
+  await test('AI自定义草稿可读触发和六类步骤，填表与字段投影保持最新格式',async()=>{
+    const trigger={mode:'group',groups:[],sender:'bot',logic:'any',text:'注册链接',text_regex:false,button:'注册',button_regex:false,cooldown:20};const steps=copy(ex("['send','wait','click','wait_reply','extract','captcha'].map(type=>STEP_HINTS[type])"));
+    app.customDraft={type:'custom',name:'AI 注册流程',target:'{trigger.bot}',custom_trigger:JSON.stringify(trigger),custom_steps:JSON.stringify(steps),chain_retry:1,scheduled_at:'2026-12-03T09:08:07',enabled:0};app.customPreview={summary:'自定义草稿',draft:app.customDraft,elapsed_ms:5};
+    const preview=ex('readableAIDraft(customPreview)');for(const text of ['监听群消息','发送消息','等待回复','提取内容','识别验证码'])assert(preview.includes(text));
+    ex('applyDraftToForm(customDraft)');assert.deepStrictEqual(copy(ex('buildCustomTrigger()')),trigger);assert.deepStrictEqual(JSON.parse(q('#cSteps').value),steps);assert.strictEqual(q('#cTarget').value,'{trigger.bot}');
+    const projected=copy(ex('taskConfig(customDraft)'));assert.strictEqual(projected.custom_trigger,app.customDraft.custom_trigger);assert.strictEqual(projected.custom_steps,app.customDraft.custom_steps);assert.strictEqual(projected.scheduled_at,app.customDraft.scheduled_at);
+  });
+  await test('AI含凭证占位符的自定义草稿必须先填表，不可直接保存',async()=>{
+    app.credentialDraft={...app.customDraft,custom_steps:JSON.stringify([{t:'send',to:'{trigger.bot}',text:'{credential.user}',reply:false}])};ex('aiDraft={account:accountContext(),draft:credentialDraft};aiDraftBusy=false');let sent=0;app.api=async()=>{sent++;return {}};await ex('saveAIDraft()');assert.strictEqual(sent,0);assert(q('#toast').textContent.includes('用户名和安全码'));ex('resetAIAssistant()');
+  });
   await test('AI填入表单不是编辑已有任务，保存仍默认停用且保留零次重试',async()=>{
-    let sent=[];app.api=async(p,o)=>{sent.push([p,JSON.parse(o.body)]);return {ok:true}};
+    ex('aiDraft={account:accountContext(),draft:generated};aiDraftBusy=false');let sent=[];app.api=async(p,o)=>{sent.push([p,JSON.parse(o.body)]);return {ok:true}};
     ex('fillAIDraft()');assert.strictEqual(sent.length,0);assert.strictEqual(ex('editAuto'),null);
     assert.strictEqual(q('#sName').value,app.generated.name);assert.strictEqual(q('#sRetries').value,'0');
     assert(q('#af-signin').classList.contains('show'));await ex("saveAuto('signin')");
