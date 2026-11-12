@@ -1442,6 +1442,12 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(js.includes('data-log-id='));
     assert(!js.includes('class="logitem" onclick="this.classList.toggle'));
   });
+  await test('日志清理操作在列表上方吸顶且手机触控尺寸足够',async()=>{
+    const start=html.indexOf('<section id="tab-logs">'),end=html.indexOf('</section>',start),part=html.slice(start,end);
+    const toolbar=part.indexOf('class="log-toolbar"'),list=part.indexOf('id="logList"');assert(toolbar>0&&toolbar<list);
+    assert.strictEqual((part.match(/onclick="clearLogs\(/g)||[]).length,2);assert(part.includes('class="danger" onclick="clearLogs(0)"'));
+    assert(html.includes('.log-toolbar{position:sticky'));assert(html.includes('.log-toolbar input,.log-toolbar button{min-height:44px}'));assert(html.includes('overflow-x:hidden;overflow-x:clip'));
+  });
   await test('系统更新位于设置最顶部且默认收起',async()=>{
     const start=html.indexOf('<section id="tab-settings">'),end=html.indexOf('</section>',start);
     const part=html.slice(start,end),update=part.indexOf('系统更新'),accounts=part.indexOf('Telegram 账号');
