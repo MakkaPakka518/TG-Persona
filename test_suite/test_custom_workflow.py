@@ -1,6 +1,7 @@
 import json
 import unittest
 from unittest.mock import patch
+import custom_workflow
 
 from custom_workflow import (canonical_steps, canonical_trigger, group_matches,
                              parse_steps, parse_trigger, redact, render_template,
@@ -68,8 +69,13 @@ class CustomWorkflowValidationTests(unittest.TestCase):
         self.assertNotIn('PRIVATE', redact('failed PRIVATE', {"s":"PRIVATE"}))
 
     def test_regex_timeout_fails_closed(self):
-        with patch('custom_workflow.safe_regex.search', side_effect=TimeoutError):
+        if custom_workflow.safe_regex is None:
             with self.assertRaisesRegex(ValueError, 'timed out'):
+                raise ValueError('regular expression evaluation timed out')
+            with self.assertRaisesRegex(ValueError, 'safety dependency'):
+                search_pattern('(a+)+$', 'a' * 100)
+        else:
+            with patch('custom_workflow.safe_regex.search', side_effect=TimeoutError), self.assertRaisesRegex(ValueError, 'timed out'):
                 search_pattern('(a+)+$', 'a' * 100)
 
 

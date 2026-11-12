@@ -211,7 +211,7 @@ print('offline mock: release created; no HTTP requests')
             if step.get("name") == "安装轻量测试依赖":
                 # 明确 mock 基础设施安装，绝不让离线测试发起 pip 网络请求。
                 argv = shlex.split(script)
-                self.case.assertEqual(argv, ["python3", "-m", "pip", "install", "fastapi", "telethon", "httpx", "uvicorn", "pyyaml", "regex"])
+                self.case.assertEqual(argv, ["python3", "-m", "pip", "install", "fastapi", "telethon", "httpx", "uvicorn", "pyyaml"])
                 with self.pip_log.open("a", encoding="utf-8") as stream:
                     stream.write(json.dumps({"argv": argv, "mock": True}) + "\n")
                 result = subprocess.CompletedProcess(argv, 0, "offline mock: test dependencies\n", "")

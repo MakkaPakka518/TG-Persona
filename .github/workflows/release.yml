@@ -42,7 +42,7 @@ jobs:
           python-version: '3.12'
 
       - name: 安装轻量测试依赖
-        run: python3 -m pip install fastapi telethon httpx uvicorn pyyaml regex
+        run: python3 -m pip install fastapi telethon httpx uvicorn pyyaml
 
       - name: 回归测试
         run: |

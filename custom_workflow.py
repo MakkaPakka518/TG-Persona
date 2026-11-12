@@ -2,7 +2,10 @@
 from datetime import datetime
 import json
 import re
-import regex as safe_regex
+try:
+    import regex as safe_regex
+except ImportError:  # Release tests install only the lightweight dependency set.
+    safe_regex = None
 
 
 MAX_TEXT = 4096
@@ -66,8 +69,8 @@ def _pattern(value, label, required=False):
     value = _string(value, label, MAX_PATTERN, empty=not required)
     if value:
         try:
-            safe_regex.compile(value)
-        except safe_regex.error:
+            _compile_pattern(value)
+        except (re.error, ValueError):
             raise ValueError(f"{label} is not a valid regular expression") from None
     return value
 
@@ -177,7 +180,7 @@ def canonical_steps(value):
         elif kind == "extract":
             pattern = _pattern(raw.get("regex"), "extract regex", required=True)
             group = _integer(raw.get("group", 0), "extract group", 0, 20)
-            if group > safe_regex.compile(pattern).groups:
+            if group > _compile_pattern(pattern).groups:
                 raise ValueError("extract group exceeds the regular expression groups")
             step = {"t": kind, "from": _destination(raw.get("from", "target"), "extract from"),
                     "regex": pattern, "group": group,
@@ -341,10 +344,30 @@ def _trigger_pattern(pattern, text):
 
 
 def search_pattern(pattern, text):
+    if safe_regex is None:
+        _fallback_pattern_guard(pattern)
+        return re.search(pattern, str(text or ""), re.I)
     try:
         return safe_regex.search(pattern, str(text or ""), safe_regex.I, timeout=0.05)
     except TimeoutError:
         raise ValueError("regular expression evaluation timed out") from None
+
+
+def _compile_pattern(pattern):
+    if safe_regex is not None:
+        try:
+            return safe_regex.compile(pattern)
+        except safe_regex.error:
+            raise ValueError("invalid regular expression") from None
+    _fallback_pattern_guard(pattern)
+    return re.compile(pattern)
+
+
+def _fallback_pattern_guard(pattern):
+    # Fail closed on constructs most prone to catastrophic backtracking.
+    if (re.search(r"\\[1-9]|\)(?:[*+]|\{)|(?:\.\*){2}|(?:\.\+){2}", pattern)
+            or len(re.findall(r"(?<!\\)[*+]", pattern)) > 2):
+        raise ValueError("regular expression requires the regex safety dependency")
 
 
 def redact(text, credential=None):
