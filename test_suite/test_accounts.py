@@ -228,6 +228,23 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         for method, route in [('GET', ''), ('PUT', ''), ('POST', '/import'), ('GET', '/export'), ('POST', '/upload-now')]:
             self.assertEqual((await self.req(method, '/api/ai/flock/knowledge' + route, aid, json={'content': 'x'})).status_code, 401)
 
+    async def test_study_routes_are_authenticated_and_account_isolated(self):
+        aid = await self.create()
+        for owner, content in [('default', '# 根账号群氛围'), (aid, '# 第二账号群知识')]:
+            response = await self.req('PUT', '/api/ai/flock/study', owner, json={'content': content})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual((await self.req('GET', '/api/ai/flock/study', owner)).json()['content'], content)
+            exported = await self.req('GET', '/api/ai/flock/study/export', owner)
+            self.assertEqual(exported.text, content)
+            self.assertIn('study.md', exported.headers['content-disposition'])
+            self.assertEqual(self.rt(owner).study_file.stat().st_mode & 0o777, 0o600)
+        response = await self.req('POST', '/api/ai/flock/study/import', aid, content='# 导入群知识'.encode())
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((await self.req('GET', '/api/ai/flock/study', 'default')).json()['content'], '# 根账号群氛围')
+        self.http.cookies.clear()
+        for method, route in [('GET', ''), ('PUT', ''), ('POST', '/import'), ('GET', '/export')]:
+            self.assertEqual((await self.req(method, '/api/ai/flock/study' + route, aid, json={'content': 'x'})).status_code, 401)
+
     async def test_parallel_clients_login_codes_and_two_factor(self):
         aid = await self.create()
         await asyncio.gather(self.login('default', 123, '00000000001', '00001'),

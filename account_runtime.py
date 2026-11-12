@@ -48,7 +48,7 @@ def secure_directory(path, create=False):
 
 def secure_files(directory):
     for name in ("config.db", "config.db-wal", "config.db-shm", "config.db-journal",
-                 "tg.session", "tg.session-journal", "tg.session-wal", "tg.session-shm", "avatar.jpg", "skill.md", "knowledge.md"):
+                 "tg.session", "tg.session-journal", "tg.session-wal", "tg.session-shm", "avatar.jpg", "skill.md", "knowledge.md", "study.md"):
         path = directory / name
         if path.is_symlink() or (path.exists() and not path.is_file()):
             raise AccountError(400, "账号文件不允许符号链接或非普通文件")
@@ -120,6 +120,7 @@ class AccountRuntime:
     ai_learning_worker_task: object = None
     ai_learning_busy: bool = False
     ai_learning_next_at: int = 0
+    ai_skill_upload_busy: bool = False
     session_alerted: bool = False
     handler_registered: bool = False
     closing: bool = False
@@ -165,6 +166,10 @@ class AccountRuntime:
     @property
     def knowledge_file(self):
         return self.directory / "knowledge.md"
+
+    @property
+    def study_file(self):
+        return self.directory / "study.md"
 
     @property
     def ai_flock_lock(self):

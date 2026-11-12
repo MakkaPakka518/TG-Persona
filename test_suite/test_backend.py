@@ -33,6 +33,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import uuid
 import shutil
 import zlib
+from telethon.extensions import markdown as telethon_markdown
 from custom_workflow import (canonical_steps, canonical_trigger, group_matches, parse_steps,
                              parse_trigger, redact as redact_custom, render_template, search_pattern,
                              uses_credentials, uses_default_target, uses_trigger_context, validate_template)
@@ -95,7 +96,7 @@ def load_backend():
             selected.append(node)
     names = {name: globals()[name] for name in ('ast', 'asyncio', 'base64', 'OrderedDict', 'datetime',
              'timezone', 'timedelta', 'hashlib', 'hmac', 'ipaddress', 'json', 'math', 'random', 're',
-              'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'ContextVar', 'uuid', 'shutil')}
+              'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'ContextVar', 'uuid', 'shutil', 'telethon_markdown')}
     names.update(BaseModel=Model, Optional=Optional, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
                   HTTPException=HTTPException, JSONResponse=Response, Response=Response, os=os, io=io,
                   log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=Exception,
@@ -126,6 +127,7 @@ def load_backend():
         avatar_file = Path('/tmp/never-read-backend-fixture/avatar.jpg')
         skill_file = Path('/tmp/never-read-backend-fixture/skill.md')
         knowledge_file = Path('/tmp/never-read-backend-fixture/knowledge.md')
+        study_file = Path('/tmp/never-read-backend-fixture/study.md')
         @property
         def ai_flock_lock(self):
             if self._ai_flock_lock is None:
@@ -143,7 +145,7 @@ def load_backend():
             return self._knowledge_lock
         def __getattr__(self, name):
             key = aliases.get(name, name)
-            default = {} if name in dict_fields else set() if name in set_fields else False if name in ('handler_registered','session_alerted','closing','closed','stopping','ai_flock_busy','ai_learning_busy') else 0 if name in ('ai_flock_waiting','ai_learning_next_at') else '' if name=='tg_phone' else None
+            default = {} if name in dict_fields else set() if name in set_fields else False if name in ('handler_registered','session_alerted','closing','closed','stopping','ai_flock_busy','ai_learning_busy','ai_skill_upload_busy') else 0 if name in ('ai_flock_waiting','ai_learning_next_at') else '' if name=='tg_phone' else None
             return names.setdefault(key, default)
         def __setattr__(self, name, value):
             names[aliases.get(name, name)] = value

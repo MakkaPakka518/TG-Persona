@@ -20,6 +20,7 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = self.b['get_runtime']()
         type(self.runtime).knowledge_file = self.base / 'account-knowledge.md'
         type(self.runtime).skill_file = self.base / 'skill.md'
+        type(self.runtime).study_file = self.base / 'study.md'
         self.b['BASE'] = self.base
         self.b['DATA'] = self.base / 'data'
         self.b['DATA'].mkdir(exist_ok=True)
@@ -207,6 +208,38 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((chat['mode'], chat['chars']), ('chat', 1200))
         ai.assert_not_awaited()
         self.assertEqual(self.runtime.knowledge_file.read_bytes(), before)
+
+    def test_study_and_manual_knowledge_share_reference_budget(self):
+        self.b['_write_study']('STUDY_' + '群' * 100)
+        self.b['_write_knowledge']('KNOWLEDGE_' + '知' * 100)
+        reference = self.b['_reference_markdown'](40)
+        self.assertIn('STUDY_', reference)
+        self.assertIn('KNOWLEDGE_', reference)
+        self.assertEqual(len(reference), 40)
+        self.assertNotIn('群' * 20, reference)
+        self.assertNotIn('知' * 20, reference)
+        self.b['_write_study']('短')
+        reference = self.b['_reference_markdown'](40)
+        self.assertEqual(len(reference), 40)
+        self.assertIn('KNOWLEDGE_', reference)
+
+    def test_study_capacity_drops_oldest_managed_section(self):
+        original = self.b['KNOWLEDGE_MAX_BYTES']
+        self.b['KNOWLEDGE_MAX_BYTES'] = 260
+        try:
+            content = self.b['_append_study']('', 'OLDEST-' + 'A' * 80)
+            content = self.b['_append_study'](content, 'MIDDLE-' + 'B' * 80)
+            content = self.b['_append_study'](content, 'NEWEST-' + 'C' * 80)
+        finally:
+            self.b['KNOWLEDGE_MAX_BYTES'] = original
+        self.assertNotIn('OLDEST-', content)
+        self.assertIn('NEWEST-', content)
+        self.b['KNOWLEDGE_MAX_BYTES'] = 120
+        try:
+            with self.assertRaisesRegex(ValueError, 'study.md 容量不足'):
+                self.b['_append_study']('F' * 110, 'NEWEST')
+        finally:
+            self.b['KNOWLEDGE_MAX_BYTES'] = original
 
     async def test_ai_usage_summary_groups_day_feature_provider(self):
         db = self.b['conn']
