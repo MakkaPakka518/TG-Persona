@@ -211,10 +211,15 @@ print('offline mock: release created; no HTTP requests')
             if step.get("name") == "安装轻量测试依赖":
                 # 明确 mock 基础设施安装，绝不让离线测试发起 pip 网络请求。
                 argv = shlex.split(script)
-                self.case.assertEqual(argv, ["python3", "-m", "pip", "install", "fastapi", "telethon", "httpx", "uvicorn", "pyyaml"])
+                self.case.assertEqual(
+                    argv,
+                    ["python3", "-m", "pip", "install", "fastapi", "telethon",
+                     "httpx", "uvicorn", "pyyaml", "cryptography>=42.0"],
+                )
                 with self.pip_log.open("a", encoding="utf-8") as stream:
                     stream.write(json.dumps({"argv": argv, "mock": True}) + "\n")
-                result = subprocess.CompletedProcess(argv, 0, "offline mock: test dependencies\n", "")
+                result = subprocess.CompletedProcess(
+                    argv, 0, "offline mock: test dependencies\n", "")
             else:
                 result = subprocess.run(
                     [shutil.which("bash"), "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
@@ -222,7 +227,7 @@ print('offline mock: release created; no HTTP requests')
             self.results.append((step, result))
             if "id" in step:
                 self.outputs[step["id"]] = dict(line.split("=", 1) for line in
-                                              output.read_text().splitlines() if "=" in line)
+                                               output.read_text().splitlines() if "=" in line)
             if result.returncode:
                 return result
         return result
@@ -281,21 +286,39 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(box.git("show", "main:VERSION", cwd=box.remote).stdout, version + "\n")
         if changed:
             self.assertNotEqual(sha, box.initial_sha)
-            self.assertEqual(box.git("diff", "--name-only", box.initial_sha, sha, cwd=box.repo).stdout.splitlines(), ["VERSION"])
+            self.assertEqual(
+                box.git("diff", "--name-only", box.initial_sha, sha, cwd=box.repo).stdout.splitlines(),
+                ["VERSION"],
+            )
         else:
             self.assertEqual(sha, box.initial_sha)
         dist = box.repo / "dist"
         tar_path = dist / ("TG-Persona-" + tag + ".tar.gz")
         zip_path = dist / ("TG-Persona-" + tag + ".zip")
         with tarfile.open(tar_path, "r:gz") as archive:
-            self.assertEqual(archive.extractfile("tg-persona/VERSION").read(), (version + "\n").encode())
+            self.assertEqual(
+                archive.extractfile("tg-persona/VERSION").read(),
+                (version + "\n").encode(),
+            )
             tar_main = archive.extractfile("tg-persona/main.py").read()
         with zipfile.ZipFile(zip_path) as archive:
             self.assertEqual(archive.read("tg-persona/VERSION"), (version + "\n").encode())
             self.assertEqual(archive.read("tg-persona/main.py"), tar_main)
-        self.assertEqual(tar_main, box.git("show", sha + ":main.py", cwd=box.repo).stdout.encode())
-        checksums = dict(line.split(None, 1)[::-1] for line in (dist / "SHA256SUMS.txt").read_text().splitlines())
-        self.assertEqual(checksums, {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (tar_path, zip_path)})
+        self.assertEqual(
+            tar_main,
+            box.git("show", sha + ":main.py", cwd=box.repo).stdout.encode(),
+        )
+        checksums = dict(
+            line.split(None, 1)[::-1]
+            for line in (dist / "SHA256SUMS.txt").read_text().splitlines()
+        )
+        self.assertEqual(
+            checksums,
+            {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in (tar_path, zip_path)
+            },
+        )
         gh = box.calls("gh")
         self.assertEqual(len(gh), 1)
         self.assertEqual(gh[0]["argv"][:3], ["release", "create", tag])
@@ -310,19 +333,29 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--atomic", pushes[0])
         self.assertIn("HEAD:refs/heads/main", pushes[0])
         self.assertIn("refs/tags/" + tag, pushes[0])
-        self.assertFalse(any(arg.startswith(("--force", "+")) or arg == "-f" for arg in pushes[0]))
+        self.assertFalse(
+            any(arg.startswith(("--force", "+")) or arg == "-f" for arg in pushes[0])
+        )
 
     def test_github_toolcache_node_is_available_inside_isolation(self):
         from unittest.mock import patch
+
         original_which = shutil.which
         real_node = original_which("node")
         with tempfile.TemporaryDirectory(prefix="github-toolcache-") as tmp:
             hosted_node = Path(tmp) / "node/22/x64/bin/node"
             hosted_node.parent.mkdir(parents=True)
             hosted_node.symlink_to(real_node)
+
             def resolve(name, *args, **kwargs):
-                return str(hosted_node) if name == "node" else original_which(name, *args, **kwargs)
-            with patch.object(shutil, "which", side_effect=resolve), patch.dict(os.environ, {"UNRELATED_TEST_SECRET": "not-a-real-secret"}):
+                return (
+                    str(hosted_node)
+                    if name == "node"
+                    else original_which(name, *args, **kwargs)
+                )
+
+            with patch.object(shutil, "which", side_effect=resolve), patch.dict(
+                    os.environ, {"UNRELATED_TEST_SECRET": "not-a-real-secret"}):
                 box = self.sandbox(tags=("v1.0.3",))
                 self.assertEqual(os.readlink(box.bin / "node"), str(hosted_node))
                 self.assertNotIn(str(hosted_node.parent), box.env["PATH"])
@@ -372,10 +405,12 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
     def test_archives_use_locked_commit_not_dirty_worktree(self):
         box = self.sandbox()
+
         def dirty_after_commit(sandbox, step):
             if "git archive" in step.get("run", ""):
                 (sandbox.repo / "VERSION").write_text("9.9.9\n")
                 (sandbox.repo / "main.py").write_text("DIRTY = True\n")
+
         self.assert_success(box, box.execute("v1.2.3", before_step=dirty_after_commit))
         self.assert_release(box, "1.2.3", changed=True)
         self.assertEqual((box.repo / "VERSION").read_text(), "9.9.9\n")
@@ -383,9 +418,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def assert_concurrent_rejection(self, requested):
         box = self.sandbox(tags=("v1.0.3",))
         advanced = []
+
         def race(sandbox, step):
             if "git push" in step.get("run", ""):
                 advanced.append(sandbox.push_concurrent_main())
+
         result = box.execute(requested, before_step=race)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(len(advanced), 1)
@@ -393,14 +430,23 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(box.remote_sha(), advanced[0])
         self.assertNotEqual(box.remote_sha(), box.outputs["commit"]["sha"])
         self.assertEqual(box.remote_tags(), box.initial_tags)
-        self.assertEqual(box.git("show", "main:VERSION", cwd=box.remote).stdout, "1.0.4\n")
+        self.assertEqual(
+            box.git("show", "main:VERSION", cwd=box.remote).stdout,
+            "1.0.4\n",
+        )
         self.assertEqual(box.calls("gh"), [])
         self.assertFalse(box.summary.exists())
         # A local tag may exist in the discarded runner. It must not leak to origin.
-        pushes = [c["argv"] for c in box.calls("git") if c["argv"][:1] == ["push"]]
+        pushes = [
+            call["argv"]
+            for call in box.calls("git")
+            if call["argv"][:1] == ["push"]
+        ]
         self.assertEqual(len(pushes), 1)
         self.assertIn("--atomic", pushes[0])
-        self.assertFalse(any(arg.startswith(("--force", "+")) or arg == "-f" for arg in pushes[0]))
+        self.assertFalse(
+            any(arg.startswith(("--force", "+")) or arg == "-f" for arg in pushes[0])
+        )
 
     def test_concurrent_main_rejects_divergent_version_commit_without_remote_tag(self):
         self.assert_concurrent_rejection("v1.2.3")
@@ -411,20 +457,39 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_tag_created_concurrently_causes_atomic_main_rollback(self):
         box = self.sandbox()
         old_tag_sha = []
+
         def create_conflicting_tag(sandbox, step):
             if "git push" in step.get("run", ""):
-                sandbox.git("tag", "-a", "v1.2.3", "-m", "concurrent tag", cwd=sandbox.seed)
-                sandbox.git("push", "-q", "origin", "refs/tags/v1.2.3", cwd=sandbox.seed)
-                old_tag_sha.append(sandbox.git("rev-parse", "v1.2.3^{tag}", cwd=sandbox.remote).stdout)
+                sandbox.git(
+                    "tag", "-a", "v1.2.3", "-m", "concurrent tag", cwd=sandbox.seed)
+                sandbox.git(
+                    "push", "-q", "origin", "refs/tags/v1.2.3", cwd=sandbox.seed)
+                old_tag_sha.append(
+                    sandbox.git(
+                        "rev-parse", "v1.2.3^{tag}", cwd=sandbox.remote
+                    ).stdout
+                )
+
         result = box.execute("v1.2.3", before_step=create_conflicting_tag)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(box.remote_sha(), box.initial_sha)
-        self.assertEqual(box.git("show", "main:VERSION", cwd=box.remote).stdout, "1.0.4\n")
-        self.assertEqual(box.git("rev-parse", "v1.2.3^{tag}", cwd=box.remote).stdout, old_tag_sha[0])
+        self.assertEqual(
+            box.git("show", "main:VERSION", cwd=box.remote).stdout,
+            "1.0.4\n",
+        )
+        self.assertEqual(
+            box.git("rev-parse", "v1.2.3^{tag}", cwd=box.remote).stdout,
+            old_tag_sha[0],
+        )
         self.assertEqual(box.calls("gh"), [])
 
     def test_non_main_dispatch_is_rejected_before_version_or_push(self):
-        for ref in ("refs/heads/dev", "refs/tags/v1.0.4", "refs/pull/1/merge", "main"):
+        for ref in (
+            "refs/heads/dev",
+            "refs/tags/v1.0.4",
+            "refs/pull/1/merge",
+            "main",
+        ):
             with self.subTest(ref=ref):
                 box = self.sandbox()
                 result = box.execute("v1.2.3", ref=ref)
@@ -457,17 +522,31 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 result = box.execute(requested)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(box.results[-1][0].get("id"), "ver")
-                self.assertFalse(sentinel.exists(), "user input was executed as shell code")
+                self.assertFalse(
+                    sentinel.exists(),
+                    "user input was executed as shell code",
+                )
                 self.assertEqual((box.repo / "VERSION").read_text(), "1.0.4\n")
                 self.assertEqual(box.remote_sha(), box.initial_sha)
                 self.assertEqual(box.remote_tags(), box.initial_tags)
                 self.assertEqual(box.calls("gh"), [])
                 self.assertFalse((box.repo / "dist").exists())
-                self.assertFalse(any(c["argv"][:1] == ["push"] for c in box.calls("git")))
+                self.assertFalse(
+                    any(
+                        call["argv"][:1] == ["push"]
+                        for call in box.calls("git")
+                    )
+                )
 
     def test_existing_and_downgrade_versions_fail_before_commit(self):
         box = self.sandbox(tags=("v1.0.3", "v1.1.0"))
-        for requested in ("v1.0.3", "v1.1.0", "0.9.9", "1.0.2", "1.0.5"):
+        for requested in (
+            "v1.0.3",
+            "v1.1.0",
+            "0.9.9",
+            "1.0.2",
+            "1.0.5",
+        ):
             with self.subTest(requested=requested):
                 box.results = []
                 box.outputs = {}
@@ -485,10 +564,20 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(version["required"], "false")
         self.assertEqual(version["default"], "")
         self.assertEqual(self.workflow["permissions"]["contents"], "write")
-        self.assertEqual(self.workflow["concurrency"]["cancel-in-progress"], "false")
-        self.assertEqual(self.workflow["concurrency"]["group"], "tg-persona-release-main")
+        self.assertEqual(
+            self.workflow["concurrency"]["cancel-in-progress"],
+            "false",
+        )
+        self.assertEqual(
+            self.workflow["concurrency"]["group"],
+            "tg-persona-release-main",
+        )
         steps = self.workflow["jobs"]["release"]["steps"]
-        checkouts = [step for step in steps if step.get("uses", "").startswith("actions/checkout@")]
+        checkouts = [
+            step
+            for step in steps
+            if step.get("uses", "").startswith("actions/checkout@")
+        ]
         self.assertEqual(len(checkouts), 1)
         self.assertEqual(checkouts[0]["with"]["ref"], "main")
         self.assertEqual(checkouts[0]["with"]["fetch-depth"], "0")
@@ -499,12 +588,21 @@ class ReleaseWorkflowTests(unittest.TestCase):
         steps = self.workflow["jobs"]["release"]["steps"]
         version_steps = [step for step in steps if step.get("id") == "ver"]
         self.assertEqual(len(version_steps), 1)
-        self.assertEqual(version_steps[0]["env"]["RELEASE_VERSION"], "${{ inputs.version }}")
+        self.assertEqual(
+            version_steps[0]["env"]["RELEASE_VERSION"],
+            "${{ inputs.version }}",
+        )
         for step in steps:
             if "run" in step:
-                self.assertNotRegex(step["run"], r"\$\{\{\s*(?:inputs\.|github\.event\.inputs\.)")
+                self.assertNotRegex(
+                    step["run"],
+                    r"\$\{\{\s*(?:inputs\.|github\.event\.inputs\.)",
+                )
                 self.assertNotIn("eval ", step["run"])
-                self.assertNotRegex(step["run"], r"git\s+push[^\n]*(?:--force|\s-f(?:\s|$))")
+                self.assertNotRegex(
+                    step["run"],
+                    r"git\s+push[^\n]*(?:--force|\s-f(?:\s|$))",
+                )
 
 
 if __name__ == "__main__":
