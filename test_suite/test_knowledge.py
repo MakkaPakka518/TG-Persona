@@ -2,6 +2,7 @@
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -19,6 +20,13 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = self.b['get_runtime']()
         type(self.runtime).knowledge_file = self.base / 'account-knowledge.md'
         type(self.runtime).skill_file = self.base / 'skill.md'
+        self.b['BASE'] = self.base
+        self.b['DATA'] = self.base / 'data'
+        self.b['DATA'].mkdir(exist_ok=True)
+        self.b['account_registry'] = SimpleNamespace(accounts={'default': self.runtime})
+        self.b['updater'] = SimpleNamespace(current_version=lambda: '1.20.4', STATE={})
+        self.b['data_migration'] = SimpleNamespace(create_package=lambda *args: (_ for _ in ()).throw(ValueError('not configured')))
+        self.b['_migration_lock'] = asyncio.Lock()
 
     async def provider(self):
         return (await self.b['create_ai_provider'](self.b['AIProviderInput'](
@@ -162,6 +170,92 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         await self.b['update_ai_flock_job'](job, model(name='按需', groups='-1', prompt='聊天',
               start_time='00:00', end_time='23:59', provider_ids=provider, knowledge_on_demand=0))
         self.assertIn('ON_DEMAND_KNOWLEDGE', await prompt_for('哈哈哈'))
+
+    async def test_knowledge_preview_modes_do_not_call_ai_or_write(self):
+        self.b['_write_knowledge']('PREVIEW_KNOWLEDGE_' + '知' * 2000 + '_TAIL')
+        ai = AsyncMock(side_effect=AssertionError('preview must not call AI'))
+        self.b['_call_ai_any'] = ai
+        before = self.runtime.knowledge_file.read_bytes()
+        model = self.b['KnowledgePreviewInput']
+        full = await self.b['preview_flock_knowledge'](model(text='随便聊聊', knowledge_chars=10))
+        self.assertEqual((full['mode'], full['preview']), ('full', 'PREVIEW_KN'))
+        none = await self.b['preview_flock_knowledge'](model(text='怎么配置代理', knowledge_chars=0))
+        self.assertEqual((none['mode'], none['preview'], none['chars']), ('', '', 0))
+        relevant = await self.b['preview_flock_knowledge'](model(text='CF 522 怎么办', knowledge_chars=40, knowledge_on_demand=1))
+        self.assertEqual(relevant['mode'], 'relevant')
+        self.assertTrue(relevant['preview'].startswith('PREVIEW_KNOWLEDGE_'))
+        chat = await self.b['preview_flock_knowledge'](model(text='今天好热', knowledge_chars=-1, knowledge_on_demand=1))
+        self.assertEqual((chat['mode'], chat['chars']), ('chat', 1200))
+        ai.assert_not_awaited()
+        self.assertEqual(self.runtime.knowledge_file.read_bytes(), before)
+
+    async def test_ai_usage_summary_groups_day_feature_provider(self):
+        db = self.b['conn']
+        self.b['_record_ai_usage']('0123456789abcdef', {'prompt_tokens': 10, 'completion_tokens': 5}, 'ai_flock')
+        self.b['_record_ai_usage']('0123456789abcdef', {'input_tokens': 7, 'output_tokens': 3}, 'learning')
+        self.b['_record_ai_usage']('0123456789abcdef', {}, 'ai_flock')
+        summary = await self.b['ai_usage_summary'](14)
+        self.assertEqual(sum((item['input_tokens'] for item in summary['features']), 0), 17)
+        self.assertEqual(sum((item['output_tokens'] for item in summary['features']), 0), 8)
+        self.assertEqual({item['feature'] for item in summary['features']}, {'ai_flock', 'learning'})
+        self.assertEqual(summary['days'][0]['input_tokens'], 17)
+        self.assertEqual(summary['providers'][0]['input_tokens'], 17)
+
+    async def test_auto_backup_settings_validate_and_never_leak_password(self):
+        runtime = self.runtime
+        runtime.label = '默认'
+        model = self.b['AutoBackupInput']
+        with self.assertRaises(HTTPException):
+            await self.b['update_auto_backup'](model(enabled=1, time='25:00', account='default', password='longenough'))
+        with self.assertRaises(HTTPException):
+            await self.b['update_auto_backup'](model(enabled=1, time='04:30', account='missing', password='longenough'))
+        with self.assertRaises(HTTPException):
+            await self.b['update_auto_backup'](model(enabled=1, time='04:30', account='default', password='short'))
+        await self.b['update_auto_backup'](model(enabled=1, time='04:30', account='default', caption_password=1, password='longenough'))
+        state = await self.b['get_auto_backup']()
+        self.assertEqual((state['enabled'], state['time'], state['account'], state['caption_password'], state['password_present']),
+                         (True, '04:30', 'default', True, True))
+        self.assertNotIn('longenough', str(state))
+        self.assertEqual(self.b['get_setting']('auto_backup_password'), 'longenough')
+        await self.b['update_auto_backup'](model(enabled=1, time='05:00', account='default', password=''))
+        self.assertEqual(self.b['get_setting']('auto_backup_password'), 'longenough')
+
+    async def test_auto_backup_uploads_then_prunes_remote_and_local_temp(self):
+        self.b['set_setting']('auto_backup_enabled', '1')
+        self.b['set_setting']('auto_backup_password', 'longenough')
+        self.b['set_setting']('auto_backup_caption_password', '1')
+        runtime = self.runtime
+        runtime.tg_state = {'phase': 'ready'}
+        package = self.base / 'tg-persona-migration-20260101-010101.tgp'
+        package.write_bytes(b'package')
+        fresh = SimpleNamespace(document=SimpleNamespace(attributes=[SimpleNamespace(file_name=package.name)]), delete=AsyncMock())
+        old = [SimpleNamespace(document=SimpleNamespace(attributes=[SimpleNamespace(file_name='tg-persona-migration-old%d.tgp' % i)]), delete=AsyncMock()) for i in range(4)]
+        other = SimpleNamespace(document=SimpleNamespace(attributes=[SimpleNamespace(file_name='not-a-backup.txt')]), delete=AsyncMock())
+        runtime.client = SimpleNamespace(get_messages=AsyncMock(return_value=[fresh] + old + [other]), send_file=AsyncMock())
+        work = self.base / '.migration-export-test'
+        work.mkdir()
+        self.b['data_migration'].create_package = lambda *args: (package, work)
+        result = await self.b['_run_auto_backup']('manual')
+        self.assertEqual((result['ok'], result['removed']), (True, 2))
+        call = runtime.client.send_file.await_args
+        self.assertEqual((call.args[0], call.args[1]), ('me', str(package)))
+        self.assertTrue(call.kwargs['force_document'])
+        self.assertIn('迁移包密码：longenough', call.kwargs['caption'])
+        self.assertFalse(work.exists())
+        self.assertEqual(self.b['get_setting']('auto_backup_last_error'), '')
+        self.assertEqual(self.b['get_setting']('auto_backup_last_file'), package.name)
+
+    async def test_auto_backup_skips_when_disabled_and_records_upload_failure(self):
+        result = await self.b['_run_auto_backup']('schedule')
+        self.assertEqual(result['skipped'], True)
+        self.b['set_setting']('auto_backup_enabled', '1')
+        self.b['set_setting']('auto_backup_password', 'longenough')
+        package = self.base / 'tg-persona-migration-x.tgp'; package.write_bytes(b'x')
+        self.b['data_migration'].create_package = lambda *args: (package, self.base / '.work-none')
+        self.runtime.tg_state = {'phase': 'idle'}
+        with self.assertRaisesRegex(ValueError, '未登录'):
+            await self.b['_run_auto_backup']('manual')
+        self.assertTrue(self.b['get_setting']('auto_backup_last_error'))
 
     async def test_learning_never_reads_or_writes_knowledge(self):
         await self.provider()

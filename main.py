@@ -35,6 +35,7 @@ import time
 import os
 import hashlib
 import hmac
+import csv
 import io
 import shutil
 import subprocess
@@ -169,6 +170,11 @@ def db_init(database=None):
         CREATE TABLE IF NOT EXISTS ai_learning_samples (
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, chat_id TEXT NOT NULL,
             text TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'owner'
+        );
+        CREATE TABLE IF NOT EXISTS ai_usage (
+            day TEXT NOT NULL, feature TEXT NOT NULL, provider_id TEXT NOT NULL DEFAULT '',
+            input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(day, feature, provider_id)
         );
         CREATE TABLE IF NOT EXISTS generated_messages (
             chat_id TEXT NOT NULL, message_id INTEGER NOT NULL, ts INTEGER NOT NULL,
@@ -372,7 +378,10 @@ def purge_hits(days=None):
 
 GLOBAL_SETTING_KEYS = {"tz", "theme", "log_keep_days", "uptime_since", "ocr_enabled", "icon_libraries",
                        "api_id", "api_hash",
-                       "signin_global_enabled", "signin_global_start", "signin_global_end"}
+                       "signin_global_enabled", "signin_global_start", "signin_global_end",
+                       "auto_backup_enabled", "auto_backup_time", "auto_backup_account",
+                       "auto_backup_caption_password", "auto_backup_password",
+                       "auto_backup_last_run", "auto_backup_last_error", "auto_backup_last_file"}
 
 
 def setting_db(key):
@@ -606,7 +615,7 @@ def _ai_provider_configs():
             for row in _ai_provider_rows() if row["enabled"]]
 
 
-def _record_ai_usage(provider_id, usage):
+def _record_ai_usage(provider_id, usage, feature="other"):
     if not re.fullmatch(r"[a-f0-9]{16}", str(provider_id or "")) or not isinstance(usage, dict):
         return
     try:
@@ -616,6 +625,17 @@ def _record_ai_usage(provider_id, usage):
         return
     if not input_tokens and not output_tokens:
         return
+    day = _beijing_now().strftime("%Y-%m-%d")
+    try:
+        get_account_db().execute(
+            "INSERT INTO ai_usage(day,feature,provider_id,input_tokens,output_tokens) VALUES(?,?,?,?,?) "
+            "ON CONFLICT(day,feature,provider_id) DO UPDATE SET "
+            "input_tokens=input_tokens+excluded.input_tokens, output_tokens=output_tokens+excluded.output_tokens",
+            (day, str(feature or "other")[:32], str(provider_id or ""),
+             input_tokens, output_tokens))
+        get_account_db().commit()
+    except sqlite3.Error:
+        pass
     with _ai_usage_guard:
         rows = _ai_provider_rows(migrate=False)
         for row in rows:
@@ -739,7 +759,7 @@ def _ai_endpoint(base):
     return base if base.endswith("/chat/completions") else base + "/chat/completions"
 
 
-async def _call_ai(cfg, content, max_tokens=512, assistant_mode=False):
+async def _call_ai(cfg, content, max_tokens=512, assistant_mode=False, feature="other"):
     if not cfg.get("base") or not cfg.get("key") or not cfg.get("model"):
         raise ValueError("请填写 AI API 地址、密钥和模型名")
     endpoint = _ai_endpoint(cfg["base"])
@@ -787,18 +807,18 @@ async def _call_ai(cfg, content, max_tokens=512, assistant_mode=False):
             if finish == "content_filter":
                 raise RuntimeError("AI 服务未提供正文（响应被内容过滤），请调整描述")
             raise RuntimeError("AI 返回空正文；接口已响应，但没有可用答案，请重试或检查模型配置")
-        _record_ai_usage(cfg.get("id"), data.get("usage"))
+        _record_ai_usage(cfg.get("id"), data.get("usage"), feature)
         return reply
 
 
-async def _call_ai_any(content, max_tokens=512, assistant_mode=False, provider_ids=None):
+async def _call_ai_any(content, max_tokens=512, assistant_mode=False, provider_ids=None, feature="other"):
     providers = _ordered_ai_providers(provider_ids)
     if not providers:
         raise ValueError("请先在设置中添加并启用 AI API")
     failures = []
     for cfg in providers:
         try:
-            return await _call_ai(cfg, content, max_tokens, assistant_mode)
+            return await _call_ai(cfg, content, max_tokens, assistant_mode, feature)
         except Exception as error:
             failures.append((cfg.get("note") or cfg.get("model") or "未备注",
                              _safe_ai_error(error, cfg.get("key", ""))))
@@ -994,7 +1014,7 @@ async def _distill_memory_group(blocks, target_stage, fade_count=0, created_at=N
         + json.dumps(source, ensure_ascii=False)
     )
     provider_ids = _valid_provider_ids(get_setting("flock_learning_provider_ids", ""), True)
-    reply = await _call_ai_any(prompt, max_tokens=AI_FLOCK_DISTILL_MAX_TOKENS, provider_ids=provider_ids)
+    reply = await _call_ai_any(prompt, max_tokens=AI_FLOCK_DISTILL_MAX_TOKENS, provider_ids=provider_ids, feature="learning")
     safe = ("" if str(reply or "").strip().upper() == "NO_MEMORY" else
             _safe_skill_markdown(reply, max_bytes=32 * 1024, allow_empty=target_stage == "fading"))
     if safe and len(safe) >= len(source):
@@ -1218,6 +1238,7 @@ async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False):
                                    AI_FLOCK_BUDGET_RANGES["knowledge_chars"], "knowledge_chars")
     knowledge_mode = _knowledge_usage(
         trigger_text, source.get("knowledge_on_demand"), knowledge_chars)
+    knowledge_slice = ""
     context_chars = context_messages * message_chars
     registration = source["kind"] == "registration"
     trigger = str(trigger_text or "").strip()[:message_chars]
@@ -1300,7 +1321,7 @@ async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False):
                 runtime.ai_flock_busy = True
                 owns_ai_slot = True
                 reply = (await _call_ai_any(instruction, max_tokens=max_tokens,
-                                            provider_ids=source["provider_ids"])).strip()
+                                            provider_ids=source["provider_ids"], feature="ai_flock")).strip()
         finally:
             runtime.ai_flock_waiting -= 1
             runtime.ai_flock_busy = False
@@ -1328,10 +1349,16 @@ async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False):
                        (key, source["task_id"]))
             db.commit()
         runtime.ai_flock_last[key] = time.monotonic()
+        if source.get("job_id"):
+            set_setting("flock_job_last_%s" % source["job_id"],
+                        json.dumps({"at": _beijing_now().strftime("%Y-%m-%d %H:%M"), "reply": reply[:120]},
+                                   ensure_ascii=False))
         add_hit("ai_flock", True, chat_id=key, rule_id=-source["task_id"] if source["task_id"] else 0,
                 content=trigger[:120], reply=reply,
                 detail={"kind": "ai_flock", "source": source["kind"], "task_id": source["task_id"],
-                        "job_id": source["job_id"]})
+                        "job_id": source["job_id"], "knowledge_mode": knowledge_mode or "",
+                        "knowledge_chars": len(knowledge_slice),
+                        "provider_ids": source["provider_ids"]})
     except errors.FloodWaitError as error:
         runtime.ai_flock_blocked[key] = time.monotonic() + error.seconds
     except Exception as error:
@@ -1630,7 +1657,7 @@ async def _learn_ai_flock_locked(force=False):
             "Existing skill:\n" + current + "\nSamples:\n" + json.dumps(samples, ensure_ascii=False)
         )
         try:
-            result = await _call_ai_any(prompt, max_tokens=max_tokens, provider_ids=provider_ids)
+            result = await _call_ai_any(prompt, max_tokens=max_tokens, provider_ids=provider_ids, feature="learning")
             result = _safe_skill_markdown(result, (sample["text"] for sample in samples))
             successes.append((batch, samples, result))
         except Exception as error:
@@ -4622,8 +4649,13 @@ async def lifespan(app):
         await asyncio.gather(*(restore(runtime) for runtime in account_registry.accounts.values()))
         data_migration.finish_startup_restore(BASE)
         _cleanup_migration_stages(startup=True)
+        backup_task = asyncio.create_task(auto_backup_loop())
         yield
     finally:
+        try:
+            backup_task.cancel()
+        except NameError:
+            pass
         await account_registry.shutdown()
 
 
@@ -5127,7 +5159,18 @@ async def list_ai_flock_jobs():
     _reconcile_group_configuration(db)
     db.commit()
     rows = get_account_db().execute("SELECT * FROM ai_flock_jobs ORDER BY id").fetchall()
-    return {"jobs": [dict(row) for row in rows]}
+    jobs = []
+    for row in rows:
+        job = dict(row)
+        raw = get_setting("flock_job_last_%s" % row["id"], "")
+        try:
+            last = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            last = {}
+        job["last_reply_at"] = last.get("at", "") if isinstance(last, dict) else ""
+        job["last_reply"] = last.get("reply", "") if isinstance(last, dict) else ""
+        jobs.append(job)
+    return {"jobs": jobs}
 
 
 @app.post("/api/ai/flock/jobs")
@@ -5877,12 +5920,18 @@ SETTING_KEYS = ["tz", "log_keep_days", "cooldown", "delay", "ignore_bots", "api_
                 "ai_base", "ai_key", "ai_model", "ai_enabled", "ocr_enabled",
                 "flock_enabled", "flock_count", "flock_minutes", "flock_pool", "task_concurrency",
                 "water_ai_enabled", "water_ai_groups", "water_ai_start", "water_ai_end", "water_ai_prompt",
-                "signin_global_enabled", "signin_global_start", "signin_global_end"]
+                "signin_global_enabled", "signin_global_start", "signin_global_end",
+                "auto_backup_enabled", "auto_backup_time", "auto_backup_account",
+                "auto_backup_caption_password", "auto_backup_last_run", "auto_backup_last_error",
+                "auto_backup_last_file"]
 DEFAULTS = {"cooldown": "20", "delay": "1.0 3.0", "ignore_bots": "1", "theme": "dark",
             "flock_count": "5", "flock_minutes": "5", "task_concurrency": "2", "ocr_enabled": "1", "log_keep_days": "30",
             "water_ai_enabled": "0", "water_ai_groups": "", "water_ai_start": "09:00", "water_ai_end": "22:00",
             "water_ai_prompt": DEFAULT_AI_FLOCK_PROMPT,
-            "signin_global_enabled": "0", "signin_global_start": "00:05", "signin_global_end": "00:41"}
+            "signin_global_enabled": "0", "signin_global_start": "00:05", "signin_global_end": "00:41",
+            "auto_backup_enabled": "0", "auto_backup_time": "04:30", "auto_backup_account": "default",
+            "auto_backup_caption_password": "0", "auto_backup_last_run": "", "auto_backup_last_error": "",
+            "auto_backup_last_file": ""}
 
 
 @app.get("/api/settings")
@@ -6282,6 +6331,38 @@ async def export_flock_knowledge():
         "Content-Disposition": 'attachment; filename="knowledge.md"', "Cache-Control": "no-store"})
 
 
+class KnowledgePreviewInput(BaseModel):
+    text: str = Field("", max_length=2000)
+    knowledge_chars: int = Field(AI_FLOCK_KNOWLEDGE_CHARS, ge=-1, le=KNOWLEDGE_MAX_BYTES)
+    knowledge_on_demand: int = Field(0, ge=0, le=1)
+
+
+@app.post("/api/ai/flock/knowledge/preview")
+async def preview_flock_knowledge(body: KnowledgePreviewInput):
+    try:
+        content = _read_knowledge()
+    except (ValueError, OSError) as error:
+        raise HTTPException(400, str(error)) from None
+    limit = body.knowledge_chars
+    mode = None
+    if limit:
+        if not body.knowledge_on_demand:
+            mode = "full"
+        elif _KNOWLEDGE_INTENT.search(body.text or ""):
+            mode = "relevant"
+        else:
+            mode = "chat"
+    if mode is None:
+        return {"mode": "", "chars": 0, "preview": "", "reason": "该消息不会引用知识"}
+    if mode in ("relevant", "full"):
+        take = content if limit == -1 else content[:limit]
+    else:
+        take = content[:1200 if limit == -1 else min(1200, limit)]
+    return {"mode": mode, "chars": len(take), "preview": take,
+            "reason": {"full": "每轮引用全部配置字数", "relevant": "提问或求助，引用约 "
+                       + str(len(take)) + " 字", "chat": "普通闲聊，仅低概率补充"}[mode]}
+
+
 @app.post("/api/ai/flock/knowledge/upload-now")
 async def upload_flock_knowledge():
     runtime = get_runtime()
@@ -6372,7 +6453,7 @@ async def exam_ai_flock_skill():
         provider_ids = _valid_provider_ids(get_setting("flock_learning_provider_ids", ""), True)
         evidence_texts = [sample["text"] for sample in samples] + [block["body"] for block in blocks]
         answer = _sanitize_exam_answer(
-            await _call_ai_any(prompt, max_tokens=1800, provider_ids=provider_ids), evidence_texts)
+            await _call_ai_any(prompt, max_tokens=1800, provider_ids=provider_ids, feature="learning"), evidence_texts)
         answer = _safe_skill_markdown(answer,
             [sample["text"] for sample in samples] + [block["body"] for block in blocks],
             max_bytes=24 * 1024)
@@ -6871,6 +6952,40 @@ async def get_state():
     }
 
 
+@app.get("/api/ai/usage")
+async def ai_usage_summary(days: int = 14):
+    days = max(1, min(int(days or 14), 90))
+    rows = get_account_db().execute(
+        "SELECT day,feature,SUM(input_tokens) i,SUM(output_tokens) o FROM ai_usage "
+        "GROUP BY day,feature ORDER BY day DESC").fetchall()
+    keep_days = sorted({row["day"] for row in rows}, reverse=True)[:days]
+    wanted = set(keep_days)
+    provider_rows = get_account_db().execute(
+        "SELECT day,provider_id,SUM(input_tokens) i,SUM(output_tokens) o FROM ai_usage GROUP BY day,provider_id").fetchall()
+    notes = {row["id"]: row["note"] or row["id"] for row in _ai_provider_rows(migrate=False)}
+    by_feature = {}
+    by_day = {day: {"input_tokens": 0, "output_tokens": 0} for day in keep_days}
+    by_provider = {}
+    for row in rows:
+        if row["day"] not in wanted:
+            continue
+        item = by_feature.setdefault(row["feature"], {"input_tokens": 0, "output_tokens": 0})
+        item["input_tokens"] += row["i"] or 0
+        item["output_tokens"] += row["o"] or 0
+        by_day[row["day"]]["input_tokens"] += row["i"] or 0
+        by_day[row["day"]]["output_tokens"] += row["o"] or 0
+    for row in provider_rows:
+        if row["day"] not in wanted:
+            continue
+        item = by_provider.setdefault(row["provider_id"], {"note": notes.get(row["provider_id"], row["provider_id"]),
+                                                           "input_tokens": 0, "output_tokens": 0})
+        item["input_tokens"] += row["i"] or 0
+        item["output_tokens"] += row["o"] or 0
+    return {"days": [{"day": day, **by_day[day]} for day in keep_days],
+            "features": [{"feature": key, **value} for key, value in sorted(by_feature.items())],
+            "providers": sorted(by_provider.values(), key=lambda item: -(item["input_tokens"] + item["output_tokens"]))}
+
+
 @app.post("/api/logs/clear")
 async def clear_logs(body: dict = None):
     """手动清理日志:days 给了按天数删,没有则全清"""
@@ -6890,7 +7005,7 @@ async def clear_logs(body: dict = None):
 
 
 @app.get("/api/logs")
-async def get_logs(n: int = 60, kind: str = "", q: str = ""):
+async def get_logs(n: int = 60, kind: str = "", q: str = "", before: int = 0):
     """kind: reply(关键词回复) / signin / grabcodes / redpacket / custom;留空=全部"""
     kind = (kind or "").strip()
     if kind == "reply":
@@ -6904,8 +7019,11 @@ async def get_logs(n: int = 60, kind: str = "", q: str = ""):
         like = "%" + q.strip()[:60] + "%"
         where += " AND (grp_name LIKE ? OR sender LIKE ? OR content LIKE ? OR reply LIKE ? OR detail LIKE ?)"
         params = list(params) + [like] * 5
+    if before:
+        where += " AND id<?"
+        params = list(params) + [int(before)]
     rows = get_account_db().execute(
-        "SELECT ts,chat_id,rule_id,msg_id,action,content,reply,grp_name,ok,sender,detail FROM hits "
+        "SELECT id,ts,chat_id,rule_id,msg_id,action,content,reply,grp_name,ok,sender,detail FROM hits "
         "WHERE " + where + " ORDER BY id DESC LIMIT ?",
         (*params, min(n, 200)),
     ).fetchall()
@@ -6918,14 +7036,29 @@ async def get_logs(n: int = 60, kind: str = "", q: str = ""):
             d["detail"] = {}
         out.append(d)
     if q.strip():
-        return {"hits": out, "counts": {}}
+        return {"hits": out, "counts": {}, "has_more": len(out) == min(n, 200)}
     counts = {"reply": 0, "signin": 0, "scheduled_register": 0, "grabcodes": 0, "redpacket": 0, "custom": 0,
               "keepalive": 0, "link_register": 0, "button_register": 0, "code_register": 0, "ai_flock": 0}
     for r in get_account_db().execute("SELECT action, COUNT(*) c FROM hits GROUP BY action").fetchall():
         k = "reply" if r["action"] in ("reply", "react", "both") else r["action"]
         if k in counts:
             counts[k] += r["c"]
-    return {"hits": out, "counts": counts}
+    return {"hits": out, "counts": counts, "has_more": len(out) == min(n, 200)}
+
+
+@app.get("/api/logs/export")
+async def export_logs(kind: str = "", q: str = ""):
+    payload = await get_logs(200, kind, q)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["时间", "类型", "结果", "群", "发送人", "内容", "回复", "详情"])
+    for hit in payload["hits"]:
+        writer.writerow([datetime.fromtimestamp(hit["ts"] or 0, timezone.utc).astimezone(tzinfo()).strftime("%Y-%m-%d %H:%M:%S"),
+                         hit["action"], "成功" if hit["ok"] else "失败" if hit["ok"] == 0 else "",
+                         hit.get("grp_name", ""), hit.get("sender", ""), hit.get("content", ""),
+                         hit.get("reply", ""), json.dumps(hit.get("detail") or {}, ensure_ascii=False)])
+    return Response("\ufeff" + buffer.getvalue(), media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition": 'attachment; filename="tg-persona-logs.csv"', "Cache-Control": "no-store"})
 
 
 # ---------- 前端 ----------
@@ -7015,6 +7148,148 @@ async def export_machine_backup(body: dict):
     return FileResponse(package, filename=package.name, media_type="application/octet-stream",
                         headers={"Cache-Control": "no-store"},
                         background=BackgroundTask(lambda: shutil.rmtree(work, ignore_errors=True)))
+
+
+AUTO_BACKUP_PREFIX = "tg-persona-migration-"
+
+
+def _auto_backup_name_matches(name):
+    return bool(name) and str(name).startswith(AUTO_BACKUP_PREFIX) and str(name).endswith(".tgp")
+
+
+async def _prune_remote_backups(runtime, keep=3):
+    """Remove older auto-backup packages from the target account's Saved Messages."""
+    try:
+        messages = await runtime.client.get_messages("me", limit=100)
+    except Exception as error:
+        raise ValueError("读取收藏夹备份列表失败：" + _safe_ai_error(error)) from None
+    ours = []
+    for message in messages or []:
+        document = getattr(message, "document", None)
+        filename = ""
+        for attribute in getattr(document, "attributes", None) or []:
+            candidate = getattr(attribute, "file_name", None)
+            if candidate:
+                filename = candidate
+                break
+        if _auto_backup_name_matches(filename):
+            ours.append(message)
+    for message in ours[keep:]:
+        try:
+            await message.delete()
+        except Exception as error:
+            log.warning("清理旧自动备份失败: %s", type(error).__name__)
+    return max(0, len(ours) - keep)
+
+
+async def _run_auto_backup(trigger="manual"):
+    """Create a full migration package, upload it to the chosen account, then clean up."""
+    if get_setting("auto_backup_enabled", "0") != "1" and trigger != "manual":
+        return {"ok": False, "skipped": True, "reason": "自动备份未启用"}
+    password = str(get_setting("auto_backup_password", "") or "")
+    if len(password) < 8:
+        raise ValueError("请先设置至少 8 位的自动备份密码")
+    account_id = str(get_setting("auto_backup_account", "default") or "default")
+    runtime = account_registry.accounts.get(account_id)
+    if runtime is None or runtime.db is None or runtime.storage_error:
+        raise ValueError("自动备份账号不存在或数据不可用")
+    note_password = get_setting("auto_backup_caption_password", "0") == "1"
+    if _migration_busy() or _migration_lock.locked():
+        raise ValueError("有任务或系统更新正在运行，稍后再执行自动备份")
+    async with _migration_lock:
+        account_ids = [aid for aid in account_registry.accounts if aid != "default"]
+        package = work = None
+        try:
+            package, work = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: data_migration.create_package(
+                    BASE, DATA, account_ids, updater.current_version(), password))
+            async with runtime.lifecycle():
+                if runtime.client is None or runtime.tg_state.get("phase") != "ready":
+                    raise ValueError("自动备份账号未登录，无法上传收藏夹")
+                caption = "TG-Persona 自动整机备份 " + _beijing_now().strftime("%Y-%m-%d %H:%M")
+                if note_password:
+                    caption += "\n迁移包密码：" + password
+                await runtime.client.send_file("me", str(package), force_document=True, caption=caption)
+                removed = await _prune_remote_backups(runtime)
+            set_setting("auto_backup_last_run", _beijing_now().strftime("%Y-%m-%d %H:%M"))
+            set_setting("auto_backup_last_file", package.name)
+            set_setting("auto_backup_last_error", "")
+            log.info("自动整机备份完成：%s，清理旧备份 %s 份", package.name, removed)
+            return {"ok": True, "file": package.name, "removed": removed}
+        except Exception as error:
+            set_setting("auto_backup_last_error", _safe_ai_error(error)[:300])
+            set_setting("auto_backup_last_run", _beijing_now().strftime("%Y-%m-%d %H:%M"))
+            raise
+        finally:
+            if work is not None:
+                shutil.rmtree(work, ignore_errors=True)
+
+
+async def auto_backup_loop():
+    """Check once a minute; run at most once per local day at the configured time."""
+    while True:
+        try:
+            if get_setting("auto_backup_enabled", "0") == "1":
+                now = now_local()
+                target = str(get_setting("auto_backup_time", "04:30") or "04:30")
+                today = now.strftime("%Y-%m-%d")
+                if (now.strftime("%H:%M") == target
+                        and not str(get_setting("auto_backup_last_run", "") or "").startswith(today)):
+                    await _run_auto_backup("schedule")
+        except Exception as error:
+            log.warning("自动备份失败：%s", _safe_ai_error(error))
+        await asyncio.sleep(60)
+
+
+@app.get("/api/migration/auto-backup")
+async def get_auto_backup():
+    return {"enabled": get_setting("auto_backup_enabled", "0") == "1",
+            "time": get_setting("auto_backup_time", "04:30"),
+            "account": get_setting("auto_backup_account", "default"),
+            "caption_password": get_setting("auto_backup_caption_password", "0") == "1",
+            "password_present": len(str(get_setting("auto_backup_password", "") or "")) >= 8,
+            "last_run": get_setting("auto_backup_last_run", ""),
+            "last_error": get_setting("auto_backup_last_error", ""),
+            "last_file": get_setting("auto_backup_last_file", ""),
+            "accounts": [{"id": aid, "label": rt.label, "logged_in": rt.tg_state.get("phase") == "ready"}
+                         for aid, rt in account_registry.accounts.items()]}
+
+
+class AutoBackupInput(BaseModel):
+    enabled: int = Field(0, ge=0, le=1)
+    time: str = Field("04:30", max_length=5)
+    account: str = Field("default", max_length=64)
+    caption_password: int = Field(0, ge=0, le=1)
+    password: str = Field("", max_length=256)
+
+
+@app.put("/api/migration/auto-backup")
+async def update_auto_backup(body: AutoBackupInput):
+    if _win_minutes(body.time) is None:
+        raise HTTPException(400, "自动备份时间须为 HH:MM")
+    if body.account not in account_registry.accounts:
+        raise HTTPException(400, "自动备份账号不存在")
+    if body.password:
+        if len(body.password) < 8:
+            raise HTTPException(400, "自动备份密码至少 8 位")
+        set_setting("auto_backup_password", body.password)
+    elif body.enabled and len(str(get_setting("auto_backup_password", "") or "")) < 8:
+        raise HTTPException(400, "请先设置自动备份密码")
+    set_setting("auto_backup_enabled", str(int(body.enabled)))
+    set_setting("auto_backup_time", body.time)
+    set_setting("auto_backup_account", body.account)
+    set_setting("auto_backup_caption_password", str(int(body.caption_password)))
+    return {"ok": True}
+
+
+@app.post("/api/migration/auto-backup/run")
+async def run_auto_backup_now():
+    try:
+        return await _run_auto_backup("manual")
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from None
+    except Exception as error:
+        raise HTTPException(502, "自动备份失败：" + _safe_ai_error(error)) from None
 
 
 @app.put("/api/migration/import")

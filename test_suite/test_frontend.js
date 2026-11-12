@@ -1502,6 +1502,35 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     ex("document.visibilityState='hidden'");tick();assert.strictEqual(states,0);assert.strictEqual(logs,0);assert.strictEqual(skills,0);ex('document.listeners.visibilitychange()');assert.strictEqual(states,0);assert.strictEqual(logs,0);
     ex("document.visibilityState='visible'");assert.strictEqual(ex('pageIsHidden()'),false);ex('refreshVisibleTab()');assert.strictEqual(states,1);assert.strictEqual(logs,1);assert(js.includes("addEventListener('visibilitychange',()=>{if(!pageIsHidden())refreshVisibleTab()})"));tick();assert.strictEqual(states,2);assert.strictEqual(logs,2);assert.strictEqual(skills,0);ex("activeTab='settings';waterAISkillBusy=false;waterAISkillLoading=false");tick();assert.strictEqual(skills,1);ex('waterAISkillBusy=true');tick();assert.strictEqual(skills,1);ex("waterAISkillBusy=false;waterAISkillLoading=true");tick();assert.strictEqual(skills,1);ex("waterAISkillLoading=false;activeTab='autos'");tick();assert.strictEqual(skills,1);assert(js.includes('setInterval(pollVisibleState,5000)'));assert(js.includes('loadFlockSkill(true)'));
   });
+  await test('日志导出CSV和加载更早携带分类搜索与游标',async()=>{
+    assert(html.includes('onclick="exportLogs()"')&&html.includes('id="logMore"'));
+    ex("selectedAccount='log-more';accountEpoch++;logKind='signin';logQ='x';logBefore=0;logHasMore=false");
+    assert(js.includes("'/api/logs/export?kind='+encodeURIComponent(logKind)"));assert(js.includes("logQ?('&q='+encodeURIComponent(logQ))"));assert(js.includes("link.download='tg-persona-logs.csv'"));
+    const req=[];app.api=async(p,o)=>{req.push([p,o]);return {hits:[{id:42,ts:1,action:'signin',ok:1,detail:{}}],has_more:true}};
+    ex("logOpenIds.clear();document.querySelector('#logList').innerHTML='';logBefore=99;logHasMore=true");
+    await ex('loadMoreLogs()');assert(req[0][0].includes('before=99')&&req[0][0].includes('n=80'));assert.strictEqual(ex('logBefore'),42);assert(ex('logHasMore'));
+    ex('logBefore=0;logHasMore=false;loadMoreLogs()');assert.strictEqual(req.length,1);
+  });
+  await test('AI用量按日功能线路展示且失败不破坏页面',async()=>{
+    ex("selectedAccount='usage';accountEpoch++;aiUsageBusy=false");app.api=async p=>{assert.strictEqual(p,'/api/ai/usage?days=14');return {days:[{day:'2026-11-12',input_tokens:12,output_tokens:3}],features:[{feature:'ai_flock',input_tokens:12,output_tokens:3}],providers:[{note:'主线路',input_tokens:12,output_tokens:3}]}};
+    await ex('loadAIUsage()');const body=q('#aiUsageBody');assert.strictEqual(body.children.length,1);assert.strictEqual(body.innerHTML,'');const wrap=body.children[0],labels=[...new Set((wrap.children||[]).map(node=>node.textContent))];assert(labels.some(v=>String(v).includes('最近 14 天')));assert(labels.some(v=>String(v).includes('AI 水群')));assert(labels.some(v=>String(v).includes('主线路')));
+    app.api=async()=>{throw new Error('mock usage error')};await ex('loadAIUsage()');assert(q('#aiUsageBody').textContent.includes('用量加载失败'));
+  });
+  await test('知识引用预览只读提交文本字数与按需模式',async()=>{
+    ex("selectedAccount='kp';accountEpoch++;aiProvidersLoaded=true");q('#knowledgePreviewText').value='CF 522 怎么办';q('#knowledgePreviewChars').value='500';q('#knowledgePreviewOnDemand').value='1';
+    let request;app.api=async(p,o)=>{request=[p,o];return {mode:'relevant',chars:500,reason:'提问或求助，引用约 500 字',preview:'知识片段'}};
+    await ex('previewKnowledge()');assert.strictEqual(request[0],'/api/ai/flock/knowledge/preview');assert.deepStrictEqual(JSON.parse(request[1].body),{text:'CF 522 怎么办',knowledge_chars:500,knowledge_on_demand:1});assert.strictEqual(q('#knowledgePreviewResult').textContent,'提问或求助，引用约 500 字\n\n知识片段');assert(!q('#knowledgePreviewBtn').disabled);
+    app.api=async()=>({mode:'',chars:0,preview:'',reason:'该消息不会引用知识'});await ex('previewKnowledge()');assert.strictEqual(q('#knowledgePreviewResult').textContent,'该消息不会引用知识');
+  });
+  await test('自动备份保存账号时间密码备注且立即备份提示结果',async()=>{
+    ex("selectedAccount='backup';accountEpoch++;autoBackupBusy=false");app.api=async p=>({enabled:true,time:'04:30',account:'default',caption_password:true,password_present:true,last_run:'2026-11-12 04:30',last_error:'',accounts:[{id:'default',label:'默认',logged_in:true,phase:'ready'},{id:'second',label:'小号',logged_in:false,phase:'idle'}]});
+    await ex('loadAutoBackup()');assert(q('#autoBackupEnabled').checked);assert.strictEqual(q('#autoBackupPassword').value,'');assert(q('#autoBackupPassword').placeholder.includes('留空不修改'));
+    const options=q('#autoBackupAccount').children;assert.strictEqual(options.length,2);assert.strictEqual(options[0].value,'default');assert(options[1].textContent.includes('小号'));
+    let request;app.api=async(p,o)=>{if(o&&o.method==='PUT')request=[p,o];return o&&o.method==='PUT'?{ok:true}:{enabled:false,accounts:[]}};ex('autoBackupBusy=false');q('#autoBackupTime').value='05:15';q('#autoBackupAccount').value='second';q('#autoBackupCaptionPassword').checked=true;q('#autoBackupPassword').value='secret123';
+    await ex('saveAutoBackup()');assert.strictEqual(request[0],'/api/migration/auto-backup');assert.deepStrictEqual(JSON.parse(request[1].body),{enabled:1,time:'05:15',account:'second',caption_password:1,password:'secret123'});
+    let ran=false;app.api=async(p,o)=>{if(p==='/api/migration/auto-backup/run'){ran=true;return {ok:true,file:'tg-persona-migration-1.tgp',removed:2}}return {enabled:true,time:'05:15',account:'second',caption_password:true,password_present:true,last_run:'2026-11-12 05:15',last_error:'',accounts:[{id:'default',label:'默认',logged_in:true}]}};app.window.confirm=()=>true;await ex('runAutoBackupNow()');assert(ran);assert(q('#autoBackupStatus').textContent.includes('2026-11-12 05:15'));assert(!q('#autoBackupNow').disabled);
+    ex('autoBackupBusy=false');q('#autoBackupEnabled').checked=false;ex('syncAutoBackupForm()');assert(q('#autoBackupFields').classList.contains('hidden'));
+  });
   await test('日志轮询重绘保留当前展开详情',async()=>{
     assert(js.includes('let logOpenIds=new Set()'));
     assert(js.includes("open=logOpenIds.has(logId)?' open':''"));

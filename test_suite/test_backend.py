@@ -30,6 +30,8 @@ from types import SimpleNamespace
 from typing import Optional
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
+import uuid
+import shutil
 import zlib
 from custom_workflow import (canonical_steps, canonical_trigger, group_matches, parse_steps,
                              parse_trigger, redact as redact_custom, render_template, search_pattern,
@@ -83,7 +85,7 @@ def load_backend():
                          'AI_FLOCK_LEARNING_MESSAGE_CHARS', 'AI_FLOCK_LEARNING_SKILL_CHARS',
                          'AI_FLOCK_LEARNING_MAX_TOKENS', 'AI_FLOCK_LEARNING_UNLIMITED_MAX_TOKENS',
                           'AI_FLOCK_LEARNING_RANGES', 'SKILL_MAX_BYTES', 'KNOWLEDGE_MAX_BYTES', 'AI_FLOCK_KNOWLEDGE_CHARS',
-                         'AI_FLOCK_MEMORY_BLOCK_MAX_BYTES', 'AI_FLOCK_DISTILL_MAX_TOKENS', '_KNOWLEDGE_INTENT'}
+                         'AI_FLOCK_MEMORY_BLOCK_MAX_BYTES', 'AI_FLOCK_DISTILL_MAX_TOKENS', '_KNOWLEDGE_INTENT', 'AUTO_BACKUP_PREFIX'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -93,7 +95,7 @@ def load_backend():
             selected.append(node)
     names = {name: globals()[name] for name in ('ast', 'asyncio', 'base64', 'OrderedDict', 'datetime',
              'timezone', 'timedelta', 'hashlib', 'hmac', 'ipaddress', 'json', 'math', 'random', 're',
-              'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'ContextVar')}
+              'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'ContextVar', 'uuid', 'shutil')}
     names.update(BaseModel=Model, Optional=Optional, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
                   HTTPException=HTTPException, JSONResponse=Response, Response=Response, os=os, io=io,
                   log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=Exception,

@@ -285,6 +285,25 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await self.req('GET', '/api/logs', 'default')).json()['hits'])
         self.assertFalse((await self.req('GET', '/api/logs', aid)).json()['hits'])
 
+    async def test_logs_pagination_export_and_ai_usage_are_account_scoped(self):
+        aid = await self.create()
+        with use_runtime(self.rt(aid)):
+            for i in range(3):
+                self.main.add_hit('signin', True, chat_id='@x', content='hit-'+str(i), detail={'task': 't'})
+            self.main._record_ai_usage('0123456789abcdef', {'prompt_tokens': 5, 'completion_tokens': 2}, 'ai_flock')
+        page = (await self.req('GET', '/api/logs?n=2', aid)).json()
+        self.assertEqual((len(page['hits']), page['has_more']), (2, True))
+        older = (await self.req('GET', '/api/logs?n=2&before=' + str(page['hits'][-1]['id']), aid)).json()
+        self.assertEqual((len(older['hits']), older['has_more']), (1, False))
+        exported = await self.req('GET', '/api/logs/export?kind=signin', aid)
+        self.assertEqual(exported.status_code, 200)
+        self.assertIn('text/csv', exported.headers['content-type'])
+        self.assertIn('hit-0', exported.text)
+        usage = (await self.req('GET', '/api/ai/usage?days=14', aid)).json()
+        self.assertEqual(usage['features'][0]['input_tokens'], 5)
+        empty = (await self.req('GET', '/api/ai/usage?days=14', 'default')).json()
+        self.assertEqual(empty['features'], [])
+
     async def test_learning_status_is_account_local(self):
         aid=await self.create()
         with use_runtime(self.rt()):
