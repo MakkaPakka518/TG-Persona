@@ -116,6 +116,9 @@ class AccountRuntime:
     housekeeping_task: object = None
     health_task: object = None
     ai_learning_task: object = None
+    ai_learning_worker_task: object = None
+    ai_learning_busy: bool = False
+    ai_learning_next_at: int = 0
     session_alerted: bool = False
     handler_registered: bool = False
     closing: bool = False
@@ -278,7 +281,7 @@ class AccountRuntime:
             self.client = None
             self.handler_registered = False
             self.clear_auto_queue()
-            for name in ("watcher_task", "signin_task", "scheduled_task", "poll_task", "keepalive_task", "housekeeping_task", "health_task", "ai_learning_task"):
+            for name in ("watcher_task", "signin_task", "scheduled_task", "poll_task", "keepalive_task", "housekeeping_task", "health_task", "ai_learning_task", "ai_learning_worker_task"):
                 setattr(self, name, None)
             self.tg_phone = ""
             self.tg_state.update(phase="idle", phone="", me=None, err=None, health_error=None)
@@ -296,6 +299,8 @@ class AccountRuntime:
             self.generated_message_ids.clear()
             self._ai_flock_lock = None
             self._skill_lock = None
+            self.ai_learning_busy = False
+            self.ai_learning_next_at = 0
             self.custom_trigger_pending.clear()
             self.custom_trigger_task = None
             self.session_alerted = False

@@ -227,15 +227,15 @@ class TaskManagementTests(unittest.TestCase):
         for task_type in ('link_register','button_register','code_register'):
             patch=dict(type=task_type,name=task_type,btn_text='注册',keywords='注册状态',success_kw='成功',
                        ai_flock_provider_ids='0123456789abcdef',ai_flock_reaction='👍',
-                       ai_flock_context_messages=9,ai_flock_message_chars=240,
-                       ai_flock_skill_chars=4500,ai_flock_max_tokens=700)
+                       ai_flock_context_messages=50,ai_flock_message_chars=2000,
+                       ai_flock_skill_chars=200000,ai_flock_max_tokens=8192)
             if task_type=='button_register':patch.update(announcement_kw='开注',announcement_button='点击注册')
             if task_type=='code_register':patch.update(groups='-100123',target='@fixed_bot')
             self.add(**patch)
         exported=self.client.get('/api/tasks/export').json();imported=self.imp(exported,account='other',preview=False)
         self.assertEqual(imported.status_code,200,imported.text)
         rows=self.dbs['other'].execute('SELECT type,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens FROM automations ORDER BY id').fetchall()
-        self.assertEqual(rows,[(kind,'0123456789abcdef','👍',9,240,4500,700) for kind in ('link_register','button_register','code_register')])
+        self.assertEqual(rows,[(kind,'0123456789abcdef','👍',50,2000,200000,8192) for kind in ('link_register','button_register','code_register')])
 
     def test_batch_default_apply_preserves_success(self):
         aid = self.add()

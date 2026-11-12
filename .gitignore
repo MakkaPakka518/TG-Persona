@@ -9,3 +9,4 @@ __pycache__/
 *.pyc
 dist/
 .pytest_cache/
+.playwright-cli/

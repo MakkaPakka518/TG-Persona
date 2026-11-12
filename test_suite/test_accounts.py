@@ -265,6 +265,15 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await self.req('GET', '/api/logs', 'default')).json()['hits'])
         self.assertFalse((await self.req('GET', '/api/logs', aid)).json()['hits'])
 
+    async def test_learning_status_is_account_local(self):
+        aid=await self.create()
+        with use_runtime(self.rt()):
+            self.main.set_setting('flock_learning_last_status','error');self.main.set_setting('flock_learning_last_error','default-error')
+        with use_runtime(self.rt(aid)):
+            self.main.set_setting('flock_learning_last_status','success');self.main.set_setting('flock_learning_last_error','')
+        first=(await self.req('GET','/api/ai/flock/skill','default')).json();second=(await self.req('GET','/api/ai/flock/skill',aid)).json()
+        self.assertEqual((first['learning_state'],first['flock_learning_last_error']),('error','default-error'));self.assertEqual((second['learning_state'],second['flock_learning_last_error']),('disabled',''))
+
     async def test_event_callbacks_bind_explicit_owner(self):
         aid = await self.create()
         first, second = self.rt(), self.rt(aid)

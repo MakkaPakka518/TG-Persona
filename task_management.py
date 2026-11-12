@@ -44,8 +44,8 @@ INTEGER_LIMITS = {
     "history_first": (0, 1), "link_mode": (0, 1), "link_limit": (2, 4), "link_wait": (2, 15),
     "success_reply_enabled": (0, 1), "success_reply_delay": (0, 300),
     "ai_flock_enabled": (0, 1), "ai_flock_minutes": (1, 60),
-    "ai_flock_context_messages": (1, 20), "ai_flock_message_chars": (40, 500),
-    "ai_flock_skill_chars": (0, 10000), "ai_flock_max_tokens": (50, 1000),
+    "ai_flock_context_messages": (1, 50), "ai_flock_message_chars": (40, 2000),
+    "ai_flock_skill_chars": (0, 200000), "ai_flock_max_tokens": (50, 8192),
 }
 # Only effective fields are applied; custom windows/delays are NOT scheduled.
 APPLICABILITY = {

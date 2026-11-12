@@ -150,15 +150,15 @@ def probe():
         check('provider-fixture-secret' not in listed_providers.text, 'AI API 列表不回传密钥')
         provider_id=created_provider.json()['provider']['id']
         check(https_client.post('/api/groups',json={'chat_id':'-1001','name':'测试群'}).status_code==200, '水群测试监听群可创建')
-        job={'name':'测试水群','enabled':1,'groups':'-1001','start_time':'09:00','end_time':'11:00','prompt':'自然聊天','provider_ids':provider_id,'reaction':'👍','context_messages':8,'message_chars':200,'skill_chars':4000,'max_tokens':500}
+        job={'name':'测试水群','enabled':1,'groups':'-1001','start_time':'09:00','end_time':'11:00','prompt':'自然聊天','provider_ids':provider_id,'reaction':'👍','context_messages':50,'message_chars':2000,'skill_chars':200000,'max_tokens':8192}
         check(https_client.post('/api/ai/flock/jobs',json=job).status_code==200, '真实路由可创建 AI 水群任务')
         jobs=https_client.get('/api/ai/flock/jobs').json()['jobs']
-        check(len(jobs)==1 and [jobs[0][key] for key in ('context_messages','message_chars','skill_chars','max_tokens')]==[8,200,4000,500], '真实路由可列出 AI 水群任务及预算')
-        skill={'content':'- 使用短句','flock_learning_enabled':1,'flock_learning_groups':'-1001','flock_learning_start':'09:00','flock_learning_end':'11:00','flock_learning_provider_ids':provider_id,'flock_skill_upload_time':'03:00','flock_learning_batch_size':30,'flock_learning_message_chars':220,'flock_learning_skill_chars':7000,'flock_learning_max_tokens':900,'flock_learning_unlimited':1,'flock_learning_unlimited_start':'2026-11-12T00:00','flock_learning_unlimited_end':'2026-11-13T00:00','flock_skill_distill_enabled':1,'flock_skill_distill_time':'04:20'}
+        check(len(jobs)==1 and [jobs[0][key] for key in ('context_messages','message_chars','skill_chars','max_tokens')]==[50,2000,200000,8192], '真实路由可列出 AI 水群任务及预算')
+        skill={'content':'- 使用短句','flock_learning_enabled':1,'flock_learning_groups':'-1001','flock_learning_start':'09:00','flock_learning_end':'11:00','flock_learning_provider_ids':provider_id,'flock_skill_upload_time':'03:00','flock_learning_batch_size':200,'flock_learning_message_chars':4096,'flock_learning_skill_chars':1048576,'flock_learning_max_tokens':32768,'flock_learning_unlimited':1,'flock_learning_unlimited_start':'2026-11-12T00:00','flock_learning_unlimited_end':'2026-11-13T00:00','flock_skill_distill_enabled':1,'flock_skill_distill_time':'04:20'}
         check(https_client.put('/api/ai/flock/skill',json=skill).status_code==200, '真实路由可保存 skill 和学习配置')
         learned=https_client.get('/api/ai/flock/skill').json()
         check('content' not in learned, 'skill 设置接口不返回完整内容')
-        check([learned[key] for key in ('flock_learning_batch_size','flock_learning_message_chars','flock_learning_skill_chars','flock_learning_max_tokens')]==['30','220','7000','900'], '真实路由返回学习预算')
+        check([learned[key] for key in ('flock_learning_batch_size','flock_learning_message_chars','flock_learning_skill_chars','flock_learning_max_tokens')]==['200','4096','1048576','32768'], '真实路由返回学习预算')
         check(learned['flock_learning_unlimited']=='1', '真实路由返回无限学习开关')
         check((learned['flock_skill_distill_enabled'],learned['flock_skill_distill_time'])==('1','04:20'), '真实路由返回蒸馏设置')
         check(https_client.put('/api/ai/flock/skill/import',content='- 导入风格'.encode()).status_code==200, '真实路由可导入 UTF-8 skill')

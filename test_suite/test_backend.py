@@ -135,7 +135,7 @@ def load_backend():
             return self._skill_lock
         def __getattr__(self, name):
             key = aliases.get(name, name)
-            default = {} if name in dict_fields else set() if name in set_fields else False if name in ('handler_registered','session_alerted','closing','closed','stopping','ai_flock_busy') else 0 if name == 'ai_flock_waiting' else '' if name=='tg_phone' else None
+            default = {} if name in dict_fields else set() if name in set_fields else False if name in ('handler_registered','session_alerted','closing','closed','stopping','ai_flock_busy','ai_learning_busy') else 0 if name in ('ai_flock_waiting','ai_learning_next_at') else '' if name=='tg_phone' else None
             return names.setdefault(key, default)
         def __setattr__(self, name, value):
             names[aliases.get(name, name)] = value
