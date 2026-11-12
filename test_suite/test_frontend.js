@@ -1322,6 +1322,22 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     ex("cancelAutoEdit('button_register')");q('#brName').value='修复引用';q('#brUser').value='user';q('#brSecret').value='secret';const requests=[];app.api=async(p,o)=>{requests.push([p,o]);return {id:201}};app.loadAutos=async()=>{};await ex("saveAuto('button_register')");assert.strictEqual(JSON.parse(requests[0][1].body).ai_flock_provider_ids,'');
     ex('resetFlockSkillForm()');app.api=async(p,o)=>{requests.push([p,o]);return {ok:true}};app.loadFlockSkill=async()=>{};await ex('saveFlockSkill()');assert.strictEqual(JSON.parse(requests.at(-1)[1].body).flock_learning_provider_ids,'');
   });
+  await test('保存时API或群列表尚未加载仍保留原选择，不误报失效',async()=>{
+    ex("selectedAccount='pending-load';accountEpoch++;aiProvidersLoaded=false;watchedGroupsLoaded=false;waterAIJobs=[];aiProviders=[];watchedGroups=[];openWaterAIJobForm();waterAIJobGroupSel=new Set(['-1001']);aiProviders=[{id:'1111111111111111',enabled:true}]");q('#waterAiJobName').value='等待加载';q('#waterAiJobStart').value='09:00';q('#waterAiJobEnd').value='10:00';q('#waterAiJobPrompt').value='聊';
+    let sent=0;app.api=async()=>{sent++;return {ok:true}};app.loadWaterAIJobs=async()=>{};
+    ex("waterAIJobGroupSel=new Set(['-1001']);waterAIJobProviderSel=new Set(['1111111111111111'])");
+    await ex('saveWaterAIJob()');assert.strictEqual(sent,1);assert(q('#toast').textContent!=='原 API 已失效，请重新选择至少一个已启用 API');
+    ex('resetWaterAIJobForm()');
+  });
+  await test('列表未加载时保存不清空已选API或群，加载后才过滤失效项',async()=>{
+    ex("selectedAccount='guard';accountEpoch++;aiProvidersLoaded=false;watchedGroupsLoaded=false;aiProviders=[];watchedGroups=[]");
+    assert.strictEqual(ex("enabledProviderCsv('1111111111111111,2222222222222222')"),'1111111111111111,2222222222222222');
+    assert.strictEqual(ex("watchedGroupCsv('-1001,-1002')"),'-1001,-1002');
+    assert.strictEqual(ex("explicitProviderSelectionBroken(true,'1111111111111111')"),false);
+    assert.strictEqual(ex("selectedAIProvidersEnabled('1111111111111111')"),true);
+    ex("aiProvidersLoaded=true;aiProviders=[{id:'1111111111111111',enabled:true}]");assert.strictEqual(ex("enabledProviderCsv('1111111111111111,2222222222222222')"),'1111111111111111');assert.strictEqual(ex("explicitProviderSelectionBroken(true,'2222222222222222')"),true);
+    ex("watchedGroupsLoaded=true;watchedGroups=[{chat_id:'-1001'}]");assert.strictEqual(ex("watchedGroupCsv('-1001,-1002')"),'-1001');
+  });
   await test('显式API全失效阻止水群注册学习保存，混合引用只保存有效项',async()=>{
     app.validProviders=[{id:'1111111111111111',note:'有效',enabled:true}];ex("selectedAccount='explicit-provider';accountEpoch++;aiProviders=validProviders;aiProvidersLoaded=true;watchedGroups=[{chat_id:'-1001',name:'群'}];watchedGroupsLoaded=true;staleReferenceNoticeShown=false;waterAIJobs=[{id:401,name:'全失效',enabled:0,groups:'-1001',start_time:'09:00',end_time:'10:00',prompt:'',provider_ids:'3333333333333333'}];openWaterAIJobForm(401)");assert(ex('waterAIJobProviderExplicit'));assert.strictEqual(ex('waterAIJobProviderSel.size'),0);let requests=[];app.api=async(p,o)=>{requests.push([p,o]);return {ok:true}};app.loadWaterAIJobs=async()=>{};await ex('saveWaterAIJob()');assert.strictEqual(requests.length,0);assert.strictEqual(q('#toast').textContent,'原 API 已失效，请重新选择至少一个已启用 API');
     ex("waterAIJobs=[{id:402,name:'混合',enabled:0,groups:'-1001',start_time:'09:00',end_time:'10:00',prompt:'',provider_ids:'3333333333333333,1111111111111111'}];openWaterAIJobForm(402)");await ex('saveWaterAIJob()');assert.strictEqual(JSON.parse(requests.at(-1)[1].body).provider_ids,'1111111111111111');ex("openWaterAIJobForm();waterAIJobGroupSel=new Set(['-1001'])");q('#waterAiJobName').value='全部线路';q('#waterAiJobStart').value='10:00';q('#waterAiJobEnd').value='11:00';await ex('saveWaterAIJob()');assert.strictEqual(JSON.parse(requests.at(-1)[1].body).provider_ids,'');assert.strictEqual(ex('waterAIJobProviderExplicit'),false);

@@ -3173,11 +3173,11 @@ function syncKnowledgeLimit(prefix){$('#'+prefix+'KnowledgeChars').disabled=$('#
 function setIntegerFields(idPrefix,data,specs,fieldPrefix=''){for(const [suffix,field,fallback] of specs){const value=data?.[fieldPrefix+field]??fallback;if(suffix==='KnowledgeChars'){$('#'+idPrefix+'KnowledgeUnlimited').checked=Number(value)===-1;$('#'+idPrefix+suffix).value=Number(value)===-1?fallback:value;syncKnowledgeLimit(idPrefix)}else $('#'+idPrefix+suffix).value=value}}
 function readIntegerFields(idPrefix,specs,fieldPrefix=''){const values={};for(const [suffix,field,,min,max,label] of specs){if(suffix==='KnowledgeChars'&&$('#'+idPrefix+'KnowledgeUnlimited').checked){values[fieldPrefix+field]=-1;continue}const raw=$('#'+idPrefix+suffix).value.trim(),value=Number(raw);if(!raw||!Number.isInteger(value)||value<min||value>max)throw new Error(label+'须为 '+min+'–'+max+' 的整数');values[fieldPrefix+field]=value}return values}
 function validIntegerFields(idPrefix,specs,fieldPrefix=''){try{return readIntegerFields(idPrefix,specs,fieldPrefix)}catch(e){toast(e.message,1);return null}}
-function selectedAIProvidersEnabled(value){return csvValues(value).every(id=>aiProviders.some(provider=>provider.enabled&&String(provider.id)===id))}
-function enabledProviderCsv(value){return csvValues(value).filter(id=>aiProviders.some(provider=>provider.enabled&&String(provider.id)===id)).join(',')}
-function explicitProviderSelectionBroken(explicit,value){return !!explicit&&!enabledProviderCsv(value)}
+function selectedAIProvidersEnabled(value){if(!aiProvidersLoaded)return true;return csvValues(value).every(id=>aiProviders.some(provider=>provider.enabled&&String(provider.id)===id))}
+function enabledProviderCsv(value){const ids=csvValues(value);if(!aiProvidersLoaded)return ids.join(',');return ids.filter(id=>aiProviders.some(provider=>provider.enabled&&String(provider.id)===id)).join(',')}
+function explicitProviderSelectionBroken(explicit,value){if(!aiProvidersLoaded)return false;return !!explicit&&!enabledProviderCsv(value)}
 function rejectBrokenProviderSelection(explicit,value){if(!explicitProviderSelectionBroken(explicit,value))return false;toast('原 API 已失效，请重新选择至少一个已启用 API',1);return true}
-function watchedGroupCsv(value){return csvValues(value).filter(id=>watchedGroups.some(group=>String(group.chat_id)===id)).join(',')}
+function watchedGroupCsv(value){const ids=csvValues(value);if(!watchedGroupsLoaded)return ids.join(',');return ids.filter(id=>watchedGroups.some(group=>String(group.chat_id)===id)).join(',')}
 function notifyStaleReferences(count){if(count&&!staleReferenceNoticeShown){staleReferenceNoticeShown=true;toast('已移除当前账号中不存在的旧群或 AI API 引用',1)}}
 function pruneProviderSelection(sel){if(!aiProvidersLoaded)return 0;let removed=0;for(const id of [...sel])if(!aiProviders.some(provider=>String(provider.id)===String(id))){sel.delete(id);removed++}notifyStaleReferences(removed);return removed}
 function pruneGroupSelection(sel){if(!watchedGroupsLoaded)return 0;let removed=0;for(const id of [...sel])if(!watchedGroups.some(group=>String(group.chat_id)===String(id))){sel.delete(id);removed++}notifyStaleReferences(removed);return removed}
