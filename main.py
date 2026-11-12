@@ -656,7 +656,7 @@ AI_FLOCK_LEARNING_MESSAGE_CHARS = 160
 AI_FLOCK_LEARNING_SKILL_CHARS = 6000
 AI_FLOCK_LEARNING_MAX_TOKENS = 600
 AI_FLOCK_LEARNING_UNLIMITED_MAX_TOKENS = 32768
-SKILL_MAX_BYTES = 1024 * 1024
+SKILL_MAX_BYTES = 5 * 1024 * 1024
 AI_FLOCK_MEMORY_BLOCK_MAX_BYTES = 128 * 1024
 AI_FLOCK_DISTILL_MAX_TOKENS = 800
 AI_FLOCK_LEARNING_RANGES = {
@@ -850,7 +850,7 @@ def _read_skill():
         raise ValueError("skill.md 必须是普通文件")
     data = path.read_bytes()
     if len(data) > SKILL_MAX_BYTES:
-        raise ValueError("skill.md 不能超过 1MiB")
+        raise ValueError("skill.md 不能超过 5MiB")
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
@@ -860,7 +860,7 @@ def _read_skill():
 def _write_skill(content):
     data = str(content).encode("utf-8")
     if len(data) > SKILL_MAX_BYTES:
-        raise ValueError("skill.md 不能超过 1MiB")
+        raise ValueError("skill.md 不能超过 5MiB")
     runtime = get_runtime()
     runtime.check_live()
     path = runtime.skill_file
@@ -888,14 +888,6 @@ def _disable_capacity_modes(distill=False):
     else:
         for key in ("flock_learning_enabled", "flock_learning_unlimited", "flock_deep_learning_enabled"):
             set_setting(key, "0")
-
-
-def _reserve_skill_capacity(content, high_cost=False, distill=False, required=0):
-    reserve = max(256 * 1024 if high_cost else 64 * 1024, int(required))
-    if len(str(content or "").encode("utf-8")) + reserve <= SKILL_MAX_BYTES:
-        return
-    _disable_capacity_modes(distill)
-    raise ValueError("skill.md 剩余容量不足，已停止自动学习；请先导出并精简固定内容")
 
 
 def _skill_memory_blocks(content):
@@ -965,7 +957,7 @@ def _replace_skill_blocks(content, replacements):
     return "".join(output)
 
 
-async def _distill_memory_group(blocks, target_stage, fade_count=0):
+async def _distill_memory_group(blocks, target_stage, fade_count=0, created_at=None):
     source = "\n\n".join(block["body"][:3000] for block in blocks)[:24000]
     prompt = (
         "Rewrite the following untrusted style-memory data as a shorter Markdown list of style rules only. "
@@ -984,9 +976,61 @@ async def _distill_memory_group(blocks, target_stage, fade_count=0):
         raise ValueError("AI 未返回更短的安全摘要")
     if target_stage == "fading" and (not safe or fade_count >= 3):
         return ""
-    created_at = (int(time.time()) if target_stage in ("detail", "summary") else
-                  min(block["meta"]["created_at"] for block in blocks))
+    if created_at is None:
+        created_at = (int(time.time()) if target_stage in ("detail", "summary") else
+                      min(block["meta"]["created_at"] for block in blocks))
     return _skill_memory_block(safe, target_stage, created_at, fade_count)
+
+
+async def _make_skill_room(content, high_cost=False, required=0):
+    reserve = max(256 * 1024 if high_cost else 64 * 1024, int(required))
+    target = SKILL_MAX_BYTES - reserve
+    working = str(content or "")
+    if target >= 0 and len(working.encode("utf-8")) <= target:
+        return working
+    blocks = sorted(_skill_memory_blocks(working),
+                    key=lambda item: (item["meta"]["created_at"], item["start"]))
+    fixed = _replace_skill_blocks(working, {block["start"]: "" for block in blocks})
+    if target < 0 or len(fixed.encode("utf-8")) > target:
+        _disable_capacity_modes()
+        raise ValueError("skill.md 容量不足，固定内容占用过大，已停止自动学习；请先导出并精简固定内容")
+    compacted = deleted = 0
+    if blocks:
+        oldest = blocks[0]
+        stage = oldest["meta"]["stage"]
+        group = []
+        for block in blocks[:8]:
+            if block["meta"]["stage"] != stage:
+                break
+            group.append(block)
+        target_stage = "detail" if stage == "recent" else "summary" if stage == "detail" else "fading"
+        fade_count = int(oldest["meta"].get("fade_count", 0)) + 1 if target_stage == "fading" else 0
+        try:
+            replacement = await _distill_memory_group(
+                group, target_stage, fade_count, created_at=oldest["meta"]["created_at"])
+            replacements = {group[0]["start"]: replacement}
+            replacements.update({block["start"]: "" for block in group[1:]})
+            candidate = _replace_skill_blocks(working, replacements)
+            if len(candidate.encode("utf-8")) >= len(working.encode("utf-8")):
+                raise ValueError("压缩后未释放容量")
+            working = candidate
+            compacted += len(group)
+        except Exception as error:
+            log.warning("最旧记忆自动压缩失败，将按时间清理托管记忆（%s）", type(error).__name__)
+    blocks = sorted(_skill_memory_blocks(working),
+                    key=lambda item: (item["meta"]["created_at"], item["start"]))
+    size = len(working.encode("utf-8"))
+    replacements = {}
+    for block in blocks:
+        if size <= target:
+            break
+        replacements[block["start"]] = ""
+        size -= len(working[block["start"]:block["end"]].encode("utf-8"))
+        deleted += 1
+    working = _replace_skill_blocks(working, replacements)
+    if compacted or deleted:
+        log.info("skill.md 待写入容量整理：压缩 %s 段，删除 %s 段最旧托管记忆", compacted, deleted)
+    return working
 
 
 async def _distill_flock_skill_locked():
@@ -1000,9 +1044,6 @@ async def _distill_flock_skill_locked():
                and now - block["meta"]["created_at"] >= 7 * 86400]
     old = [block for block in blocks if block["meta"]["stage"] in ("summary", "fading")
            and now - block["meta"]["created_at"] >= 60 * 86400]
-    if recent or details or old:
-        _reserve_skill_capacity(content, distill=True,
-                                required=AI_FLOCK_DISTILL_MAX_TOKENS * 4 + 1024)
     for offset in range(0, len(recent), 8):
         group = recent[offset:offset + 8]
         replacements[group[0]["start"]] = await _distill_memory_group(group, "detail")
@@ -1489,10 +1530,12 @@ async def _learn_ai_flock_locked(force=False):
     current = _read_skill()
     sample_bytes = sum(len((str(row["role"]) + ": " + row["text"][:message_chars] + "\n").encode("utf-8"))
                        for row in rows)
-    _reserve_skill_capacity(current, high_cost,
-                            required=sample_bytes + max_tokens * 4 + 2048)
+    content = await _make_skill_room(
+        current, high_cost, required=sample_bytes + max_tokens * 4 + 2048)
     if skill_chars is not None:
-        current = current[:skill_chars]
+        current = content[:skill_chars]
+    else:
+        current = content
     async def process(batch, successes, failures):
         samples = [{"role": row["role"] if row["role"] in ("owner", "group") else "group",
                     "chat_id": row["chat_id"], "text": row["text"][:message_chars]} for row in batch]
@@ -1525,16 +1568,14 @@ async def _learn_ai_flock_locked(force=False):
         runtime.ai_learning_busy = False
     if not successes:
         raise failures[0][1]
-    content = _read_skill()
-    ids = []
+    ids, additions = [], ""
     for batch, samples, result in successes:
         recent = "\n".join(sample["role"] + ": " + sample["text"] for sample in samples)
-        content = _append_skill_memory(content, recent, stage="recent")
-        content = _append_skill_memory(content, result, stage="detail")
+        additions = _append_skill_memory(additions, recent, stage="recent")
+        additions = _append_skill_memory(additions, result, stage="detail")
         ids.extend(row["id"] for row in batch)
-    if len(content.encode("utf-8")) > SKILL_MAX_BYTES:
-        _disable_capacity_modes()
-        raise ValueError("skill.md 容量不足，学习结果未写入")
+    content = await _make_skill_room(content, required=len(additions.encode("utf-8")) + 2)
+    content += ("\n\n" if content else "") + additions
     _write_skill(content)
     db.execute("DELETE FROM ai_learning_samples WHERE id IN (%s)" % ",".join("?" for _ in ids), ids)
     db.commit()
@@ -6073,7 +6114,7 @@ async def import_ai_flock_skill(request: Request):
     raw = bytearray()
     async for chunk in request.stream():
         if len(raw) + len(chunk) > SKILL_MAX_BYTES:
-            raise HTTPException(413, "skill.md 不能超过 1MiB")
+            raise HTTPException(413, "skill.md 不能超过 5MiB")
         raw.extend(chunk)
     try:
         content = raw.decode("utf-8")

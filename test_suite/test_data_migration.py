@@ -44,14 +44,14 @@ class DataMigrationTests(unittest.TestCase):
         self.assertFalse(migration._allowed('../data/config.db'));self.assertFalse(migration._allowed('data/accounts/bad/config.db'))
         shutil.rmtree(export_work);shutil.rmtree(stage)
 
-    def test_skill_one_mib_migration_boundary(self):
+    def test_skill_five_mib_migration_boundary(self):
         skill=self.data/'skill.md';skill.write_bytes(b'A'*migration.SKILL_MAX_BYTES)
         package,work=migration.create_package(self.base,self.data,[self.aid],'1.16.1','backup-password')
         _,_,stage=migration.stage_package(self.base,package,'backup-password','1.16.1')
         self.assertEqual((stage/'new/data/skill.md').stat().st_size,migration.SKILL_MAX_BYTES)
         shutil.rmtree(work);shutil.rmtree(stage)
         skill.write_bytes(b'A'*(migration.SKILL_MAX_BYTES+1))
-        with self.assertRaisesRegex(ValueError,'1MiB'):migration.create_package(self.base,self.data,[self.aid],'1.16.1','backup-password')
+        with self.assertRaisesRegex(ValueError,'5MiB'):migration.create_package(self.base,self.data,[self.aid],'1.16.1','backup-password')
 
     def test_startup_swap_success_and_failed_boot_rollback(self):
         package,export_work=migration.create_package(self.base,self.data,[self.aid],'1.16.1','backup-password')

@@ -190,8 +190,9 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
             attributed='1. 新项目由张三负责\n2. Alice Smith的方案获通过\n3. 大家感谢李四\n4. 张三公布进展，电话 13800138000\n5. @private_user分享 https://private.invalid/path'
             self.b['_call_ai_any']=AsyncMock(return_value=attributed);sanitized=(await self.b['exam_ai_flock_skill']())['answer'];self.assertNotIn('张三',sanitized);self.assertNotIn('Alice Smith',sanitized);self.assertNotIn('@private_user',sanitized);self.assertNotIn('13800138000',sanitized);self.assertNotIn('http',sanitized);self.assertGreaterEqual(sanitized.count('某成员'),3);self.assertEqual(runtime.skill_file.read_bytes(),before_file);self.assertEqual([tuple(row) for row in db.execute('SELECT * FROM ai_learning_samples')],before_rows)
 
-    async def test_skill_one_mib_boundary_and_symlink_safety(self):
+    async def test_skill_five_mib_boundary_and_symlink_safety(self):
         runtime=self.b['get_runtime']()
+        self.assertEqual(self.b['SKILL_MAX_BYTES'],5*1024*1024)
         with tempfile.TemporaryDirectory() as directory:
             type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md';limit=self.b['SKILL_MAX_BYTES']
             self.b['_write_skill']('A'*limit);self.assertEqual(len(self.b['_read_skill']()),limit);self.assertEqual(runtime.skill_file.stat().st_mode&0o777,0o600)
@@ -218,8 +219,48 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):await self.b['_learn_ai_flock']()
             self.b['_call_ai_any'].assert_not_awaited();self.assertEqual(tuple(self.b['get_setting'](key) for key in ('flock_learning_unlimited','flock_deep_learning_enabled')),('0','0'));self.assertEqual(self.b['_read_skill'](),pinned)
             old=self.b['_skill_memory_block']('- old detail','detail',int(self.b['time'].time())-8*86400);pinned='P'*(self.b['SKILL_MAX_BYTES']-60*1024-len(old));runtime.skill_file.write_text(pinned+old);self.b['set_setting']('flock_skill_distill_enabled','1');self.b['_call_ai_any'].reset_mock()
-            with self.assertRaises(ValueError):await self.b['_distill_flock_skill']()
-            self.b['_call_ai_any'].assert_not_awaited();self.assertEqual(self.b['get_setting']('flock_skill_distill_enabled'),'0');self.assertEqual(self.b['_read_skill'](),pinned+old)
+            self.b['_call_ai_any'].return_value='- compacted';self.assertTrue((await self.b['_distill_flock_skill']())['distilled'])
+            self.b['_call_ai_any'].assert_awaited_once();self.assertEqual(self.b['get_setting']('flock_skill_distill_enabled'),'1');self.assertTrue(self.b['_read_skill']().startswith(pinned));self.assertNotIn('old detail',self.b['_read_skill']())
+
+    async def test_capacity_compacts_then_deletes_oldest_managed_memory(self):
+        provider=await self.provider();self.b['set_setting']('flock_learning_provider_ids',provider);runtime=self.b['get_runtime']();now=int(self.b['time'].time())
+        old=self.b['_skill_memory_block']('OLD-'+('A'*70000),'detail',now-20)
+        newer=self.b['_skill_memory_block']('NEW-'+('B'*70000),'detail',now-10)
+        pinned='PINNED\n'+('P'*(self.b['SKILL_MAX_BYTES']-200*1024));content=pinned+old+newer
+        self.assertLessEqual(len(content.encode()),self.b['SKILL_MAX_BYTES']);self.assertGreater(len(content.encode())+64*1024,self.b['SKILL_MAX_BYTES'])
+        self.b['_call_ai_any']=AsyncMock(return_value='- compacted oldest style')
+        compacted=await self.b['_make_skill_room'](content);blocks=self.b['_skill_memory_blocks'](compacted)
+        self.assertTrue(compacted.startswith(pinned));self.assertEqual(len(blocks),1);self.assertEqual(blocks[0]['meta']['stage'],'summary');self.assertEqual(blocks[0]['meta']['created_at'],now-20);self.assertNotIn('OLD-',compacted);self.assertNotIn('NEW-',compacted)
+        self.b['_call_ai_any']=AsyncMock(side_effect=RuntimeError('provider unavailable'))
+        pruned=await self.b['_make_skill_room'](content);blocks=self.b['_skill_memory_blocks'](pruned)
+        self.assertTrue(pruned.startswith(pinned));self.assertEqual(len(blocks),1);self.assertIn('NEW-',pruned);self.assertNotIn('OLD-',pruned);self.assertLessEqual(len(pruned.encode())+64*1024,self.b['SKILL_MAX_BYTES'])
+
+    async def test_capacity_still_full_after_compression_deletes_oldest_by_age_and_bytes(self):
+        await self.provider();self.b['SKILL_MAX_BYTES']=256*1024;now=int(self.b['time'].time())
+        older=self.b['_skill_memory_block']('OLD-'+('A'*40000),'detail',now-100)
+        newer=self.b['_skill_memory_block']('NEW-'+('B'*80000),'recent',now-10)
+        target=self.b['SKILL_MAX_BYTES']-64*1024
+        fixed='固定\n';fixed+='P'*(target-len(newer.encode())-1000-len(fixed.encode()))
+        content=newer+fixed+older;self.b['_call_ai_any']=AsyncMock(return_value='摘'*700)
+        cleaned=await self.b['_make_skill_room'](content)
+        self.b['_call_ai_any'].assert_awaited_once();self.assertEqual(cleaned,newer+fixed)
+        self.assertLessEqual(len(cleaned.encode()),target);self.assertNotIn('OLD-',cleaned)
+
+    async def test_learning_failure_after_capacity_compression_keeps_original_file_and_samples(self):
+        await self.provider();self.b['SKILL_MAX_BYTES']=256*1024;runtime=self.b['get_runtime']();db=self.b['conn']
+        db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit()
+        for key,value in {'flock_learning_enabled':'1','flock_learning_groups':'-1','flock_learning_start':'17:00','flock_learning_end':'19:00'}.items():self.b['set_setting'](key,value)
+        db.executemany("INSERT INTO ai_learning_samples(ts,chat_id,text) VALUES(0,'-1',?)",[('待学习样本 '+str(i),) for i in range(10)]);db.commit()
+        old=self.b['_skill_memory_block']('OLD-'+('A'*110000),'detail',0);fixed='P'*100000
+        with tempfile.TemporaryDirectory() as directory:
+            type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md';self.b['_write_skill'](fixed+old);before=runtime.skill_file.read_bytes()
+            self.b['_call_ai_any']=AsyncMock(side_effect=['- compacted',RuntimeError('learning unavailable')])
+            with self.assertRaisesRegex(RuntimeError,'learning unavailable'):await self.b['_learn_ai_flock']()
+            self.assertEqual(runtime.skill_file.read_bytes(),before);self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],10)
+            self.b['_call_ai_any']=AsyncMock(side_effect=['- compacted','- learned style'])
+            learned=await self.b['_learn_ai_flock']();self.assertTrue(learned['learned']);self.assertEqual(learned['samples'],10)
+            saved=self.b['_read_skill']();self.assertTrue(saved.startswith(fixed));self.assertNotIn('OLD-',saved);self.assertIn('learned style',saved)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],0);self.assertLessEqual(runtime.skill_file.stat().st_size,self.b['SKILL_MAX_BYTES'])
 
     async def test_learning_unlimited_uses_hard_caps_and_ignores_normal_budgets(self):
         provider=await self.provider();runtime=self.b['get_runtime']();db=self.b['conn']
