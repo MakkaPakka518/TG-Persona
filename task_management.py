@@ -33,7 +33,7 @@ SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
     "poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens"
+    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars"
 ).split(","))
 # Credentials are stored per-account in settings, never in task rows/exports.
 INTEGER_LIMITS = {
@@ -46,6 +46,7 @@ INTEGER_LIMITS = {
     "ai_flock_enabled": (0, 1), "ai_flock_minutes": (1, 60),
     "ai_flock_context_messages": (1, 50), "ai_flock_message_chars": (40, 2000),
     "ai_flock_skill_chars": (0, 200000), "ai_flock_max_tokens": (50, 8192),
+    "ai_flock_knowledge_chars": (-1, 5 * 1024 * 1024),
 }
 # Only effective fields are applied; custom windows/delays are NOT scheduled.
 APPLICABILITY = {
@@ -65,7 +66,7 @@ APPLICABILITY = {
     "ai_flock_provider_ids": {"link_register", "button_register", "code_register"},
     "ai_flock_reaction": {"link_register", "button_register", "code_register"},
     **{key: {"link_register", "button_register", "code_register"} for key in
-       ("ai_flock_context_messages", "ai_flock_message_chars", "ai_flock_skill_chars", "ai_flock_max_tokens")},
+       ("ai_flock_context_messages", "ai_flock_message_chars", "ai_flock_skill_chars", "ai_flock_max_tokens", "ai_flock_knowledge_chars")},
 }
 RULE_COLUMNS = ("keywords", "regex", "action", "value", "reaction", "groups", "enabled")
 

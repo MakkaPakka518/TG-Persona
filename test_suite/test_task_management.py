@@ -37,7 +37,7 @@ def load_model_callbacks():
     source = ast.parse((ROOT / "main.py").read_text())
     wanted = {"AutoIn", "_valid_auto", "_auto_vals", "_csv", "_budget_value", "_valid_provider_ids", "_valid_reaction"}
     assignments = [node for node in source.body if isinstance(node, ast.Assign)
-                   and any(isinstance(target, ast.Name) and target.id in ("_AUTO_COLS", "DEFAULT_SIGNIN_IMAGE_PROMPT", "DEFAULT_AI_FLOCK_PROMPT", "DEFAULT_REGISTRATION_AI_FLOCK_PROMPT", "AI_FLOCK_CONTEXT_MESSAGES", "AI_FLOCK_MESSAGE_CHARS", "AI_FLOCK_SKILL_CHARS", "AI_FLOCK_MAX_TOKENS", "AI_FLOCK_BUDGET_RANGES") for target in node.targets)]
+                   and any(isinstance(target, ast.Name) and target.id in ("_AUTO_COLS", "DEFAULT_SIGNIN_IMAGE_PROMPT", "DEFAULT_AI_FLOCK_PROMPT", "DEFAULT_REGISTRATION_AI_FLOCK_PROMPT", "AI_FLOCK_CONTEXT_MESSAGES", "AI_FLOCK_MESSAGE_CHARS", "AI_FLOCK_SKILL_CHARS", "AI_FLOCK_MAX_TOKENS", "AI_FLOCK_KNOWLEDGE_CHARS", "KNOWLEDGE_MAX_BYTES", "AI_FLOCK_BUDGET_RANGES") for target in node.targets)]
     nodes = assignments + [node for node in source.body if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in wanted]
     namespace = {"BaseModel": BaseModel, "Field": Field, "HTTPException": HTTPException,
                    "math": math, "json": json, "re": re, "_win_minutes": win_minutes,
@@ -228,14 +228,14 @@ class TaskManagementTests(unittest.TestCase):
             patch=dict(type=task_type,name=task_type,btn_text='注册',keywords='注册状态',success_kw='成功',
                        ai_flock_provider_ids='0123456789abcdef',ai_flock_reaction='👍',
                        ai_flock_context_messages=50,ai_flock_message_chars=2000,
-                       ai_flock_skill_chars=200000,ai_flock_max_tokens=8192)
+                       ai_flock_skill_chars=200000,ai_flock_max_tokens=8192,ai_flock_knowledge_chars=-1)
             if task_type=='button_register':patch.update(announcement_kw='开注',announcement_button='点击注册')
             if task_type=='code_register':patch.update(groups='-100123',target='@fixed_bot')
             self.add(**patch)
         exported=self.client.get('/api/tasks/export').json();imported=self.imp(exported,account='other',preview=False)
         self.assertEqual(imported.status_code,200,imported.text)
-        rows=self.dbs['other'].execute('SELECT type,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens FROM automations ORDER BY id').fetchall()
-        self.assertEqual(rows,[(kind,'0123456789abcdef','👍',50,2000,200000,8192) for kind in ('link_register','button_register','code_register')])
+        rows=self.dbs['other'].execute('SELECT type,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars FROM automations ORDER BY id').fetchall()
+        self.assertEqual(rows,[(kind,'0123456789abcdef','👍',50,2000,200000,8192,-1) for kind in ('link_register','button_register','code_register')])
 
     def test_batch_default_apply_preserves_success(self):
         aid = self.add()

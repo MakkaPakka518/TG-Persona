@@ -82,7 +82,7 @@ def load_backend():
                          'AI_FLOCK_BUDGET_RANGES', 'AI_FLOCK_LEARNING_MESSAGES',
                          'AI_FLOCK_LEARNING_MESSAGE_CHARS', 'AI_FLOCK_LEARNING_SKILL_CHARS',
                          'AI_FLOCK_LEARNING_MAX_TOKENS', 'AI_FLOCK_LEARNING_UNLIMITED_MAX_TOKENS',
-                         'AI_FLOCK_LEARNING_RANGES', 'SKILL_MAX_BYTES',
+                          'AI_FLOCK_LEARNING_RANGES', 'SKILL_MAX_BYTES', 'KNOWLEDGE_MAX_BYTES', 'AI_FLOCK_KNOWLEDGE_CHARS',
                          'AI_FLOCK_MEMORY_BLOCK_MAX_BYTES', 'AI_FLOCK_DISTILL_MAX_TOKENS'}
     selected = []
     for node in tree.body:
@@ -102,7 +102,7 @@ def load_backend():
                   ReactionEmoji=lambda **kw: SimpleNamespace(**kw),
                   _captcha=OrderedDict(), _login_fail=OrderedDict(), _auth_gc_at=0.0,
                   _ai_cfg={}, _ai_rr={}, _ai_usage_guard=threading.Lock(),
-                 TRUSTED_PROXIES=(), _auto_running={}, signin_plans={}, poll_last={}, auto_last_ts={},
+                  TRUSTED_PROXIES=(), BASE=SOURCE.parent, _auto_running={}, signin_plans={}, poll_last={}, auto_last_ts={},
                  _session_alerted=False, tg_state={'phase': 'ready', 'me': {'id': 1}, 'err': None},
                   _running={'paused': True}, client=SimpleNamespace(), notify_event=Mock(), send_notify=Mock())
     names.update(canonical_steps=canonical_steps, canonical_trigger=canonical_trigger,
@@ -123,6 +123,7 @@ def load_backend():
         session_path = '/tmp/never-read-backend-fixture/tg'
         avatar_file = Path('/tmp/never-read-backend-fixture/avatar.jpg')
         skill_file = Path('/tmp/never-read-backend-fixture/skill.md')
+        knowledge_file = Path('/tmp/never-read-backend-fixture/knowledge.md')
         @property
         def ai_flock_lock(self):
             if self._ai_flock_lock is None:
@@ -133,6 +134,11 @@ def load_backend():
             if self._skill_lock is None:
                 self._skill_lock = asyncio.Lock()
             return self._skill_lock
+        @property
+        def knowledge_lock(self):
+            if self._knowledge_lock is None:
+                self._knowledge_lock = asyncio.Lock()
+            return self._knowledge_lock
         def __getattr__(self, name):
             key = aliases.get(name, name)
             default = {} if name in dict_fields else set() if name in set_fields else False if name in ('handler_registered','session_alerted','closing','closed','stopping','ai_flock_busy','ai_learning_busy') else 0 if name in ('ai_flock_waiting','ai_learning_next_at') else '' if name=='tg_phone' else None

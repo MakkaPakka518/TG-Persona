@@ -18,8 +18,8 @@ MAX_PACKAGE = 512 * 1024 * 1024
 MAX_EXTRACTED = 1024 * 1024 * 1024
 MAX_FILES = 128
 ACCOUNT_ID = re.compile(r"[0-9a-f]{32}")
-ROOT_FILES = {"config.db", "tg.session", "avatar.jpg", "skill.md"}
-ACCOUNT_FILES = {"config.db", "tg.session", "avatar.jpg", "skill.md"}
+ROOT_FILES = {"config.db", "tg.session", "avatar.jpg", "skill.md", "knowledge.md"}
+ACCOUNT_FILES = {"config.db", "tg.session", "avatar.jpg", "skill.md", "knowledge.md"}
 SKILL_MAX_BYTES = 5 * 1024 * 1024
 
 
@@ -58,8 +58,8 @@ def _sqlite_snapshot(source, target):
 def _copy_optional(source, target):
     if not source.is_file() or source.is_symlink():
         return False
-    if source.name == "skill.md" and source.stat().st_size > SKILL_MAX_BYTES:
-        raise ValueError("skill.md 不能超过 5MiB")
+    if source.name in ("skill.md", "knowledge.md") and source.stat().st_size > SKILL_MAX_BYTES:
+        raise ValueError(source.name + " 不能超过 5MiB")
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     shutil.copy2(source, target);os.chmod(target, 0o600)
     return True
@@ -79,6 +79,7 @@ def create_package(base, data, account_ids, version, password):
         snapshot = work / "snapshot" / "data"
         for name in ROOT_FILES:
             source = data / name
+            if name == "knowledge.md" and not source.exists(): source = Path(base) / "knowledge.md"
             if source.is_file(): _snapshot_file(source, snapshot / name)
         for account_id in account_ids:
             if not ACCOUNT_ID.fullmatch(account_id):
@@ -88,6 +89,7 @@ def create_package(base, data, account_ids, version, password):
                 raise ValueError("账号数据不完整，无法导出")
             for name in ACCOUNT_FILES:
                 source = directory / name
+                if name == "knowledge.md" and not source.exists(): source = Path(base) / "knowledge.md"
                 if source.is_file(): _snapshot_file(source, snapshot / "accounts" / account_id / name)
         files = []
         for path in sorted(snapshot.rglob("*")):
@@ -124,7 +126,7 @@ def create_package(base, data, account_ids, version, password):
 
 
 def _allowed(path):
-    if path in ("manifest.json", "data/config.db", "data/tg.session", "data/avatar.jpg", "data/skill.md"):
+    if path in ("manifest.json", "data/config.db", "data/tg.session", "data/avatar.jpg", "data/skill.md", "data/knowledge.md"):
         return True
     parts = path.split("/")
     return len(parts) == 4 and parts[:2] == ["data", "accounts"] and ACCOUNT_ID.fullmatch(parts[2]) and parts[3] in ACCOUNT_FILES
@@ -166,7 +168,7 @@ def stage_package(base, package_path, password, current_version):
                     if name not in ("data","data/accounts") and not (name.startswith("data/accounts/") and ACCOUNT_ID.fullmatch(name.split("/")[-1])): raise ValueError("备份目录无效")
                     continue
                 if not member.isfile() or not _allowed(name): raise ValueError("备份包含不允许的文件")
-                if name.endswith("/skill.md") and member.size > SKILL_MAX_BYTES: raise ValueError("skill.md 不能超过 5MiB")
+                if name.endswith(("/skill.md", "/knowledge.md")) and member.size > SKILL_MAX_BYTES: raise ValueError(name.split("/")[-1] + " 不能超过 5MiB")
                 total_size+=member.size
                 if member.size<0 or member.size>MAX_PACKAGE or total_size>MAX_EXTRACTED: raise ValueError("备份解压大小超过限制")
                 target=root/name;target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)

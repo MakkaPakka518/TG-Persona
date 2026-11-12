@@ -53,6 +53,18 @@ class DataMigrationTests(unittest.TestCase):
         skill.write_bytes(b'A'*(migration.SKILL_MAX_BYTES+1))
         with self.assertRaisesRegex(ValueError,'5MiB'):migration.create_package(self.base,self.data,[self.aid],'1.16.1','backup-password')
 
+    def test_knowledge_migration_preserves_default_and_per_account_override(self):
+        (self.base/'knowledge.md').write_text('# 内置知识',encoding='utf-8')
+        knowledge=self.data/'accounts'/self.aid/'knowledge.md';knowledge.write_text('# 手动知识',encoding='utf-8')
+        package,work=migration.create_package(self.base,self.data,[self.aid],'1.19.4','backup-password')
+        _,_,stage=migration.stage_package(self.base,package,'backup-password','1.19.4')
+        self.assertEqual((stage/'new/data/knowledge.md').read_text(),'# 内置知识')
+        self.assertEqual((stage/'new/data/accounts'/self.aid/'knowledge.md').read_text(),'# 手动知识')
+        self.assertEqual((stage/'new/data/knowledge.md').stat().st_mode&0o777,0o600)
+        shutil.rmtree(work);shutil.rmtree(stage)
+        knowledge.write_bytes(b'A'*(migration.SKILL_MAX_BYTES+1))
+        with self.assertRaisesRegex(ValueError,'knowledge.md'):migration.create_package(self.base,self.data,[self.aid],'1.19.4','backup-password')
+
     def test_startup_swap_success_and_failed_boot_rollback(self):
         package,export_work=migration.create_package(self.base,self.data,[self.aid],'1.16.1','backup-password')
         restore_id,_,stage=migration.stage_package(self.base,package,'backup-password','1.16.1')

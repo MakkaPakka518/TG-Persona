@@ -48,7 +48,7 @@ def secure_directory(path, create=False):
 
 def secure_files(directory):
     for name in ("config.db", "config.db-wal", "config.db-shm", "config.db-journal",
-                 "tg.session", "tg.session-journal", "tg.session-wal", "tg.session-shm", "avatar.jpg", "skill.md"):
+                 "tg.session", "tg.session-journal", "tg.session-wal", "tg.session-shm", "avatar.jpg", "skill.md", "knowledge.md"):
         path = directory / name
         if path.is_symlink() or (path.exists() and not path.is_file()):
             raise AccountError(400, "账号文件不允许符号链接或非普通文件")
@@ -130,6 +130,7 @@ class AccountRuntime:
     _requests_idle: object = None
     _ai_flock_lock: object = None
     _skill_lock: object = None
+    _knowledge_lock: object = None
     request_count: int = 0
     lock_owner: object = None
 
@@ -161,6 +162,10 @@ class AccountRuntime:
         return self.directory / "skill.md"
 
     @property
+    def knowledge_file(self):
+        return self.directory / "knowledge.md"
+
+    @property
     def ai_flock_lock(self):
         if self._ai_flock_lock is None:
             self._ai_flock_lock = asyncio.Lock()
@@ -171,6 +176,12 @@ class AccountRuntime:
         if self._skill_lock is None:
             self._skill_lock = asyncio.Lock()
         return self._skill_lock
+
+    @property
+    def knowledge_lock(self):
+        if self._knowledge_lock is None:
+            self._knowledge_lock = asyncio.Lock()
+        return self._knowledge_lock
 
     def check_live(self):
         if self.closing or self.closed or self.stopping:
@@ -299,6 +310,7 @@ class AccountRuntime:
             self.generated_message_ids.clear()
             self._ai_flock_lock = None
             self._skill_lock = None
+            self._knowledge_lock = None
             self.ai_learning_busy = False
             self.ai_learning_next_at = 0
             self.custom_trigger_pending.clear()

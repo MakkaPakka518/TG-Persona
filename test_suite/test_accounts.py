@@ -140,6 +140,7 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         # Import a physical temporary copy: main's BASE/DATA are never real paths.
         destination = self.base / 'main.py'
         shutil.copyfile(ROOT / 'main.py', destination)
+        shutil.copyfile(ROOT / 'knowledge.md', self.base / 'knowledge.md')
         spec = importlib.util.spec_from_file_location('persona_offline_main', destination)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -207,6 +208,25 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.http.cookies.clear()
         self.assertEqual((await self.req('GET', '/api/state', '../bad')).status_code, 401)
         self.assertEqual((await self.req('GET', '/api/accounts')).status_code, 401)
+
+    async def test_knowledge_routes_are_authenticated_and_account_isolated(self):
+        aid = await self.create()
+        self.assertIsNot(self.rt().knowledge_lock, self.rt(aid).knowledge_lock)
+        for owner, content in [('default', '# 根账号知识'), (aid, '# 第二账号知识')]:
+            response = await self.req('PUT', '/api/ai/flock/knowledge', owner, json={'content': content})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual((await self.req('GET', '/api/ai/flock/knowledge', owner)).json()['content'], content)
+            exported = await self.req('GET', '/api/ai/flock/knowledge/export', owner)
+            self.assertEqual(exported.text, content)
+            self.assertIn('knowledge.md', exported.headers['content-disposition'])
+            self.assertEqual(self.rt(owner).knowledge_file.stat().st_mode & 0o777, 0o600)
+        response = await self.req('POST', '/api/ai/flock/knowledge/import', aid, content='# 导入知识'.encode())
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((await self.req('GET', '/api/ai/flock/knowledge', 'default')).json()['content'], '# 根账号知识')
+        self.assertEqual((await self.req('POST', '/api/ai/flock/knowledge/import', aid, content=b'\xff')).status_code, 400)
+        self.http.cookies.clear()
+        for method, route in [('GET', ''), ('PUT', ''), ('POST', '/import'), ('GET', '/export'), ('POST', '/upload-now')]:
+            self.assertEqual((await self.req(method, '/api/ai/flock/knowledge' + route, aid, json={'content': 'x'})).status_code, 401)
 
     async def test_parallel_clients_login_codes_and_two_factor(self):
         aid = await self.create()
