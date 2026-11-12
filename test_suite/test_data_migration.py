@@ -27,6 +27,8 @@ class DataMigrationTests(unittest.TestCase):
         database(self.data/'tg.session',[("CREATE TABLE sessions(dc_id INTEGER)",()),("INSERT INTO sessions VALUES(?)",(1,))])
         database(directory/'tg.session',[("CREATE TABLE sessions(dc_id INTEGER)",()),("INSERT INTO sessions VALUES(?)",(2,))])
         (self.data/'avatar.jpg').write_bytes(b'avatar')
+        (self.data/'skill.md').write_text('- root style')
+        (directory/'skill.md').write_text('- account style')
 
     def tearDown(self): self.tmp.cleanup()
 
@@ -36,11 +38,20 @@ class DataMigrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'密码错误'):
             migration.stage_package(self.base,package,'wrong-password','1.16.1')
         restore_id,preview,stage=migration.stage_package(self.base,package,'backup-password','1.16.1')
-        self.assertEqual((preview['accounts'],preview['files']),(2,5));self.assertTrue((stage/'new/data/accounts'/self.aid/'tg.session').is_file())
+        self.assertEqual((preview['accounts'],preview['files']),(2,7));self.assertTrue((stage/'new/data/accounts'/self.aid/'tg.session').is_file());self.assertTrue((stage/'new/data/accounts'/self.aid/'skill.md').is_file())
         tampered=self.base/'tampered.tgp';changed=bytearray(package.read_bytes());changed[-20]^=1;tampered.write_bytes(changed)
         with self.assertRaisesRegex(ValueError,'密码错误|损坏'): migration.stage_package(self.base,tampered,'backup-password','1.16.1')
         self.assertFalse(migration._allowed('../data/config.db'));self.assertFalse(migration._allowed('data/accounts/bad/config.db'))
         shutil.rmtree(export_work);shutil.rmtree(stage)
+
+    def test_skill_one_mib_migration_boundary(self):
+        skill=self.data/'skill.md';skill.write_bytes(b'A'*migration.SKILL_MAX_BYTES)
+        package,work=migration.create_package(self.base,self.data,[self.aid],'1.16.1','backup-password')
+        _,_,stage=migration.stage_package(self.base,package,'backup-password','1.16.1')
+        self.assertEqual((stage/'new/data/skill.md').stat().st_size,migration.SKILL_MAX_BYTES)
+        shutil.rmtree(work);shutil.rmtree(stage)
+        skill.write_bytes(b'A'*(migration.SKILL_MAX_BYTES+1))
+        with self.assertRaisesRegex(ValueError,'1MiB'):migration.create_package(self.base,self.data,[self.aid],'1.16.1','backup-password')
 
     def test_startup_swap_success_and_failed_boot_rollback(self):
         package,export_work=migration.create_package(self.base,self.data,[self.aid],'1.16.1','backup-password')

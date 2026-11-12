@@ -35,9 +35,9 @@ def load_model_callbacks():
         hour, minute = map(int, value.split(":"))
         return hour * 60 + minute
     source = ast.parse((ROOT / "main.py").read_text())
-    wanted = {"AutoIn", "_valid_auto", "_auto_vals"}
+    wanted = {"AutoIn", "_valid_auto", "_auto_vals", "_csv", "_budget_value", "_valid_provider_ids", "_valid_reaction"}
     assignments = [node for node in source.body if isinstance(node, ast.Assign)
-                   and any(isinstance(target, ast.Name) and target.id in ("_AUTO_COLS", "DEFAULT_SIGNIN_IMAGE_PROMPT", "DEFAULT_AI_FLOCK_PROMPT", "DEFAULT_REGISTRATION_AI_FLOCK_PROMPT") for target in node.targets)]
+                   and any(isinstance(target, ast.Name) and target.id in ("_AUTO_COLS", "DEFAULT_SIGNIN_IMAGE_PROMPT", "DEFAULT_AI_FLOCK_PROMPT", "DEFAULT_REGISTRATION_AI_FLOCK_PROMPT", "AI_FLOCK_CONTEXT_MESSAGES", "AI_FLOCK_MESSAGE_CHARS", "AI_FLOCK_SKILL_CHARS", "AI_FLOCK_MAX_TOKENS", "AI_FLOCK_BUDGET_RANGES") for target in node.targets)]
     nodes = assignments + [node for node in source.body if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in wanted]
     namespace = {"BaseModel": BaseModel, "Field": Field, "HTTPException": HTTPException,
                    "math": math, "json": json, "re": re, "_win_minutes": win_minutes,
@@ -76,8 +76,9 @@ class TaskManagementTests(unittest.TestCase):
                              "CREATE TABLE rules(id INTEGER PRIMARY KEY AUTOINCREMENT,keywords TEXT,regex INTEGER,"
                              "action TEXT,value TEXT,reaction TEXT,groups TEXT,enabled INTEGER,created_at INTEGER);"
                               "CREATE TABLE watched_groups(chat_id TEXT PRIMARY KEY,name TEXT,added_at INTEGER);"
-                              "CREATE TABLE registration_events(task_id INTEGER,chat_id TEXT,message_id INTEGER);"
-                              "CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT);"
+                               "CREATE TABLE registration_events(task_id INTEGER,chat_id TEXT,message_id INTEGER);"
+                               "CREATE TABLE ai_flock_sessions(chat_id TEXT PRIMARY KEY,source_task_id INTEGER);"
+                               "CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT);"
                              "CREATE TABLE hits(id INTEGER PRIMARY KEY,content TEXT);")
             db.execute("INSERT INTO settings VALUES(?,?)", ("api_key", "FAKE-DO-NOT-EXPORT"))
             db.execute("INSERT INTO hits VALUES(?,?)", (1, "FAKE-HISTORY"))
@@ -221,6 +222,20 @@ class TaskManagementTests(unittest.TestCase):
             result = self.imp(data, account='other', preview=False)
             self.assertEqual(result.status_code, 400)
             self.assertEqual(self.snapshot('other'), before)
+
+    def test_registration_flock_provider_and_reaction_round_trip_for_all_types(self):
+        for task_type in ('link_register','button_register','code_register'):
+            patch=dict(type=task_type,name=task_type,btn_text='注册',keywords='注册状态',success_kw='成功',
+                       ai_flock_provider_ids='0123456789abcdef',ai_flock_reaction='👍',
+                       ai_flock_context_messages=9,ai_flock_message_chars=240,
+                       ai_flock_skill_chars=4500,ai_flock_max_tokens=700)
+            if task_type=='button_register':patch.update(announcement_kw='开注',announcement_button='点击注册')
+            if task_type=='code_register':patch.update(groups='-100123',target='@fixed_bot')
+            self.add(**patch)
+        exported=self.client.get('/api/tasks/export').json();imported=self.imp(exported,account='other',preview=False)
+        self.assertEqual(imported.status_code,200,imported.text)
+        rows=self.dbs['other'].execute('SELECT type,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens FROM automations ORDER BY id').fetchall()
+        self.assertEqual(rows,[(kind,'0123456789abcdef','👍',9,240,4500,700) for kind in ('link_register','button_register','code_register')])
 
     def test_batch_default_apply_preserves_success(self):
         aid = self.add()
@@ -608,6 +623,16 @@ class TaskManagementTests(unittest.TestCase):
         response = self.imp(self.backup([task], rules=[], watched_groups=[]), preview=False, activate=False)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.row(response.json()["ids"][0])["enabled"], 0)
+
+    def test_safe_import_forces_registration_flock_off_but_keeps_config(self):
+        task={'type':'link_register','name':'flock import','btn_text':'注册','keywords':'状态','success_kw':'成功',
+              'enabled':1,'ai_flock_enabled':1,'ai_flock_prompt':'人格','ai_flock_provider_ids':'0123456789abcdef',
+              'ai_flock_reaction':'👍','ai_flock_context_messages':9,'ai_flock_message_chars':240,
+              'ai_flock_skill_chars':4500,'ai_flock_max_tokens':700}
+        response=self.imp(self.backup([task],rules=[],watched_groups=[]),preview=False,activate=False)
+        self.assertEqual(response.status_code,200,response.text);row=self.row(response.json()['ids'][0]);self.assertEqual((row['enabled'],row['ai_flock_enabled']),(0,0))
+        self.assertEqual((row['ai_flock_prompt'],row['ai_flock_provider_ids'],row['ai_flock_reaction'],row['ai_flock_max_tokens']),('人格','0123456789abcdef','👍',700))
+        self.assertEqual(self.imp(self.backup([task],rules=[],watched_groups=[]),activate=True).status_code,400)
 
     def test_size_task_count_json_duplicates_and_nonfinite_are_rejected(self):
         response = self.client.post("/api/tasks/import", content=b" " * (MAX_BYTES + 1), headers={"content-type": "application/json"})

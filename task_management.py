@@ -33,7 +33,7 @@ SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
     "poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt"
+    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens"
 ).split(","))
 # Credentials are stored per-account in settings, never in task rows/exports.
 INTEGER_LIMITS = {
@@ -44,6 +44,8 @@ INTEGER_LIMITS = {
     "history_first": (0, 1), "link_mode": (0, 1), "link_limit": (2, 4), "link_wait": (2, 15),
     "success_reply_enabled": (0, 1), "success_reply_delay": (0, 300),
     "ai_flock_enabled": (0, 1), "ai_flock_minutes": (1, 60),
+    "ai_flock_context_messages": (1, 20), "ai_flock_message_chars": (40, 500),
+    "ai_flock_skill_chars": (0, 10000), "ai_flock_max_tokens": (50, 1000),
 }
 # Only effective fields are applied; custom windows/delays are NOT scheduled.
 APPLICABILITY = {
@@ -60,6 +62,10 @@ APPLICABILITY = {
     "existing_kw": {"link_register", "button_register", "code_register"}, "success_reply_enabled": {"link_register", "button_register", "code_register"},
     "success_reply_text": {"link_register", "button_register", "code_register"}, "success_reply_delay": {"link_register", "button_register", "code_register"},
     "ai_provider_ids": {"signin"},
+    "ai_flock_provider_ids": {"link_register", "button_register", "code_register"},
+    "ai_flock_reaction": {"link_register", "button_register", "code_register"},
+    **{key: {"link_register", "button_register", "code_register"} for key in
+       ("ai_flock_context_messages", "ai_flock_message_chars", "ai_flock_skill_chars", "ai_flock_max_tokens")},
 }
 RULE_COLUMNS = ("keywords", "regex", "action", "value", "reaction", "groups", "enabled")
 
@@ -205,7 +211,8 @@ def _fingerprint(data):
 
 
 def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_columns,
-                      invalidate_cache, reset_schedule, running_ids, account_info=None) -> APIRouter:
+                      invalidate_cache, reset_schedule, running_ids, account_info=None,
+                      reconcile_groups=None) -> APIRouter:
     router = APIRouter()
 
     def columns():
@@ -319,6 +326,7 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
                             db.execute("DELETE FROM automations WHERE id=?", (aid,))
                             db.execute("DELETE FROM settings WHERE key=?", ("link_cred_" + str(aid),))
                             db.execute("DELETE FROM registration_events WHERE task_id=?", (aid,))
+                            db.execute("DELETE FROM ai_flock_sessions WHERE source_task_id=?", (aid,))
                         else:
                             # Field identifiers originate solely from APPLICABILITY/enabled.
                             db.execute("UPDATE automations SET " + ",".join(k + "=?" for k in changes) + " WHERE id=?",
@@ -395,8 +403,9 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
             requested_enabled = task.get("enabled", auto_model().enabled)
             if type(requested_enabled) is not int or requested_enabled not in (0, 1):
                 _bad("enabled 必须为 0-1 的整数")
-            normalized = prepare({**task, "enabled": 0}, cols)
+            normalized = prepare({**task, "enabled": 0, "ai_flock_enabled": 0}, cols)
             normalized["enabled"] = requested_enabled
+            normalized["ai_flock_enabled"] = 0
             tasks.append(normalized)
         rules = []
         for rule in data.rules:
@@ -473,6 +482,7 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
                         unlocked(set(running_ids()) | {r["id"] for r in old})
                         db.execute("DELETE FROM automations")
                         db.execute("DELETE FROM registration_events")
+                        db.execute("DELETE FROM ai_flock_sessions")
                         db.execute("DELETE FROM settings WHERE key LIKE 'link_cred_%'")
                         if body.include_rules:
                             db.execute("DELETE FROM rules")
@@ -489,6 +499,8 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
                     for group in pending_groups:
                         db.execute("INSERT INTO watched_groups(chat_id,name,added_at) VALUES(?,?,?)",
                                    (group["chat_id"], group["name"], now))
+                    if reconcile_groups is not None and body.mode == "replace" and body.include_groups:
+                        reconcile_groups(db)
             except sqlite3.Error:
                 raise HTTPException(409, "数据库写入冲突，导入已全部回滚")
             after_commit(([r["id"] for r in old] if body.mode == "replace" else []) + new_ids, warnings)

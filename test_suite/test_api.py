@@ -140,11 +140,31 @@ def probe():
         check(guest.post('/api/ai/diagnose',json={'id':delayed.json()['id']}).status_code==401, 'AI排障必须经过面板鉴权')
         provider={'note':'测试线路','base':'https://example.invalid/v1','key':'provider-fixture-secret','model':'fixture-model','enabled':True}
         check(guest.post('/api/ai/providers',json=provider).status_code==401, 'AI API 管理必须经过面板鉴权')
+        check(guest.get('/api/ai/flock/jobs').status_code==401, 'AI 水群任务必须经过面板鉴权')
+        check(guest.get('/api/ai/flock/skill').status_code==401, 'AI 水群 skill 必须经过面板鉴权')
+        check(guest.post('/api/ai/flock/skill/distill-now').status_code==401, 'skill 蒸馏必须经过面板鉴权')
         created_provider=https_client.post('/api/ai/providers',json=provider)
         check(created_provider.status_code==200, '真实路由可新增 AI API')
         listed_providers=https_client.get('/api/ai/providers')
         check(listed_providers.status_code==200 and listed_providers.json()['enabled_count']==1, '真实路由可列出启用的 AI API')
         check('provider-fixture-secret' not in listed_providers.text, 'AI API 列表不回传密钥')
+        provider_id=created_provider.json()['provider']['id']
+        check(https_client.post('/api/groups',json={'chat_id':'-1001','name':'测试群'}).status_code==200, '水群测试监听群可创建')
+        job={'name':'测试水群','enabled':1,'groups':'-1001','start_time':'09:00','end_time':'11:00','prompt':'自然聊天','provider_ids':provider_id,'reaction':'👍','context_messages':8,'message_chars':200,'skill_chars':4000,'max_tokens':500}
+        check(https_client.post('/api/ai/flock/jobs',json=job).status_code==200, '真实路由可创建 AI 水群任务')
+        jobs=https_client.get('/api/ai/flock/jobs').json()['jobs']
+        check(len(jobs)==1 and [jobs[0][key] for key in ('context_messages','message_chars','skill_chars','max_tokens')]==[8,200,4000,500], '真实路由可列出 AI 水群任务及预算')
+        skill={'content':'- 使用短句','flock_learning_enabled':1,'flock_learning_groups':'-1001','flock_learning_start':'09:00','flock_learning_end':'11:00','flock_learning_provider_ids':provider_id,'flock_skill_upload_time':'03:00','flock_learning_batch_size':30,'flock_learning_message_chars':220,'flock_learning_skill_chars':7000,'flock_learning_max_tokens':900,'flock_learning_unlimited':1,'flock_learning_unlimited_start':'2026-11-12T00:00','flock_learning_unlimited_end':'2026-11-13T00:00','flock_skill_distill_enabled':1,'flock_skill_distill_time':'04:20'}
+        check(https_client.put('/api/ai/flock/skill',json=skill).status_code==200, '真实路由可保存 skill 和学习配置')
+        learned=https_client.get('/api/ai/flock/skill').json()
+        check('content' not in learned, 'skill 设置接口不返回完整内容')
+        check([learned[key] for key in ('flock_learning_batch_size','flock_learning_message_chars','flock_learning_skill_chars','flock_learning_max_tokens')]==['30','220','7000','900'], '真实路由返回学习预算')
+        check(learned['flock_learning_unlimited']=='1', '真实路由返回无限学习开关')
+        check((learned['flock_skill_distill_enabled'],learned['flock_skill_distill_time'])==('1','04:20'), '真实路由返回蒸馏设置')
+        check(https_client.put('/api/ai/flock/skill/import',content='- 导入风格'.encode()).status_code==200, '真实路由可导入 UTF-8 skill')
+        exported_skill=https_client.get('/api/ai/flock/skill/export')
+        check(exported_skill.status_code==200 and exported_skill.content=='- 导入风格'.encode() and exported_skill.headers['cache-control']=='no-store','真实路由可无缓存导出 skill')
+        check(https_client.post('/api/ai/flock/skill/distill-now').status_code==200, '真实路由可手动蒸馏 skill')
         with patch.object(main,'_call_ai',new=AsyncMock(return_value='{"type":"signin","name":"AI草稿","target":"@dummy","command":"/start"}')):
             draft=https_client.post('/api/ai/task-draft',json={'text':'给 @dummy 发 /start'})
             check(draft.status_code==200 and draft.json()['draft']['enabled']==0,'真实路由只生成停用草稿')

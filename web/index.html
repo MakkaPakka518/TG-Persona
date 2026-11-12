@@ -185,13 +185,17 @@ h2{display:none}
 .grp-pick .gp{display:flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid var(--hair2);
   border-radius:999px;font-size:12.5px;color:var(--sub);cursor:pointer;background:var(--panel2);user-select:none}
 .grp-pick .gp.on{border-color:#22c55e;color:#16a34a;background:rgba(34,197,94,.12)}
+.grp-pick .gp.repair{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)}
 html[data-theme="light"] .grp-pick .gp.on{color:#15803d}
 .ai-provider-row{padding:12px 0;border-bottom:1px solid var(--hair)}.ai-provider-row:last-child{border-bottom:0}
 .ai-provider-head{display:flex;align-items:flex-start;gap:10px}.ai-provider-note{font-weight:600;flex:1;min-width:0;overflow-wrap:anywhere}
 .ai-provider-meta{font-size:12px;color:var(--dim);line-height:1.55;overflow-wrap:anywhere}.ai-token-usage{font-variant-numeric:tabular-nums}
 .ai-provider-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}#foldAiProviders button,#aiTestCard button,#sCaptchaProviders .gp,#aiTestProviders .gp{min-height:44px}
 #waterAiCard{min-width:0;overflow:hidden}#waterAiCard .fold-b,#waterAiCard .water-ai-time,#waterAiCard .water-ai-time>div{min-width:0;max-width:100%}
-#waterAiCard input:not([type=checkbox]),#waterAiCard textarea{width:100%;min-width:0;max-width:100%;box-sizing:border-box}.water-ai-time{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#waterAiCard input:not([type=checkbox]),#waterAiCard textarea,#waterAiCard button,#flockLearningCard input:not([type=checkbox]),#flockLearningCard button{min-height:44px;min-width:0;max-width:100%;box-sizing:border-box}.water-ai-time{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.water-ai-job{padding:11px 0;border-bottom:1px solid var(--hair)}.water-ai-job:last-child{border-bottom:0}.water-ai-job-head{display:flex;align-items:center;gap:8px}.water-ai-job-name{flex:1;min-width:0;font-weight:600;overflow-wrap:anywhere}.water-ai-job-meta{margin-top:4px;color:var(--dim);font-size:12px;line-height:1.55;overflow-wrap:anywhere}.water-ai-actions,.water-ai-toolbar,.water-ai-model-row{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch;margin-top:9px}.water-ai-actions button{flex:1 1 88px}.water-ai-toolbar button{flex:1 1 150px}.water-ai-form{margin-top:12px;padding-top:12px;border-top:1px solid var(--hair)}.water-ai-subsection{margin-top:16px;padding-top:14px;border-top:1px solid var(--hair)}.water-ai-subsection summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-weight:600;color:var(--sub)}.water-ai-stats{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.water-ai-stats span{flex:1 1 120px;color:var(--dim);font-size:12px}.water-ai-model-row input{flex:1 1 210px}.water-ai-model-row button{flex:0 1 auto}
+.water-ai-limits{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 8px}.water-ai-limits>div{min-width:0}
+#flockLearningCard label.check{min-height:44px}.water-ai-warning{color:var(--warn)}
 #migrationCard{min-width:0;overflow:hidden}#migrationCard input,#migrationCard button{min-height:44px;max-width:100%}
 .switch.on::after{transform:translateX(18px)}
 .switch.acc.on{background:var(--acc)}
@@ -214,7 +218,7 @@ select{appearance:none;-webkit-appearance:none;
 .flex{display:flex;gap:11px;align-items:flex-start;flex-wrap:wrap}
 .flex>div{flex:1;min-width:130px}
 .hint{font-size:11.5px;color:var(--dim);margin-top:8px;line-height:1.6}
-.form-actions{display:flex;gap:10px;margin-top:18px}
+.form-actions{display:flex;gap:10px;margin-top:18px}#waterAiCard .form-actions button{min-width:44px}
 .form-actions .btn{flex:1}
 .timed-history-toggle input{width:18px!important;height:18px;flex:none}
 
@@ -463,6 +467,7 @@ label.custom-check input{width:20px;height:20px;flex:none}
   #aListTimed .auto-actions button{min-height:44px}
   #foldTg input,#foldTg select,#foldTg button{min-height:44px}
   .water-ai-time{grid-template-columns:minmax(0,1fr)}
+  .water-ai-model-row button{flex:1 1 100%}.water-ai-actions button{flex-basis:calc(50% - 4px)}
 }
 @media(max-width:430px){
   .custom-time-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.custom-time-grid>div:first-child{grid-column:1/-1}
@@ -472,6 +477,7 @@ label.custom-check input{width:20px;height:20px;flex:none}
   header{padding-inline:6px}.logo{font-size:11px;letter-spacing:.03em}.logo .dot{display:none}#accountTop{max-width:78px!important}.icon{width:34px;height:34px}#btnPanelOut{padding-inline:6px}
   main{padding-inline:8px}.card{padding:11px}.ctl-div{margin-inline:-11px}.page-head h1,section>h2{font-size:20px}.quick-row{gap:6px}.qbtn{font-size:11px}.status-pill{font-size:10px}.stat-v{font-size:22px}.tabbar .tb{font-size:9.5px}.tb-ic svg{width:19px;height:19px}
   .auto-top{padding-inline:7px}.auto-top .tag{display:none}.auto-top button{padding-inline:5px}.task-icon{width:26px;height:26px}
+  .water-ai-limits{grid-template-columns:minmax(0,1fr)}
 }
 
 /* 宽屏：导航置顶、内容双列，DOM 顺序保持不变 */
@@ -726,7 +732,17 @@ section.act,.fold.open .fold-b{animation:none}
           <label class="button-reply-toggle"><input type="checkbox" id="brAiFlock"> 注册成功后开启 AI 水群</label>
           <div id="brAiFlockFields" class="hidden">
             <label for="brAiFlockMinutes">持续分钟</label><input id="brAiFlockMinutes" type="number" value="5" min="1" max="60" step="1" inputmode="numeric">
+            <div class="water-ai-limits">
+              <div><label for="brAiFlockContextMessages">上下文消息数</label><input id="brAiFlockContextMessages" type="number" value="6" min="1" max="20" step="1" inputmode="numeric"></div>
+              <div><label for="brAiFlockMessageChars">单条消息字数</label><input id="brAiFlockMessageChars" type="number" value="120" min="40" max="500" step="1" inputmode="numeric"></div>
+              <div><label for="brAiFlockSkillChars">skill 字数</label><input id="brAiFlockSkillChars" type="number" value="3000" min="0" max="10000" step="1" inputmode="numeric"></div>
+              <div><label for="brAiFlockMaxTokens">最大输出 Token</label><input id="brAiFlockMaxTokens" type="number" value="200" min="50" max="1000" step="1" inputmode="numeric"></div>
+            </div>
+            <div class="hint">可按模型能力和费用手动调小或调大，不同任务可分别设置。</div>
+            <label>使用的 AI API（可多选）</label><div id="brAiFlockProviders" class="grp-pick"></div>
+            <div class="hint">不选择表示使用全部已启用 API；多选后按所选列表轮询。</div>
             <label for="brAiFlockPrompt">人格提示词</label><textarea id="brAiFlockPrompt" maxlength="1000" rows="4">你是刚抢到注册码的普通群友。只在别人明显接你的话、问你或质疑你时回复；普通闲聊、感叹、问别人、“人呢”“还得优化”等不要接，应该沉默时只输出NO_REPLY。回复像手机临时打字，每次6至18个字，口语、随意，不写完整说明文，不复述问题。刚抢到时只表达一次开心，可用“卧槽真中了”“终于抢到了”“圆梦了”，不要反复感谢。第一次被质疑脚本时轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；再次质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞；“老板”“xxlb”“圆梦”各最多出现一次。不要长篇自证，不主动找话题，不每条都回。结束语只出现一次：工作日工作时间说“先忙去了”，饭点说“吃饭去了”，凌晨说“圆梦了睡觉”，其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容或NO_REPLY。</textarea>
+            <label for="brAiFlockReaction">可选表情回应</label><input type="text" id="brAiFlockReaction" list="aiFlockReactionOptions" maxlength="16" placeholder="留空不点表情">
           </div>
           <div class="hint">长期监听，只有注册成功才推送通知。新任务保存后请手动启用。</div>
           <div class="flex" style="margin-top:14px"><button class="btn" type="submit">保存</button><button class="ghost" type="button" id="brCancel" style="display:none" onclick="cancelAutoEdit('button_register')">取消编辑</button></div>
@@ -783,7 +799,17 @@ section.act,.fold.open .fold-b{animation:none}
           <label class="link-reply-toggle"><input type="checkbox" id="lkAiFlock"> 注册成功后开启 AI 水群</label>
           <div id="lkAiFlockFields" class="hidden">
             <label for="lkAiFlockMinutes">持续分钟</label><input type="number" id="lkAiFlockMinutes" value="5" min="1" max="60" step="1" inputmode="numeric">
+            <div class="water-ai-limits">
+              <div><label for="lkAiFlockContextMessages">上下文消息数</label><input id="lkAiFlockContextMessages" type="number" value="6" min="1" max="20" step="1" inputmode="numeric"></div>
+              <div><label for="lkAiFlockMessageChars">单条消息字数</label><input id="lkAiFlockMessageChars" type="number" value="120" min="40" max="500" step="1" inputmode="numeric"></div>
+              <div><label for="lkAiFlockSkillChars">skill 字数</label><input id="lkAiFlockSkillChars" type="number" value="3000" min="0" max="10000" step="1" inputmode="numeric"></div>
+              <div><label for="lkAiFlockMaxTokens">最大输出 Token</label><input id="lkAiFlockMaxTokens" type="number" value="200" min="50" max="1000" step="1" inputmode="numeric"></div>
+            </div>
+            <div class="hint">可按模型能力和费用手动调小或调大，不同任务可分别设置。</div>
+            <label>使用的 AI API（可多选）</label><div id="lkAiFlockProviders" class="grp-pick"></div>
+            <div class="hint">不选择表示使用全部已启用 API；多选后按所选列表轮询。</div>
             <label for="lkAiFlockPrompt">人格提示词</label><textarea id="lkAiFlockPrompt" maxlength="1000" rows="4">你是刚抢到注册码的普通群友。只在别人明显接你的话、问你或质疑你时回复；普通闲聊、感叹、问别人、“人呢”“还得优化”等不要接，应该沉默时只输出NO_REPLY。回复像手机临时打字，每次6至18个字，口语、随意，不写完整说明文，不复述问题。刚抢到时只表达一次开心，可用“卧槽真中了”“终于抢到了”“圆梦了”，不要反复感谢。第一次被质疑脚本时轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；再次质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞；“老板”“xxlb”“圆梦”各最多出现一次。不要长篇自证，不主动找话题，不每条都回。结束语只出现一次：工作日工作时间说“先忙去了”，饭点说“吃饭去了”，凌晨说“圆梦了睡觉”，其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容或NO_REPLY。</textarea>
+            <label for="lkAiFlockReaction">可选表情回应</label><input type="text" id="lkAiFlockReaction" list="aiFlockReactionOptions" maxlength="16" placeholder="留空不点表情">
           </div>
           <label for="lkTimeout">每步最长等待（秒）</label>
           <input type="number" id="lkTimeout" value="30" min="1" max="300" step="1" inputmode="numeric" required>
@@ -825,7 +851,17 @@ section.act,.fold.open .fold-b{animation:none}
           <label class="button-reply-toggle"><input type="checkbox" id="crAiFlock"> 注册成功后开启 AI 水群</label>
           <div id="crAiFlockFields" class="hidden">
             <label for="crAiFlockMinutes">持续分钟</label><input type="number" id="crAiFlockMinutes" value="5" min="1" max="60" step="1" inputmode="numeric">
+            <div class="water-ai-limits">
+              <div><label for="crAiFlockContextMessages">上下文消息数</label><input id="crAiFlockContextMessages" type="number" value="6" min="1" max="20" step="1" inputmode="numeric"></div>
+              <div><label for="crAiFlockMessageChars">单条消息字数</label><input id="crAiFlockMessageChars" type="number" value="120" min="40" max="500" step="1" inputmode="numeric"></div>
+              <div><label for="crAiFlockSkillChars">skill 字数</label><input id="crAiFlockSkillChars" type="number" value="3000" min="0" max="10000" step="1" inputmode="numeric"></div>
+              <div><label for="crAiFlockMaxTokens">最大输出 Token</label><input id="crAiFlockMaxTokens" type="number" value="200" min="50" max="1000" step="1" inputmode="numeric"></div>
+            </div>
+            <div class="hint">可按模型能力和费用手动调小或调大，不同任务可分别设置。</div>
+            <label>使用的 AI API（可多选）</label><div id="crAiFlockProviders" class="grp-pick"></div>
+            <div class="hint">不选择表示使用全部已启用 API；多选后按所选列表轮询。</div>
             <label for="crAiFlockPrompt">人格提示词</label><textarea id="crAiFlockPrompt" maxlength="1000" rows="4">你是刚抢到注册码的普通群友。只在别人明显接你的话、问你或质疑你时回复；普通闲聊、感叹、问别人、“人呢”“还得优化”等不要接，应该沉默时只输出NO_REPLY。回复像手机临时打字，每次6至18个字，口语、随意，不写完整说明文，不复述问题。刚抢到时只表达一次开心，可用“卧槽真中了”“终于抢到了”“圆梦了”，不要反复感谢。第一次被质疑脚本时轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；再次质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞；“老板”“xxlb”“圆梦”各最多出现一次。不要长篇自证，不主动找话题，不每条都回。结束语只出现一次：工作日工作时间说“先忙去了”，饭点说“吃饭去了”，凌晨说“圆梦了睡觉”，其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容或NO_REPLY。</textarea>
+            <label for="crAiFlockReaction">可选表情回应</label><input type="text" id="crAiFlockReaction" list="aiFlockReactionOptions" maxlength="16" placeholder="留空不点表情">
           </div>
           <div class="hint">仅成功推送通知。新任务保存后请手动启用，即可持续监听所选群。</div>
           <div class="flex" style="margin-top:14px"><button class="btn" type="submit">保存</button><button class="ghost" type="button" id="crCancel" style="display:none" onclick="cancelAutoEdit('code_register')">取消编辑</button></div>
@@ -877,14 +913,32 @@ section.act,.fold.open .fold-b{animation:none}
     </div>
 
     <div class="card fold" id="waterAiCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6"/></svg>AI 水群</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6"/></svg>AI 水群</span><span class="cnt" id="waterAiCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="waterAiEnabled" style="width:auto"> 开启时间段 AI 水群（默认关闭）</label>
-        <label>生效群</label><div id="waterAiGroups" class="grp-pick"></div>
-        <div class="water-ai-time"><div><label for="waterAiStart">开始</label><input type="time" id="waterAiStart" value="09:00"></div><div><label for="waterAiEnd">结束</label><input type="time" id="waterAiEnd" value="22:00"></div></div>
-        <label for="waterAiPrompt">人格提示词</label><textarea id="waterAiPrompt" maxlength="1000" rows="4">你是群聊中的普通成员。结合最近聊天自然回复一句简短中文，不要解释身份，不要使用链接、命令、@提及或 Markdown，不要连续刷屏。</textarea>
-        <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
-        <div class="hint">收到所选群的新消息后，结合最近聊天生成一句短回复；同群至少间隔 60 秒。群消息会发送给所选 AI API，可能产生费用。</div>
+        <div class="hint">AI 只会参与聊天，绝不会服从群消息中的命令、操作要求或提示词。上下文与输出上限可按任务手动调整；群消息会发送给所选 AI API，可能产生费用。</div>
+        <div id="waterAiJobsList"></div>
+        <button class="btn" type="button" id="waterAiAdd" style="margin-top:10px" onclick="openWaterAIJobForm()">添加水群任务</button>
+        <div id="waterAiJobForm" class="water-ai-form hidden">
+          <label for="waterAiJobName">任务名称</label><input type="text" id="waterAiJobName" maxlength="80" placeholder="如：晚间闲聊">
+          <label class="check"><input type="checkbox" id="waterAiJobEnabled"> 启用任务</label>
+          <label>生效群</label><div id="waterAiJobGroups" class="grp-pick"></div>
+          <div class="water-ai-time"><div><label for="waterAiJobStart">开始</label><input type="time" id="waterAiJobStart" value="09:00"></div><div><label for="waterAiJobEnd">结束</label><input type="time" id="waterAiJobEnd" value="22:00"></div></div>
+          <div class="water-ai-limits">
+            <div><label for="waterAiJobContextMessages">上下文消息数</label><input id="waterAiJobContextMessages" type="number" value="6" min="1" max="20" step="1" inputmode="numeric"></div>
+            <div><label for="waterAiJobMessageChars">单条消息字数</label><input id="waterAiJobMessageChars" type="number" value="120" min="40" max="500" step="1" inputmode="numeric"></div>
+            <div><label for="waterAiJobSkillChars">skill 字数</label><input id="waterAiJobSkillChars" type="number" value="3000" min="0" max="10000" step="1" inputmode="numeric"></div>
+            <div><label for="waterAiJobMaxTokens">最大输出 Token</label><input id="waterAiJobMaxTokens" type="number" value="200" min="50" max="1000" step="1" inputmode="numeric"></div>
+          </div>
+          <div class="hint">可按模型能力、上下文需要和费用手动调整，仅影响当前任务。</div>
+          <label>使用的 AI API（可多选）</label><div id="waterAiJobProviders" class="grp-pick"></div>
+          <div class="hint">不选择表示使用全部已启用 API；多选后按所选列表轮询。</div>
+          <label for="waterAiJobPrompt">人格提示词（可选）</label><textarea id="waterAiJobPrompt" maxlength="1000" rows="4" placeholder="留空时完全模仿账号 skill.md；填写后在主人风格上叠加该任务人格"></textarea>
+          <div class="hint">留空会只使用账号学习中心的 skill.md；填写后组合 skill.md 与本任务人格。两者都为空时不能启用任务。</div>
+          <label for="waterAiJobReaction">可选表情回应</label><input type="text" id="waterAiJobReaction" list="aiFlockReactionOptions" maxlength="16" placeholder="留空不点表情">
+          <div class="form-actions"><button class="btn" type="button" id="waterAiJobSave" onclick="saveWaterAIJob()">保存任务</button><button class="ghost" type="button" onclick="resetWaterAIJobForm()">取消</button></div>
+        </div>
+        <datalist id="aiFlockReactionOptions"></datalist>
+        <div class="hint" style="margin-top:12px">水群任务会继承当前账号在「设置 → AI 学习与 skill.md」中的学习记忆。</div>
       </div>
     </div>
     <div class="card fold">
@@ -1293,11 +1347,51 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="aiProviderNote">备注</label><input type="text" id="aiProviderNote" maxlength="80" placeholder="如：主线路、GLM 备用">
           <label for="aiProviderBase">API 地址（OpenAI 兼容）</label><input type="url" id="aiProviderBase" maxlength="2048" placeholder="https://api.openai.com/v1">
           <label for="aiProviderKey">API Key</label><input type="password" id="aiProviderKey" maxlength="4096" autocomplete="new-password" placeholder="sk-...">
-          <label for="aiProviderModel">模型</label><input type="text" id="aiProviderModel" maxlength="256" placeholder="gpt-4o-mini">
+          <label for="aiProviderModel">模型</label><div class="water-ai-model-row"><input type="text" id="aiProviderModel" list="aiProviderModelOptions" maxlength="256" placeholder="gpt-4o-mini"><button class="ghost" type="button" id="aiProviderModelsBtn" onclick="discoverAIProviderModels()">获取模型</button></div>
+          <datalist id="aiProviderModelOptions"></datalist><div id="aiProviderModelsStatus" class="hint" role="status" aria-live="polite"></div>
           <label class="check"><input type="checkbox" id="aiProviderEnabled" checked> 启用</label>
           <div class="flex" style="margin-top:12px"><button class="btn" type="button" id="aiProviderSave" onclick="saveAIProvider()">保存</button><button class="ghost" type="button" onclick="closeAIProviderForm()">取消</button></div>
         </div>
         <div id="aiTestResult" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
+      </div>
+    </div>
+    <div class="card fold" id="flockLearningCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M4 19c5-1 8-4 9-9 3 1 5 3 7 6M5 5h6v6H5zM15 4v4M13 6h4"/></svg>AI 学习与 skill.md</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b" id="waterAiSkillSection">
+        <div id="waterAiSkillActiveStatus" class="hint" role="status" aria-live="polite">当前状态：普通学习</div>
+        <label class="check"><input type="checkbox" id="waterAiSkillEnabled"> 每日普通学习</label>
+        <div class="water-ai-time"><div><label for="waterAiSkillStart">普通学习开始（北京时间）</label><input type="time" id="waterAiSkillStart" value="09:00"></div><div><label for="waterAiSkillEnd">普通学习结束（北京时间）</label><input type="time" id="waterAiSkillEnd" value="22:00"></div></div>
+        <label>学习群</label><div id="waterAiSkillGroups" class="grp-pick"></div>
+        <label>学习使用的 AI API（可多选）</label><div id="waterAiSkillProviders" class="grp-pick"></div>
+        <div class="hint">鲸鱼模式、深度主人学习和普通学习都使用这里选择的群与 API；不选择 API 表示使用全部已启用 API。</div>
+        <div class="water-ai-limits">
+          <div><label for="waterAiSkillBatchSize">每批样本数</label><input id="waterAiSkillBatchSize" type="number" value="20" min="10" max="50" step="1" inputmode="numeric"></div>
+          <div><label for="waterAiSkillMessageChars">单条样本字数</label><input id="waterAiSkillMessageChars" type="number" value="160" min="40" max="500" step="1" inputmode="numeric"></div>
+          <div><label for="waterAiSkillSkillChars">skill 字数</label><input id="waterAiSkillSkillChars" type="number" value="6000" min="500" max="20000" step="1" inputmode="numeric"></div>
+          <div><label for="waterAiSkillMaxTokens">最大输出 Token</label><input id="waterAiSkillMaxTokens" type="number" value="600" min="100" max="2000" step="1" inputmode="numeric"></div>
+        </div>
+        <div class="hint">以上预算仅用于普通学习；数值会在鲸鱼模式结束后继续使用。</div>
+        <div class="water-ai-subsection">
+          <label class="check water-ai-cost-toggle"><input type="checkbox" id="waterAiSkillUnlimited" aria-describedby="waterAiSkillUnlimitedWarning" onchange="syncFlockLearningUnlimited()"> 鲸鱼模式</label>
+          <div class="water-ai-time"><div><label for="waterAiSkillUnlimitedStart">开始（北京时间）</label><input type="datetime-local" id="waterAiSkillUnlimitedStart" step="60"></div><div><label for="waterAiSkillUnlimitedEnd">结束（北京时间）</label><input type="datetime-local" id="waterAiSkillUnlimitedEnd" step="60"></div></div>
+          <div class="hint water-ai-warning" id="waterAiSkillUnlimitedWarning">鲸鱼模式会产生高额 Token 费用：读取全部最多 200 条完整消息和完整 1 MiB skill.md，请求输出上限 32768 Token；实际仍受服务商与模型限制，到期后自动回到普通预算。</div>
+          <label class="check water-ai-cost-toggle"><input type="checkbox" id="waterAiSkillDeepEnabled" aria-describedby="waterAiSkillDeepWarning"> 深度主人学习</label>
+          <div class="water-ai-time"><div><label for="waterAiSkillDeepStart">开始（北京时间）</label><input type="datetime-local" id="waterAiSkillDeepStart" step="60"></div><div><label for="waterAiSkillDeepEnd">结束（北京时间）</label><input type="datetime-local" id="waterAiSkillDeepEnd" step="60"></div></div>
+          <div class="hint water-ai-warning" id="waterAiSkillDeepWarning">深度主人学习会读取所选群的近期事件及主人与群组的对话，Token 消耗较高，到期自动关闭；上下文过长时会自动拆分并处理全部批次。</div>
+        </div>
+        <label class="check"><input type="checkbox" id="waterAiSkillUploadEnabled"> 定时上传到 Telegram 收藏夹</label>
+        <label for="waterAiSkillUploadTime">上传时间（北京时间）</label><input type="time" id="waterAiSkillUploadTime" value="03:00">
+        <label class="check water-ai-distill"><input type="checkbox" id="waterAiSkillDistillEnabled"> 每日提炼生成记忆</label>
+        <label for="waterAiSkillDistillTime">提炼时间（北京时间）</label><input type="time" id="waterAiSkillDistillTime" value="04:00">
+        <div class="hint">生成记忆保留 1 天完整内容；超过 1 天转为详细记忆，超过 7 天转为摘要，超过 60 天且至少经过 3 次提炼后逐渐淡化。每天按所选北京时间提炼；手动导入或固定的 Markdown 永远不会被自动删除。</div>
+        <button class="btn" type="button" id="waterAiSkillSave" style="margin-top:12px" onclick="saveFlockSkill()">保存学习设置</button>
+        <div class="water-ai-stats"><span id="waterAiSkillSamples">样本：--</span><span id="waterAiSkillSize">skill.md：--</span><span id="waterAiSkillLastUpload">上次上传：--</span></div>
+        <div class="water-ai-stats hidden" id="waterAiSkillGeneratedStats"><span id="waterAiSkillRecentCount">近期记忆：--</span><span id="waterAiSkillDetailCount">详细记忆：--</span><span id="waterAiSkillSummaryCount">摘要记忆：--</span><span id="waterAiSkillFadingCount">淡化记忆：--</span></div>
+        <div class="water-ai-toolbar"><button class="ghost" type="button" id="waterAiLearnNow" onclick="runFlockSkillAction('learn-now')">立即学习</button><button class="ghost" type="button" id="waterAiDistillNow" onclick="runFlockSkillAction('distill-now')">立即提炼</button><button class="ghost" type="button" id="waterAiUploadNow" onclick="runFlockSkillAction('upload-now')">立即上传</button><button class="ghost" type="button" id="waterAiSkillExport" onclick="exportFlockSkill()">导出 skill.md</button></div>
+        <label for="waterAiSkillFile">选择 Markdown 文件（最大 1 MiB）</label><input type="file" id="waterAiSkillFile" accept=".md,.markdown,text/markdown,text/plain" onchange="readFlockSkillFile()">
+        <button class="danger" type="button" id="waterAiSkillImport" style="margin-top:10px" disabled onclick="importFlockSkill()">确认导入并替换 skill.md</button>
+        <div id="waterAiSkillStatus" class="hint" role="status" aria-live="polite"></div>
+        <div class="hint">人格与 skill.md 可能包含群聊习惯和私人信息，请仅导入可信文件并妥善保管导出内容。页面不会展示原始学习样本。</div>
       </div>
     </div>
     <div class="card fold" id="migrationCard">
@@ -1530,6 +1624,7 @@ function resetAccountCaches(){
   logQ='';logKind='reply';resetLogOpenState();anomalySeq++;anomalies=[];anomalyBusyIds.clear();clearTimeout(logQtimer);$('#logQ').value='';$('#gSearch').value='';
   batchBusy=false;exportBusy=false;$('#configExportAll').disabled=false;
   closeAIProviderForm();
+  aiProvidersSeq++;aiProviders=[];signinAIProviderSel.clear();aiTestProviderSel.clear();renderAIProviders();
   for(const id of ['gAll','gWatched','rList','logList','tgCard'])$('#'+id).replaceChildren();
   for(const id of ['ovName','ovUser','ovGroups','ovRules','ovHits','gCnt'])$('#'+id).textContent='--';
   $('#ovNoTg').style.display='flex';$('#dotHead').classList.remove('on');$('#ovStatus').textContent='未登录';$('#hPause').textContent='未登录';$('#swPause').classList.remove('on');
@@ -1540,7 +1635,7 @@ function resetAccountCaches(){
   invalidateBatchPreview();cancelConfigImport();resetAccountTests();
   for(const id of ['sBark','sBt','sBc','sFlPool'])$('#'+id).value='';
   $('#sTaskConcurrency').value='2';signinAIProviderSel.clear();renderSigninAIProviders();
-  waterAIGroupSel.clear();renderWaterAIGroups();
+  resetWaterAIState();
   syncAutoSelection();
 }
 function switchAccount(id){
@@ -2102,7 +2197,7 @@ function editAutoItem(id){
     $('#lkReady').value=a.keywords||'已进入注册状态';$('#lkUser').value='';$('#lkSecret').value='';
     $('#lkExisting').value=a.existing_kw||'';$('#lkGroupReply').checked=!!a.success_reply_enabled;
     $('#lkGroupReplyText').value=a.success_reply_text||'';$('#lkGroupReplyDelay').value=a.success_reply_delay??5;$('#lkGroupReplyFields').classList.toggle('hidden',!$('#lkGroupReply').checked);
-    $('#lkAiFlock').checked=!!a.ai_flock_enabled;$('#lkAiFlockMinutes').value=a.ai_flock_minutes??5;$('#lkAiFlockPrompt').value=a.ai_flock_prompt||DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;$('#lkAiFlockFields').classList.toggle('hidden',!$('#lkAiFlock').checked);
+    $('#lkAiFlock').checked=!!a.ai_flock_enabled;$('#lkAiFlockMinutes').value=a.ai_flock_minutes??5;$('#lkAiFlockPrompt').value=a.ai_flock_prompt||DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('lk',a.ai_flock_provider_ids,a.ai_flock_reaction);setIntegerFields('lkAiFlock',a,AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#lkAiFlockFields').classList.toggle('hidden',!$('#lkAiFlock').checked);
     $('#lkMode').value=String(Number(a.link_mode)===0?0:1);$('#lkLimit').value=Number(a.link_limit)||4;
     $('#lkWwait').value=Number(a.link_wait)||3;$('#lkSuccess').value=a.success_kw||'成功';
     $('#lkFail').value=a.fail_kw||'';$('#lkTimeout').value=a.result_timeout??30;
@@ -2114,7 +2209,7 @@ function editAutoItem(id){
     $('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value=a.success_kw||'成功';$('#brFail').value=a.fail_kw||'';$('#brTimeout').value=a.result_timeout??30;
     $('#brGroupReply').checked=!!a.success_reply_enabled;$('#brReplyText').value=a.success_reply_text||'';$('#brReplyDelay').value=a.success_reply_delay??5;
     $('#brGroupReplyFields').classList.toggle('hidden',!$('#brGroupReply').checked);$('#brCancel').style.display='inline-block';
-    $('#brAiFlock').checked=!!a.ai_flock_enabled;$('#brAiFlockMinutes').value=a.ai_flock_minutes??5;$('#brAiFlockPrompt').value=a.ai_flock_prompt||DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;$('#brAiFlockFields').classList.toggle('hidden',!$('#brAiFlock').checked);
+    $('#brAiFlock').checked=!!a.ai_flock_enabled;$('#brAiFlockMinutes').value=a.ai_flock_minutes??5;$('#brAiFlockPrompt').value=a.ai_flock_prompt||DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('br',a.ai_flock_provider_ids,a.ai_flock_reaction);setIntegerFields('brAiFlock',a,AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#brAiFlockFields').classList.toggle('hidden',!$('#brAiFlock').checked);
   }else if(t==='code_register'){
     $('#crName').value=a.name;renderCodeGroupOptions(a.groups);$('#crBot').value=a.target||'';
     $('#crButton').value=a.btn_text||'注册';$('#crReady').value=a.keywords||'已进入注册状态';$('#crExisting').value=a.existing_kw||'';
@@ -2122,7 +2217,7 @@ function editAutoItem(id){
     $('#crSuccess').value=a.success_kw||'成功';$('#crFail').value=a.fail_kw||'';$('#crTimeout').value=a.result_timeout??30;
     $('#crGroupReply').checked=!!a.success_reply_enabled;$('#crReplyText').value=a.success_reply_text||'';$('#crReplyDelay').value=a.success_reply_delay??5;
     $('#crReplyFields').classList.toggle('hidden',!$('#crGroupReply').checked);$('#crCancel').style.display='inline-block';
-    $('#crAiFlock').checked=!!a.ai_flock_enabled;$('#crAiFlockMinutes').value=a.ai_flock_minutes??5;$('#crAiFlockPrompt').value=a.ai_flock_prompt||DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;$('#crAiFlockFields').classList.toggle('hidden',!$('#crAiFlock').checked);
+    $('#crAiFlock').checked=!!a.ai_flock_enabled;$('#crAiFlockMinutes').value=a.ai_flock_minutes??5;$('#crAiFlockPrompt').value=a.ai_flock_prompt||DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('cr',a.ai_flock_provider_ids,a.ai_flock_reaction);setIntegerFields('crAiFlock',a,AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#crAiFlockFields').classList.toggle('hidden',!$('#crAiFlock').checked);
   }else if(t==='grabcodes'){
     $('#gName').value=a.name;setAutoGroups('grabcodes',a.groups);$('#gKeywords').value=a.keywords;
     $('#gText').value=a.reply_text;$('#gCd').value=a.cooldown;
@@ -2152,10 +2247,10 @@ function cancelAutoEdit(t){
   ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sRecognitionMode').value='none';$('#sImageAction').value='reply';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
-    link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkAiFlock').checked=false;$('#lkAiFlockMinutes').value='5';$('#lkAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;$('#lkAiFlockFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
+    link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkAiFlock').checked=false;$('#lkAiFlockMinutes').value='5';$('#lkAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('lk','','');setIntegerFields('lkAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#lkAiFlockFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';setCustomTrigger('{"mode":"manual"}');setVisualSteps('[]');$('#cUser').value='';$('#cSecret').value='';$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cRetries').value=2;$('#cCancel').style.display='none'},
-    code_register:()=>{$('#crName').value='';$('#crGroup').value='';$('#crBot').value='';$('#crButton').value='注册';$('#crReady').value='已进入注册状态';$('#crExisting').value='无法启用续期功能';$('#crUser').value='';$('#crSecret').value='';$('#crMode').value='1';$('#crLimit').value=4;$('#crWait').value=3;$('#crSuccess').value='成功';$('#crFail').value='';$('#crTimeout').value=30;$('#crGroupReply').checked=false;$('#crReplyText').value='';$('#crReplyDelay').value=5;$('#crReplyFields').classList.add('hidden');$('#crAiFlock').checked=false;$('#crAiFlockMinutes').value=5;$('#crAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;$('#crAiFlockFields').classList.add('hidden');$('#crCancel').style.display='none'},
-    button_register:()=>{$('#brName').value='';setAutoGroups('button_register','');$('#brAnnouncement').value='定时注册';$('#brAnnouncementButton').value='点击注册';$('#brCommand').value='/start';$('#brButton').value='创建';$('#brReady').value='注册状态';$('#brExisting').value='';$('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value='成功';$('#brFail').value='';$('#brTimeout').value=30;$('#brGroupReply').checked=true;$('#brReplyText').value='拿下！';$('#brReplyDelay').value=5;$('#brGroupReplyFields').classList.remove('hidden');$('#brAiFlock').checked=false;$('#brAiFlockMinutes').value=5;$('#brAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;$('#brAiFlockFields').classList.add('hidden');$('#brCancel').style.display='none'},
+    code_register:()=>{$('#crName').value='';$('#crGroup').value='';$('#crBot').value='';$('#crButton').value='注册';$('#crReady').value='已进入注册状态';$('#crExisting').value='无法启用续期功能';$('#crUser').value='';$('#crSecret').value='';$('#crMode').value='1';$('#crLimit').value=4;$('#crWait').value=3;$('#crSuccess').value='成功';$('#crFail').value='';$('#crTimeout').value=30;$('#crGroupReply').checked=false;$('#crReplyText').value='';$('#crReplyDelay').value=5;$('#crReplyFields').classList.add('hidden');$('#crAiFlock').checked=false;$('#crAiFlockMinutes').value=5;$('#crAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('cr','','');setIntegerFields('crAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#crAiFlockFields').classList.add('hidden');$('#crCancel').style.display='none'},
+    button_register:()=>{$('#brName').value='';setAutoGroups('button_register','');$('#brAnnouncement').value='定时注册';$('#brAnnouncementButton').value='点击注册';$('#brCommand').value='/start';$('#brButton').value='创建';$('#brReady').value='注册状态';$('#brExisting').value='';$('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value='成功';$('#brFail').value='';$('#brTimeout').value=30;$('#brGroupReply').checked=true;$('#brReplyText').value='拿下！';$('#brReplyDelay').value=5;$('#brGroupReplyFields').classList.remove('hidden');$('#brAiFlock').checked=false;$('#brAiFlockMinutes').value=5;$('#brAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('br','','');setIntegerFields('brAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#brAiFlockFields').classList.add('hidden');$('#brCancel').style.display='none'},
     redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'},
     keepalive:()=>{$('#kName').value='';$('#kTarget').value='';$('#kText').value='';$('#kEvery').value=7;$('#kUnit').value='86400';$('#kDel').value=10;$('#kCancel').style.display='none'}})[t]();
 }
@@ -2464,10 +2559,11 @@ async function saveAuto(type){
     if(!body.name||!body.reply_text)return toast('请填写名称和动作文本',1);
     if(body.poll_interval&&!body.target)return toast('轮询模式需填写轮询机器人',1);
   }else if(type==='button_register'){
+    const flockLimits=validIntegerFields('brAiFlock',AI_FLOCK_LIMIT_SPECS,'ai_flock_');if(!flockLimits)return;
     body={type,name:$('#brName').value.trim(),groups:getAutoGroups(type),announcement_kw:$('#brAnnouncement').value.trim(),announcement_button:$('#brAnnouncementButton').value.trim(),command:$('#brCommand').value.trim()||'/start',
       btn_text:$('#brButton').value.trim(),keywords:$('#brReady').value.trim(),existing_kw:$('#brExisting').value.trim(),success_kw:$('#brSuccess').value.trim(),fail_kw:$('#brFail').value.trim(),result_timeout:Number($('#brTimeout').value),
       success_reply_enabled:$('#brGroupReply').checked?1:0,success_reply_text:$('#brReplyText').value.trim(),success_reply_delay:Number($('#brReplyDelay').value),retries:0,enabled:0};
-    Object.assign(body,{ai_flock_enabled:$('#brAiFlock').checked?1:0,ai_flock_minutes:Number($('#brAiFlockMinutes').value),ai_flock_prompt:$('#brAiFlockPrompt').value.trim()});
+    Object.assign(body,{ai_flock_enabled:$('#brAiFlock').checked?1:0,ai_flock_minutes:Number($('#brAiFlockMinutes').value),ai_flock_prompt:$('#brAiFlockPrompt').value.trim(),ai_flock_provider_ids:[...registrationAIProviderSel.br].join(','),ai_flock_reaction:$('#brAiFlockReaction').value.trim()},flockLimits);
     if(!body.name||!body.announcement_kw||!body.announcement_button||!body.btn_text||!body.keywords||!body.success_kw)return toast('请填写开注关键词、按钮文字和注册流程',1);
     if(!Number.isInteger(body.result_timeout)||body.result_timeout<1||body.result_timeout>300)return toast('每步等待须为 1–300 秒',1);
     if(body.success_reply_enabled&&!body.success_reply_text)return toast('请填写成功后的群内发送内容',1);
@@ -2476,6 +2572,7 @@ async function saveAuto(type){
     if((user&&!secret)||(!user&&secret)||((!wasEditing||!editAuto.link_credential_set)&&(!user||!secret)))return toast('请同时填写注册用户名和安全码',1);
     if(user&&secret)linkCredential={user,secret};
   }else if(type==='link_register'){
+    const flockLimits=validIntegerFields('lkAiFlock',AI_FLOCK_LIMIT_SPECS,'ai_flock_');if(!flockLimits)return;
     const mode=Number($('#lkMode').value),limit=Number($('#lkLimit').value),wait=Number($('#lkWwait').value),timeout=Number($('#lkTimeout').value);
     const groupReply=$('#lkGroupReply').checked,groupReplyText=$('#lkGroupReplyText').value.trim(),groupReplyDelay=Number($('#lkGroupReplyDelay').value);
     body={type,name:$('#lkName').value.trim(),groups:getAutoGroups('link_register'),
@@ -2484,7 +2581,7 @@ async function saveAuto(type){
       link_mode:mode,link_limit:limit,link_wait:wait,result_timeout:timeout,retries:0,
       existing_kw:$('#lkExisting').value.trim(),success_reply_enabled:groupReply?1:0,
       success_reply_text:groupReplyText,success_reply_delay:groupReplyDelay,
-      ai_flock_enabled:$('#lkAiFlock').checked?1:0,ai_flock_minutes:Number($('#lkAiFlockMinutes').value),ai_flock_prompt:$('#lkAiFlockPrompt').value.trim()};
+      ai_flock_enabled:$('#lkAiFlock').checked?1:0,ai_flock_minutes:Number($('#lkAiFlockMinutes').value),ai_flock_prompt:$('#lkAiFlockPrompt').value.trim(),ai_flock_provider_ids:[...registrationAIProviderSel.lk].join(','),ai_flock_reaction:$('#lkAiFlockReaction').value.trim(),...flockLimits};
     if(!body.name||!body.btn_text||!body.keywords||!body.success_kw)return toast('请完整填写按钮、进入注册状态和成功关键词',1);
     if(![0,1].includes(mode)||!Number.isInteger(limit)||limit<2||limit>4||!Number.isInteger(wait)||wait<2||wait>15)return toast('链接模式/数量或失效等待无效',1);
     if(!Number.isInteger(timeout)||timeout<1||timeout>300)return toast('每步最长等待须为 1–300 秒',1);
@@ -2495,11 +2592,12 @@ async function saveAuto(type){
     if(!wasEditing&&(!user||!secret))return toast('新增任务请填写注册用户名和安全码',1);
     if(user&&secret)linkCredential={user,secret};
   }else if(type==='code_register'){
+    const flockLimits=validIntegerFields('crAiFlock',AI_FLOCK_LIMIT_SPECS,'ai_flock_');if(!flockLimits)return;
     body={type,name:$('#crName').value.trim(),groups:$('#crGroup').value,target:$('#crBot').value.trim(),
       btn_text:$('#crButton').value.trim(),keywords:$('#crReady').value.trim(),existing_kw:$('#crExisting').value.trim(),success_kw:$('#crSuccess').value.trim(),fail_kw:$('#crFail').value.trim(),
       link_mode:Number($('#crMode').value),link_limit:Number($('#crLimit').value),link_wait:Number($('#crWait').value),result_timeout:Number($('#crTimeout').value),
       success_reply_enabled:$('#crGroupReply').checked?1:0,success_reply_text:$('#crReplyText').value.trim(),success_reply_delay:Number($('#crReplyDelay').value),retries:0,enabled:0};
-    Object.assign(body,{ai_flock_enabled:$('#crAiFlock').checked?1:0,ai_flock_minutes:Number($('#crAiFlockMinutes').value),ai_flock_prompt:$('#crAiFlockPrompt').value.trim()});
+    Object.assign(body,{ai_flock_enabled:$('#crAiFlock').checked?1:0,ai_flock_minutes:Number($('#crAiFlockMinutes').value),ai_flock_prompt:$('#crAiFlockPrompt').value.trim(),ai_flock_provider_ids:[...registrationAIProviderSel.cr].join(','),ai_flock_reaction:$('#crAiFlockReaction').value.trim()},flockLimits);
     if(!body.name||!body.btn_text||!body.keywords||!body.success_kw)return toast('请完整填写任务名称和注册流程',1);
     if(!/^-[1-9][0-9]*$/.test(body.groups))return toast('请选择一个监听群',1);
     if(!/^@?[A-Za-z0-9_]{4,32}$/.test(body.target))return toast('请填写该群的 Bot 用户名',1);
@@ -2539,6 +2637,7 @@ async function saveAuto(type){
       cooldown:+$('#pCd').value||5};
     if(!body.name)return toast('请填写任务名称',1);
   }
+  if(['link_register','button_register','code_register'].includes(type)&&!selectedAIProvidersEnabled(body.ai_flock_provider_ids))return toast('水群任务只能选择已启用的 AI API',1);
   if(['link_register','button_register','code_register'].includes(type)&&body.ai_flock_enabled){
     if(!aiProviders.some(provider=>provider.enabled))return toast('请先到设置添加并启用 AI API',1);
     if(!Number.isInteger(body.ai_flock_minutes)||body.ai_flock_minutes<1||body.ai_flock_minutes>60||!body.ai_flock_prompt)return toast('注册水群持续时间须为 1–60 分钟，并填写人格提示词',1);
@@ -2572,7 +2671,6 @@ function toggleLinkReplyFields(){$('#lkGroupReplyFields').classList.toggle('hidd
 $('#lkGroupReply').addEventListener('change',toggleLinkReplyFields);
 function syncRegistrationAIFlock(prefix){const box=$('#'+prefix+'AiFlock'),on=box.checked;if(on&&!aiProviders.some(provider=>provider.enabled)){box.checked=false;toast('请先到设置添加并启用 AI API',1)}$('#'+prefix+'AiFlockFields').classList.toggle('hidden',!box.checked)}
 for(const prefix of ['br','lk','cr'])$('#'+prefix+'AiFlock').addEventListener('change',()=>syncRegistrationAIFlock(prefix));
-$('#waterAiEnabled').addEventListener('change',function(){if(this.checked&&!aiProviders.some(provider=>provider.enabled)){this.checked=false;toast('请先到设置添加并启用 AI API',1)}});
 async function delAuto(id){
   const a=autos.find(x=>x.id===id);
   if(!a||!confirm('删除任务「'+a.name+'」?'))return;
@@ -3026,8 +3124,22 @@ async function toggleTheme(){
 }
 
 // ---------- AI API 池 ----------
-let aiProviders=[],editingAIProviderId=null,aiProvidersSeq=0,signinAIProviderSel=new Set(),aiTestProviderSel=new Set();
+let aiProviders=[],editingAIProviderId=null,aiProvidersSeq=0,signinAIProviderSel=new Set(),aiTestProviderSel=new Set(),aiProviderModelsSeq=0,aiProviderModelsBusy=false;
+const registrationAIProviderSel={br:new Set(),lk:new Set(),cr:new Set()};
 function formatTokenCount(value){return Number(value||0).toLocaleString('zh-CN')}
+function csvValues(value){return (Array.isArray(value)?value:String(value||'').split(/[,，]/)).map(x=>String(x).trim()).filter(Boolean)}
+const AI_FLOCK_LIMIT_SPECS=[['ContextMessages','context_messages',6,1,20,'上下文消息数'],['MessageChars','message_chars',120,40,500,'单条消息字数'],['SkillChars','skill_chars',3000,0,10000,'skill 字数'],['MaxTokens','max_tokens',200,50,1000,'最大输出 Token']];
+const AI_FLOCK_LEARNING_LIMIT_SPECS=[['BatchSize','flock_learning_batch_size',20,10,50,'每批样本数'],['MessageChars','flock_learning_message_chars',160,40,500,'单条样本字数'],['SkillChars','flock_learning_skill_chars',6000,500,20000,'skill 字数'],['MaxTokens','flock_learning_max_tokens',600,100,2000,'最大输出 Token']];
+function setIntegerFields(idPrefix,data,specs,fieldPrefix=''){for(const [suffix,field,fallback] of specs)$('#'+idPrefix+suffix).value=data?.[fieldPrefix+field]??fallback}
+function readIntegerFields(idPrefix,specs,fieldPrefix=''){const values={};for(const [suffix,field,,min,max,label] of specs){const raw=$('#'+idPrefix+suffix).value.trim(),value=Number(raw);if(!raw||!Number.isInteger(value)||value<min||value>max)throw new Error(label+'须为 '+min+'–'+max+' 的整数');values[fieldPrefix+field]=value}return values}
+function validIntegerFields(idPrefix,specs,fieldPrefix=''){try{return readIntegerFields(idPrefix,specs,fieldPrefix)}catch(e){toast(e.message,1);return null}}
+function selectedAIProvidersEnabled(value){return csvValues(value).every(id=>aiProviders.some(provider=>provider.enabled&&String(provider.id)===id))}
+function providerPickMarkup(sel,dataName){const items=aiProviders.filter(provider=>provider.enabled).map(provider=>({id:String(provider.id),label:String(provider.note||provider.id),repair:false})),shown=new Set(items.map(item=>item.id));for(const id of sel){const value=String(id);if(shown.has(value))continue;const provider=aiProviders.find(item=>String(item.id)===value);items.push({id:value,label:provider?'已停用：'+String(provider.note||value):'已失效：'+value,repair:true})}return items.length?items.map(item=>`<button type="button" class="gp ${sel.has(item.id)?'on':''} ${item.repair?'repair':''}" data-${dataName}="${esc(item.id)}" ${item.repair?'aria-invalid="true" title="此 API 已停用或失效，点击移除后可重新选择"':''}>${esc(item.label)}</button>`).join(''):'<div class="empty" style="padding:6px">请先到设置启用 AI API</div>'}
+function toggleProviderSelection(sel,id,render){id=String(id);sel.has(id)?sel.delete(id):sel.add(id);render()}
+function renderRegistrationAIProviders(prefix){
+  const box=$('#'+prefix+'AiFlockProviders');if(!box)return;box.innerHTML=providerPickMarkup(registrationAIProviderSel[prefix],'registration-ai');
+}
+function setRegistrationAIFlock(prefix,providers,reaction){registrationAIProviderSel[prefix]=new Set(csvValues(providers));$('#'+prefix+'AiFlockReaction').value=reaction||'';renderRegistrationAIProviders(prefix)}
 function renderAIProviders(){
   $('#aiProvidersCount').textContent=aiProviders.length;
   $('#aiProvidersList').innerHTML=aiProviders.length?aiProviders.map(p=>`<div class="ai-provider-row" data-ai-id="${p.id}">
@@ -3036,7 +3148,7 @@ function renderAIProviders(){
     <div class="ai-provider-meta ai-token-usage">输入 ${formatTokenCount(p.input_tokens)}　输出 ${formatTokenCount(p.output_tokens)} Token</div>
     <div class="ai-provider-actions"><button class="ghost" data-ai-action="test">测试</button><button class="ghost" data-ai-action="edit">编辑</button><button class="ghost" data-ai-action="toggle">${p.enabled?'停用':'启用'}</button><button class="danger" data-ai-action="delete">删除</button></div>
   </div>`).join(''):'<div class="empty">尚未添加 AI API</div>';
-  renderSigninAIProviders();renderAITestProviders();
+  renderSigninAIProviders();renderAITestProviders();for(const prefix of ['br','lk','cr'])renderRegistrationAIProviders(prefix);renderWaterAIProviderPicks();
 }
 function renderSigninAIProviders(){
   const box=$('#sCaptchaProviders');if(!box)return;
@@ -3055,17 +3167,34 @@ function syncSigninRecognitionFields(){
   $('#sImagePromptWrap').classList.toggle('hidden',mode!=='image');
 }
 async function loadAIProviders(){
-  const seq=++aiProvidersSeq;
-  try{const d=await api('/api/ai/providers');if(seq!==aiProvidersSeq)return;aiProviders=Array.isArray(d.providers)?d.providers:[];renderAIProviders()}
-  catch(e){if(seq===aiProvidersSeq)$('#aiTestResult').textContent='AI API 加载失败：'+e.message}
+  const c=accountContext(),seq=++aiProvidersSeq;
+  try{const d=await api('/api/ai/providers',{_account:c});if(seq!==aiProvidersSeq||!isCurrentAccount(c))return;aiProviders=Array.isArray(d.providers)?d.providers:[];renderAIProviders()}
+  catch(e){if(seq===aiProvidersSeq&&isCurrentAccount(c)&&!e.staleAccount)$('#aiTestResult').textContent='AI API 加载失败：'+e.message}
 }
 function openAIProviderForm(id=null){
-  editingAIProviderId=id;const p=aiProviders.find(x=>x.id===id);
+  aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=id;const p=aiProviders.find(x=>x.id===id);
   $('#aiProviderNote').value=p?.note||'';$('#aiProviderBase').value=p?.base||'';$('#aiProviderKey').value='';
   $('#aiProviderKey').placeholder=p?.key_present?'已保存，留空不修改':'sk-...';$('#aiProviderModel').value=p?.model||'';$('#aiProviderEnabled').checked=p?.enabled??true;
+  $('#aiProviderModelOptions').replaceChildren();$('#aiProviderModelsStatus').textContent='';$('#aiProviderModelsBtn').disabled=false;
   $('#aiProviderForm').classList.remove('hidden');$('#aiProviderNote').focus();$('#aiProviderForm').scrollIntoView({behavior:'smooth',block:'center'});
 }
-function closeAIProviderForm(){editingAIProviderId=null;$('#aiProviderForm').classList.add('hidden');$('#aiProviderKey').value=''}
+function closeAIProviderForm(){aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=null;$('#aiProviderForm').classList.add('hidden');$('#aiProviderKey').value='';$('#aiProviderModelOptions').replaceChildren();$('#aiProviderModelsStatus').textContent='';$('#aiProviderModelsBtn').disabled=false}
+function redactProviderSecret(message,key){return key?String(message||'').split(key).join('[已隐藏]'):String(message||'')}
+async function discoverAIProviderModels(){
+  if(aiProviderModelsBusy)return;const c=accountContext(),providerId=editingAIProviderId,base=$('#aiProviderBase').value.trim(),key=$('#aiProviderKey').value.trim(),seq=++aiProviderModelsSeq,status=$('#aiProviderModelsStatus'),button=$('#aiProviderModelsBtn');
+  if(!base)return status.textContent='请先填写 API 地址';
+  const saved=aiProviders.find(provider=>provider.id===providerId);if(providerId&&!key&&saved&&base!==String(saved.base||'').trim())return status.textContent='API 地址已修改，请输入 API Key 后再获取模型';
+  aiProviderModelsBusy=true;button.disabled=true;status.textContent='正在获取模型…';
+  try{
+    const body={base,key};if(providerId)body.provider_id=providerId;
+    const d=await api('/api/ai/providers/models',{method:'POST',body:JSON.stringify(body),_account:c});
+    if(seq!==aiProviderModelsSeq||!isCurrentAccount(c)||providerId!==editingAIProviderId||base!==$('#aiProviderBase').value.trim()||key!==$('#aiProviderKey').value.trim())return;
+    const models=[...new Set((Array.isArray(d.models)?d.models:[]).filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim()))];const list=$('#aiProviderModelOptions');list.replaceChildren();
+    for(const model of models){const option=document.createElement('option');option.value=model;option.textContent=model;list.appendChild(option)}
+    status.textContent=models.length?'已获取 '+models.length+' 个模型，请在输入框中选择':'没有获取到可用模型';
+  }catch(e){if(seq===aiProviderModelsSeq&&isCurrentAccount(c))status.textContent='获取模型失败：'+redactProviderSecret(e.message,key)}
+  finally{if(seq===aiProviderModelsSeq&&isCurrentAccount(c)){aiProviderModelsBusy=false;button.disabled=false}}
+}
 async function saveAIProvider(){
   const body={note:$('#aiProviderNote').value.trim(),base:$('#aiProviderBase').value.trim(),key:$('#aiProviderKey').value.trim(),model:$('#aiProviderModel').value.trim(),enabled:$('#aiProviderEnabled').checked};
   if(!body.note||!body.base||!body.model||(!editingAIProviderId&&!body.key))return toast('请填写备注、地址、Key 和模型',1);
@@ -3088,6 +3217,77 @@ async function mutateAIProvider(id,action){
 $('#aiProvidersList').addEventListener('click',e=>{const b=e.target.closest('[data-ai-action]'),row=e.target.closest('[data-ai-id]');if(b&&row)mutateAIProvider(row.dataset.aiId,b.dataset.aiAction)});
 $('#sCaptchaProviders').addEventListener('click',e=>{const b=e.target.closest('[data-signin-ai]');if(!b)return;const id=b.dataset.signinAi;signinAIProviderSel.has(id)?signinAIProviderSel.delete(id):signinAIProviderSel.add(id);renderSigninAIProviders()});
 $('#aiTestProviders').addEventListener('click',e=>{const b=e.target.closest('[data-test-ai]');if(!b)return;const id=b.dataset.testAi;aiTestProviderSel.has(id)?aiTestProviderSel.delete(id):aiTestProviderSel.add(id);renderAITestProviders()});
+for(const prefix of ['br','lk','cr'])$('#'+prefix+'AiFlockProviders').addEventListener('click',e=>{const b=e.target.closest('[data-registration-ai]');if(b)toggleProviderSelection(registrationAIProviderSel[prefix],b.dataset.registrationAi,()=>renderRegistrationAIProviders(prefix))});
+
+// ---------- AI 水群任务与学习 ----------
+let waterAIJobs=[],waterAIJobsSeq=0,editingWaterAIJobId=null,waterAIJobAccount=null,waterAIJobBusy=false;
+let waterAIJobGroupSel=new Set(),waterAIJobProviderSel=new Set(),waterAISkillGroupSel=new Set(),waterAISkillProviderSel=new Set();
+let waterAISkillSeq=0,waterAISkillBusy=false,waterAISkillFileVersion=0,waterAISkillReader=null,waterAISkillDraft=null;
+function renderFlockReactions(){const list=$('#aiFlockReactionOptions');if(!list||list.children.length)return;for(const value of EMOJIS){const option=document.createElement('option');option.value=value;list.appendChild(option)}}
+function waterAIGroupName(id){const group=watchedGroups.find(item=>String(item.chat_id)===id);return String(group?.name||id)}
+function renderWaterAIGroups(){
+  for(const [id,sel] of [['waterAiJobGroups',waterAIJobGroupSel],['waterAiSkillGroups',waterAISkillGroupSel]]){const box=$('#'+id);if(!box)continue;box.innerHTML=watchedGroups.length?watchedGroups.map(g=>`<button type="button" class="gp ${sel.has(String(g.chat_id))?'on':''}" data-water-group="${esc(String(g.chat_id))}">${esc(g.name||g.chat_id)}</button>`).join(''):'<div class="empty" style="padding:6px">请先添加监听群</div>'}
+}
+function renderWaterAIProviderPicks(){
+  for(const [id,sel] of [['waterAiJobProviders',waterAIJobProviderSel],['waterAiSkillProviders',waterAISkillProviderSel]]){const box=$('#'+id);if(!box)continue;box.innerHTML=providerPickMarkup(sel,'water-provider')}
+}
+function waterAIJobPayload(job){return {name:String(job.name||'').trim(),enabled:job.enabled?1:0,groups:csvValues(job.groups).join(','),start_time:String(job.start_time||'09:00'),end_time:String(job.end_time||'22:00'),prompt:String(job.prompt||'').trim(),provider_ids:csvValues(job.provider_ids).join(','),reaction:String(job.reaction||'').trim(),context_messages:Number(job.context_messages??6),message_chars:Number(job.message_chars??120),skill_chars:Number(job.skill_chars??3000),max_tokens:Number(job.max_tokens??200)}}
+function renderWaterAIJobs(){
+  $('#waterAiCount').textContent=waterAIJobs.length;const box=$('#waterAiJobsList'),c=accountContext();
+  box.innerHTML=waterAIJobs.length?waterAIJobs.map(job=>{const groups=csvValues(job.groups),providers=csvValues(job.provider_ids),limits=waterAIJobPayload(job);return `<div class="water-ai-job" data-water-job-id="${esc(String(job.id))}"><div class="water-ai-job-head"><div class="water-ai-job-name">${esc(job.name||'未命名任务')}</div><span class="tag ${job.enabled?'ok':'off'}">${job.enabled?'已启用':'已停用'}</span></div><div class="water-ai-job-meta">${esc(groups.map(waterAIGroupName).join('、')||'未选择群')}<br>${esc(job.start_time)}–${esc(job.end_time)}　${providers.length?'已选 '+providers.length+' 个 API':'全部已启用 API'}${job.reaction?'　表情 '+esc(job.reaction):''}<br>上下文 ${limits.context_messages} 条　消息 ${limits.message_chars} 字　skill ${limits.skill_chars} 字　输出 ${limits.max_tokens} Token</div><div class="water-ai-actions"><button class="ghost" type="button" data-water-action="edit">编辑</button><button class="ghost" type="button" data-water-action="toggle">${job.enabled?'停用':'启用'}</button><button class="ghost" type="button" data-water-action="duplicate">复制</button><button class="danger" type="button" data-water-action="delete">删除</button></div></div>`}).join(''):'<div class="empty">暂无水群任务</div>';
+  box.onclick=e=>{const button=e.target.closest('[data-water-action]'),row=e.target.closest('[data-water-job-id]');if(!button||!row||!box.contains(button)||!isCurrentAccount(c))return;mutateWaterAIJob(row.dataset.waterJobId,button.dataset.waterAction,c)};
+}
+async function loadWaterAIJobs(){const c=accountContext(),seq=++waterAIJobsSeq;try{const d=await api('/api/ai/flock/jobs',{_account:c});if(seq!==waterAIJobsSeq||!isCurrentAccount(c))return;waterAIJobs=(Array.isArray(d)?d:d.jobs||[]).filter(job=>job&&job.id!=null).map(job=>({...job,groups:csvValues(job.groups).join(','),provider_ids:csvValues(job.provider_ids).join('')}));renderWaterAIJobs()}catch(e){if(seq===waterAIJobsSeq&&isCurrentAccount(c)&&!e.staleAccount)$('#waterAiJobsList').textContent='水群任务加载失败：'+e.message}}
+function openWaterAIJobForm(id=null){
+  const job=waterAIJobs.find(item=>String(item.id)===String(id));editingWaterAIJobId=job?.id??null;waterAIJobAccount=accountContext();waterAIJobGroupSel=new Set(csvValues(job?.groups));waterAIJobProviderSel=new Set(csvValues(job?.provider_ids));
+  $('#waterAiJobName').value=job?.name||'';$('#waterAiJobEnabled').checked=!!job?.enabled;$('#waterAiJobStart').value=job?.start_time||'09:00';$('#waterAiJobEnd').value=job?.end_time||'22:00';$('#waterAiJobPrompt').value=job?.prompt||'';$('#waterAiJobReaction').value=job?.reaction||'';
+  setIntegerFields('waterAiJob',job,AI_FLOCK_LIMIT_SPECS);
+  renderWaterAIGroups();renderWaterAIProviderPicks();renderFlockReactions();$('#waterAiJobForm').classList.remove('hidden');$('#waterAiJobName').focus();$('#waterAiJobForm').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function resetWaterAIJobForm(){editingWaterAIJobId=null;waterAIJobAccount=null;waterAIJobBusy=false;waterAIJobGroupSel.clear();waterAIJobProviderSel.clear();$('#waterAiJobForm').classList.add('hidden');$('#waterAiJobName').value='';$('#waterAiJobEnabled').checked=false;$('#waterAiJobStart').value='09:00';$('#waterAiJobEnd').value='22:00';$('#waterAiJobPrompt').value='';$('#waterAiJobReaction').value='';setIntegerFields('waterAiJob',{},AI_FLOCK_LIMIT_SPECS);$('#waterAiJobSave').disabled=false;renderWaterAIGroups();renderWaterAIProviderPicks()}
+async function saveWaterAIJob(){
+  if(waterAIJobBusy)return;const c=waterAIJobAccount||accountContext();if(!isCurrentAccount(c))return toast('账号已切换，请重新打开水群任务',1);
+  const limits=validIntegerFields('waterAiJob',AI_FLOCK_LIMIT_SPECS);if(!limits)return;const body=waterAIJobPayload({name:$('#waterAiJobName').value,enabled:$('#waterAiJobEnabled').checked,groups:[...waterAIJobGroupSel],start_time:$('#waterAiJobStart').value,end_time:$('#waterAiJobEnd').value,prompt:$('#waterAiJobPrompt').value,provider_ids:[...waterAIJobProviderSel],reaction:$('#waterAiJobReaction').value,...limits});
+  if(!body.name||!body.groups)return toast('请填写任务名称并选择生效群',1);if(!/^\d{2}:\d{2}$/.test(body.start_time)||!/^\d{2}:\d{2}$/.test(body.end_time)||body.start_time>=body.end_time)return toast('水群时间段须为同日且开始早于结束',1);if(body.enabled&&!aiProviders.some(p=>p.enabled))return toast('请先到设置添加并启用 AI API',1);if(!selectedAIProvidersEnabled(body.provider_ids))return toast('水群任务只能选择已启用的 AI API',1);
+  waterAIJobBusy=true;$('#waterAiJobSave').disabled=true;const id=editingWaterAIJobId;
+  try{await api('/api/ai/flock/jobs'+(id!=null?'/'+encodeURIComponent(id):''),{method:id!=null?'PUT':'POST',body:JSON.stringify(body),_account:c});if(!isCurrentAccount(c))return;resetWaterAIJobForm();toast(id!=null?'水群任务已更新':'水群任务已添加');await loadWaterAIJobs()}catch(e){if(isCurrentAccount(c))toast(e.message,1)}finally{if(isCurrentAccount(c)){waterAIJobBusy=false;$('#waterAiJobSave').disabled=false}}
+}
+async function mutateWaterAIJob(id,action,c=accountContext()){
+  if(waterAIJobBusy||!isCurrentAccount(c))return;const job=waterAIJobs.find(item=>String(item.id)===String(id));if(!job)return;if(action==='edit')return openWaterAIJobForm(id);if(action==='delete'&&!window.confirm('删除水群任务「'+String(job.name||id)+'」？'))return;
+  let method='PUT',path='/api/ai/flock/jobs/'+encodeURIComponent(id),body=waterAIJobPayload({...job,enabled:!job.enabled});if(action==='duplicate'){method='POST';path='/api/ai/flock/jobs';body=waterAIJobPayload({...job,name:String(job.name||'任务').slice(0,77)+' 副本',enabled:0})}else if(action==='delete'){method='DELETE';body=null}else if(action!=='toggle')return;
+  if(body&&!selectedAIProvidersEnabled(body.provider_ids))return toast('水群任务只能选择已启用的 AI API',1);
+  waterAIJobBusy=true;try{await api(path,{method,...(body?{body:JSON.stringify(body)}:{}),_account:c});if(!isCurrentAccount(c))return;toast(action==='delete'?'水群任务已删除':action==='duplicate'?'水群任务已复制':body.enabled?'水群任务已启用':'水群任务已停用');await loadWaterAIJobs()}catch(e){if(isCurrentAccount(c))toast(e.message,1)}finally{if(isCurrentAccount(c))waterAIJobBusy=false}
+}
+function settingEnabled(value){return value===true||value===1||value==='1'}
+function syncFlockLearningUnlimited(){const disabled=$('#waterAiSkillUnlimited').checked;for(const [suffix] of AI_FLOCK_LEARNING_LIMIT_SPECS)$('#waterAiSkill'+suffix).disabled=disabled}
+function beijingMinute(value){const match=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d)$/);if(!match)return null;const parts=match.slice(1).map(Number),date=new Date(Date.UTC(parts[0],parts[1]-1,parts[2],parts[3],parts[4]));return date.getUTCFullYear()===parts[0]&&date.getUTCMonth()+1===parts[1]&&date.getUTCDate()===parts[2]?date.getTime():null}
+function validBeijingWindow(enabled,start,end,label){if(!enabled&&!start&&!end)return true;const from=beijingMinute(start),to=beijingMinute(end);if(from===null||to===null||from>=to){toast(label+'须填写精确到分钟的北京时间，且开始早于结束',1);return false}return true}
+function renderFlockActiveStatus(data){const active=data.active_status&&typeof data.active_status==='object'?data.active_status:data.high_cost_status&&typeof data.high_cost_status==='object'?data.high_cost_status:{},whale=settingEnabled(active.whale??active.unlimited??active.flock_learning_unlimited??data.flock_learning_unlimited_active??data.unlimited_active),deep=settingEnabled(active.deep??active.flock_deep_learning??data.flock_deep_learning_active??data.deep_learning_active);let text=typeof data.active_status==='string'?data.active_status:'';if(!text)text=whale&&deep?'鲸鱼模式、深度主人学习':whale?'鲸鱼模式':deep?'深度主人学习':settingEnabled(data.flock_learning_enabled)?'普通学习':'未启用';$('#waterAiSkillActiveStatus').textContent='当前状态：'+text}
+function generatedBlockCount(stats,kind){const blocks=stats.generated_blocks&&typeof stats.generated_blocks==='object'?stats.generated_blocks:stats.generated_stats&&typeof stats.generated_stats==='object'?stats.generated_stats:{};for(const value of [blocks[kind+'_count'],blocks[kind],stats[kind+'_block_count'],stats['generated_'+kind+'_count'],stats[kind+'_count']]){const count=Number(value);if(Number.isInteger(count)&&count>=0)return count}return null}
+function renderFlockSkill(data={}){const config=data.config&&typeof data.config==='object'?data.config:data,stats=data.stats&&typeof data.stats==='object'?data.stats:data,samples=Number.isFinite(stats.sample_count)?stats.sample_count:Number.isFinite(stats.samples)?stats.samples:0;$('#waterAiSkillEnabled').checked=settingEnabled(config.flock_learning_enabled??config.enabled);$('#waterAiSkillStart').value=config.flock_learning_start||config.start_time||'09:00';$('#waterAiSkillEnd').value=config.flock_learning_end||config.end_time||'22:00';waterAISkillGroupSel=new Set(csvValues(config.flock_learning_groups??config.groups));waterAISkillProviderSel=new Set(csvValues(config.flock_learning_provider_ids??config.provider_ids));$('#waterAiSkillUploadEnabled').checked=settingEnabled(config.flock_skill_upload_enabled??config.upload_enabled);$('#waterAiSkillUploadTime').value=config.flock_skill_upload_time||config.upload_time||'03:00';$('#waterAiSkillDistillEnabled').checked=settingEnabled(config.flock_skill_distill_enabled);$('#waterAiSkillDistillTime').value=config.flock_skill_distill_time||'04:00';setIntegerFields('waterAiSkill',config,AI_FLOCK_LEARNING_LIMIT_SPECS);$('#waterAiSkillUnlimited').checked=settingEnabled(config.flock_learning_unlimited);$('#waterAiSkillUnlimitedStart').value=config.flock_learning_unlimited_start||'';$('#waterAiSkillUnlimitedEnd').value=config.flock_learning_unlimited_end||'';$('#waterAiSkillDeepEnabled').checked=settingEnabled(config.flock_deep_learning_enabled);$('#waterAiSkillDeepStart').value=config.flock_deep_learning_start||'';$('#waterAiSkillDeepEnd').value=config.flock_deep_learning_end||'';syncFlockLearningUnlimited();renderFlockActiveStatus({...data,...config});$('#waterAiSkillSamples').textContent='样本：'+String(samples);$('#waterAiSkillSize').textContent='skill.md：'+formatFileSize(stats.skill_size??stats.size??0);$('#waterAiSkillLastUpload').textContent='上次上传：'+String(stats.flock_skill_last_upload_date||stats.last_upload||'暂无');const recent=generatedBlockCount(stats,'recent'),detail=generatedBlockCount(stats,'detail'),summary=generatedBlockCount(stats,'summary'),fading=generatedBlockCount(stats,'fading'),show=[recent,detail,summary,fading].some(value=>value!==null);$('#waterAiSkillGeneratedStats').classList.toggle('hidden',!show);$('#waterAiSkillRecentCount').textContent='近期记忆：'+String(recent??0);$('#waterAiSkillDetailCount').textContent='详细记忆：'+String(detail??0);$('#waterAiSkillSummaryCount').textContent='摘要记忆：'+String(summary??0);$('#waterAiSkillFadingCount').textContent='淡化记忆：'+String(fading??0);renderWaterAIGroups();renderWaterAIProviderPicks()}
+function formatFileSize(value){const bytes=Number(value);return Number.isFinite(bytes)&&bytes>0?(bytes<1024?bytes+' B':(bytes/1024).toFixed(1)+' KiB'):'0 B'}
+async function loadFlockSkill(){const c=accountContext(),seq=++waterAISkillSeq;try{const d=await api('/api/ai/flock/skill',{_account:c});if(seq!==waterAISkillSeq||!isCurrentAccount(c))return;renderFlockSkill(d);$('#waterAiSkillStatus').textContent=''}catch(e){if(seq===waterAISkillSeq&&isCurrentAccount(c)&&!e.staleAccount)$('#waterAiSkillStatus').textContent='学习设置加载失败：'+e.message}}
+async function saveFlockSkill(){
+  if(waterAISkillBusy)return;const limits=validIntegerFields('waterAiSkill',AI_FLOCK_LEARNING_LIMIT_SPECS);if(!limits)return;const c=accountContext(),body={flock_learning_enabled:$('#waterAiSkillEnabled').checked?1:0,flock_learning_start:$('#waterAiSkillStart').value,flock_learning_end:$('#waterAiSkillEnd').value,flock_learning_groups:[...waterAISkillGroupSel].join(','),flock_learning_provider_ids:[...waterAISkillProviderSel].join(','),flock_learning_unlimited:$('#waterAiSkillUnlimited').checked?1:0,flock_learning_unlimited_start:$('#waterAiSkillUnlimitedStart').value,flock_learning_unlimited_end:$('#waterAiSkillUnlimitedEnd').value,flock_deep_learning_enabled:$('#waterAiSkillDeepEnabled').checked?1:0,flock_deep_learning_start:$('#waterAiSkillDeepStart').value,flock_deep_learning_end:$('#waterAiSkillDeepEnd').value,flock_skill_upload_enabled:$('#waterAiSkillUploadEnabled').checked?1:0,flock_skill_upload_time:$('#waterAiSkillUploadTime').value,flock_skill_distill_enabled:$('#waterAiSkillDistillEnabled').checked?1:0,flock_skill_distill_time:$('#waterAiSkillDistillTime').value,...limits};
+  if((body.flock_learning_enabled||body.flock_learning_unlimited||body.flock_deep_learning_enabled)&&!body.flock_learning_groups)return toast('开启学习模式前请选择学习群',1);if((body.flock_learning_enabled||body.flock_learning_unlimited||body.flock_deep_learning_enabled||body.flock_skill_distill_enabled)&&!aiProviders.some(provider=>provider.enabled))return toast('请先到设置添加并启用 AI API',1);if((body.flock_learning_enabled||body.flock_learning_unlimited||body.flock_deep_learning_enabled||body.flock_skill_distill_enabled||body.flock_learning_provider_ids)&&!selectedAIProvidersEnabled(body.flock_learning_provider_ids))return toast('学习只能选择已启用的 AI API',1);if(!validBeijingWindow(body.flock_learning_unlimited,body.flock_learning_unlimited_start,body.flock_learning_unlimited_end,'鲸鱼模式')||!validBeijingWindow(body.flock_deep_learning_enabled,body.flock_deep_learning_start,body.flock_deep_learning_end,'深度主人学习'))return;if(!/^\d{2}:\d{2}$/.test(body.flock_learning_start)||!/^\d{2}:\d{2}$/.test(body.flock_learning_end)||body.flock_learning_start>=body.flock_learning_end||!/^\d{2}:\d{2}$/.test(body.flock_skill_upload_time)||!/^\d{2}:\d{2}$/.test(body.flock_skill_distill_time))return toast('请检查学习、提炼与上传时间',1);
+  waterAISkillBusy=true;$('#waterAiSkillSave').disabled=true;try{await api('/api/ai/flock/skill',{method:'PUT',body:JSON.stringify(body),_account:c});if(!isCurrentAccount(c))return;$('#waterAiSkillStatus').textContent='学习设置已保存';await loadFlockSkill()}catch(e){if(isCurrentAccount(c))$('#waterAiSkillStatus').textContent='保存失败：'+e.message}finally{if(isCurrentAccount(c)){waterAISkillBusy=false;$('#waterAiSkillSave').disabled=false}}
+}
+async function runFlockSkillAction(action){const state={'learn-now':['#waterAiLearnNow','正在学习…','学习完成','学习失败：'],'distill-now':['#waterAiDistillNow','正在提炼…','提炼完成','提炼失败：'],'upload-now':['#waterAiUploadNow','正在上传…','上传完成','上传失败：']}[action];if(waterAISkillBusy||!state)return;const c=accountContext(),button=$(state[0]);waterAISkillBusy=true;button.disabled=true;$('#waterAiSkillStatus').textContent=state[1];try{const d=await api('/api/ai/flock/skill/'+action,{method:'POST',_account:c});if(!isCurrentAccount(c))return;$('#waterAiSkillStatus').textContent=action==='learn-now'&&d.learned===false?'当前没有可学习样本':action==='distill-now'&&d.distilled===false?'当前没有需要提炼的生成记忆':state[2];await loadFlockSkill()}catch(e){if(isCurrentAccount(c))$('#waterAiSkillStatus').textContent=state[3]+e.message}finally{if(isCurrentAccount(c)){waterAISkillBusy=false;button.disabled=false}}}
+function clearFlockSkillFile(){waterAISkillFileVersion++;waterAISkillDraft=null;if(waterAISkillReader){const reader=waterAISkillReader;waterAISkillReader=null;try{reader.abort()}catch(e){}}$('#waterAiSkillFile').value='';$('#waterAiSkillImport').disabled=true}
+function readFlockSkillFile(){
+  const c=accountContext(),version=++waterAISkillFileVersion,file=$('#waterAiSkillFile').files?.[0],status=$('#waterAiSkillStatus');waterAISkillDraft=null;$('#waterAiSkillImport').disabled=true;if(waterAISkillReader){waterAISkillReader.abort();waterAISkillReader=null}if(!file){status.textContent='';return}if(!/\.(?:md|markdown)$/i.test(String(file.name||''))){status.textContent='请选择 Markdown 文件';return}if(!Number.isFinite(file.size)||file.size<=0||file.size>1024*1024){status.textContent='Markdown 文件不能为空，且不能超过 1 MiB';return}
+  status.textContent='正在读取文件…';try{const reader=new FileReader();waterAISkillReader=reader;const fail=message=>{if(version!==waterAISkillFileVersion||!isCurrentAccount(c))return;waterAISkillReader=null;status.textContent=message};reader.onload=()=>{if(version!==waterAISkillFileVersion||!isCurrentAccount(c))return;waterAISkillReader=null;const content=reader.result;if(typeof content!=='string'||content.includes('\uFFFD'))return fail('文件必须是有效的 UTF-8 Markdown');waterAISkillDraft={content,account:c,version};status.textContent='文件已读取，点击“确认导入”才会上传';$('#waterAiSkillImport').disabled=false};reader.onerror=()=>fail('文件读取失败，请重新选择');reader.onabort=()=>fail('文件读取已取消，请重新选择');reader.readAsText(file,'UTF-8')}catch(e){status.textContent='文件读取失败：'+e.message}
+}
+async function importFlockSkill(){if(waterAISkillBusy||!waterAISkillDraft||!isCurrentAccount(waterAISkillDraft.account)||waterAISkillDraft.version!==waterAISkillFileVersion)return;const draft=waterAISkillDraft;if(!window.confirm('导入会替换当前 skill.md，确定继续？'))return;waterAISkillBusy=true;$('#waterAiSkillImport').disabled=true;try{await api('/api/ai/flock/skill/import',{method:'POST',headers:{'Content-Type':'text/markdown; charset=utf-8'},body:draft.content,_account:draft.account});if(!isCurrentAccount(draft.account)||draft!==waterAISkillDraft)return;clearFlockSkillFile();$('#waterAiSkillStatus').textContent='skill.md 已导入';await loadFlockSkill()}catch(e){if(isCurrentAccount(draft.account)){$('#waterAiSkillStatus').textContent='导入失败：'+e.message;$('#waterAiSkillImport').disabled=false}}finally{if(isCurrentAccount(draft.account))waterAISkillBusy=false}}
+async function exportFlockSkill(){
+  if(waterAISkillBusy)return;const c=accountContext();waterAISkillBusy=true;$('#waterAiSkillExport').disabled=true;$('#waterAiSkillStatus').textContent='正在导出…';try{const response=await fetch('/api/ai/flock/skill/export',{headers:{'X-Account-ID':c.id||'default'}});if(!isCurrentAccount(c))return;if(response.status===401){showLoginGate();throw new Error('未登录面板')}if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(apiErrorMessage(data,response.status))}const blob=await response.blob();if(!isCurrentAccount(c))return;const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='skill.md';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);$('#waterAiSkillStatus').textContent='skill.md 已导出'}catch(e){if(isCurrentAccount(c))$('#waterAiSkillStatus').textContent='导出失败：'+e.message}finally{if(isCurrentAccount(c)){waterAISkillBusy=false;$('#waterAiSkillExport').disabled=false}}
+}
+function resetFlockSkillForm(){waterAISkillGroupSel.clear();waterAISkillProviderSel.clear();$('#waterAiSkillEnabled').checked=false;$('#waterAiSkillStart').value='09:00';$('#waterAiSkillEnd').value='22:00';$('#waterAiSkillUnlimited').checked=false;$('#waterAiSkillUnlimitedStart').value='';$('#waterAiSkillUnlimitedEnd').value='';$('#waterAiSkillDeepEnabled').checked=false;$('#waterAiSkillDeepStart').value='';$('#waterAiSkillDeepEnd').value='';$('#waterAiSkillUploadEnabled').checked=false;$('#waterAiSkillUploadTime').value='03:00';$('#waterAiSkillDistillEnabled').checked=false;$('#waterAiSkillDistillTime').value='04:00';setIntegerFields('waterAiSkill',{},AI_FLOCK_LEARNING_LIMIT_SPECS);syncFlockLearningUnlimited();$('#waterAiSkillActiveStatus').textContent='当前状态：未启用';for(const id of ['waterAiSkillSave','waterAiLearnNow','waterAiDistillNow','waterAiUploadNow','waterAiSkillExport'])$('#'+id).disabled=false;$('#waterAiSkillGeneratedStats').classList.add('hidden');renderWaterAIGroups();renderWaterAIProviderPicks()}
+function resetWaterAIState(){waterAIJobsSeq++;waterAISkillSeq++;waterAIJobs=[];waterAIJobGroupSel.clear();waterAIJobProviderSel.clear();editingWaterAIJobId=null;waterAIJobAccount=null;waterAIJobBusy=false;waterAISkillBusy=false;clearFlockSkillFile();$('#waterAiJobsList').replaceChildren();$('#waterAiCount').textContent='0';$('#waterAiSkillStatus').textContent='';$('#flockLearningCard').classList.remove('open');resetWaterAIJobForm();resetFlockSkillForm()}
+$('#waterAiJobGroups').addEventListener('click',e=>{const b=e.target.closest('[data-water-group]');if(!b)return;const id=b.dataset.waterGroup;waterAIJobGroupSel.has(id)?waterAIJobGroupSel.delete(id):waterAIJobGroupSel.add(id);renderWaterAIGroups()});
+$('#waterAiSkillGroups').addEventListener('click',e=>{const b=e.target.closest('[data-water-group]');if(!b)return;const id=b.dataset.waterGroup;waterAISkillGroupSel.has(id)?waterAISkillGroupSel.delete(id):waterAISkillGroupSel.add(id);renderWaterAIGroups()});
+$('#waterAiJobProviders').addEventListener('click',e=>{const b=e.target.closest('[data-water-provider]');if(b)toggleProviderSelection(waterAIJobProviderSel,b.dataset.waterProvider,renderWaterAIProviderPicks)});
+$('#waterAiSkillProviders').addEventListener('click',e=>{const b=e.target.closest('[data-water-provider]');if(b)toggleProviderSelection(waterAISkillProviderSel,b.dataset.waterProvider,renderWaterAIProviderPicks)});
 
 // ---------- 状态 ----------
 async function loadState(){
@@ -3152,17 +3352,13 @@ async function loadSettings(){
     $('#sFlCnt').value=s.flock_count||5;
     $('#sFlMin').value=s.flock_minutes||5;
     $('#sFlPool').value=s.flock_pool||'';
-    $('#waterAiEnabled').checked=s.water_ai_enabled==='1';waterAIGroupSel=new Set(String(s.water_ai_groups||'').split(',').filter(Boolean));
-    $('#waterAiStart').value=s.water_ai_start||'09:00';$('#waterAiEnd').value=s.water_ai_end||'22:00';$('#waterAiPrompt').value=s.water_ai_prompt||DEFAULT_AI_FLOCK_PROMPT;renderWaterAIGroups();
     if(s.theme && !localStorage.getItem('tgp_theme'))applyTheme(s.theme);  // 本机优先,其它设备首次访问才用后端主题
-    loadTz();loadSessions();loadAIProviders();
+    loadTz();loadSessions();loadAIProviders();loadWaterAIJobs();loadFlockSkill();
   }catch(e){}
 }
 async function saveSettings(){
   const concurrency=String($('#sTaskConcurrency').value||'2'),c=accountContext();
   if(!/^[1-5]$/.test(concurrency))return toast('每账号任务并发上限须为 1–5',1);
-  if($('#waterAiEnabled').checked&&!aiProviders.some(provider=>provider.enabled))return toast('请先到设置添加并启用 AI API',1);
-  if($('#waterAiEnabled').checked&&(!waterAIGroupSel.size||!$('#waterAiPrompt').value.trim()))return toast('开启 AI 水群前请选择群并填写人格提示词',1);
   try{
     await api('/api/settings',{method:'POST',body:JSON.stringify({
       cooldown:+$('#sCooldown').value,
@@ -3181,8 +3377,6 @@ async function saveSettings(){
       flock_count:$('#sFlCnt').value||5,
       flock_minutes:$('#sFlMin').value||5,
       flock_pool:$('#sFlPool').value.trim(),
-      water_ai_enabled:$('#waterAiEnabled').checked?'1':'0',water_ai_groups:[...waterAIGroupSel].join(','),
-      water_ai_start:$('#waterAiStart').value,water_ai_end:$('#waterAiEnd').value,water_ai_prompt:$('#waterAiPrompt').value.trim(),
       theme:document.documentElement.dataset.theme||'dark'
     }),_account:c});
     if(!isCurrentAccount(c))return;
@@ -3446,7 +3640,7 @@ async function loadRules(){
 }
 let ruleGroupSel=new Set();
 $('#rGroups').addEventListener('click',e=>{const b=e.target.closest('[data-rule-group]');if(b&&$('#rGroups').contains(b))toggleRuleGroup(b.dataset.ruleGroup)});
-let watchedGroups=[],waterAIGroupSel=new Set();
+let watchedGroups=[];
 async function loadRuleGroups(){
   const c=accountContext();
   try{
@@ -3457,8 +3651,6 @@ async function loadRuleGroups(){
     if(allRules.length)loadRules();   // 群名到位后刷新规则列表的「范围」文案
   }catch(e){}
 }
-function renderWaterAIGroups(){const box=$('#waterAiGroups');if(!box)return;box.innerHTML=watchedGroups.length?watchedGroups.map(g=>`<button type="button" class="gp ${waterAIGroupSel.has(String(g.chat_id))?'on':''}" data-water-ai-group="${esc(String(g.chat_id))}">${esc(g.name||g.chat_id)}</button>`).join(''):'<div class="empty" style="padding:6px">请先添加监听群</div>'}
-$('#waterAiGroups').addEventListener('click',e=>{const button=e.target.closest('[data-water-ai-group]');if(!button)return;const id=button.dataset.waterAiGroup;waterAIGroupSel.has(id)?waterAIGroupSel.delete(id):waterAIGroupSel.add(id);renderWaterAIGroups()});
 function renderRuleGroups(){
   const box=$('#rGroups');if(!box)return;
   if(!watchedGroups.length){box.innerHTML='<div class="empty" style="padding:6px">还没有监听群,先去「群组」页添加</div>';return}

@@ -1,5 +1,6 @@
 """多 AI API：迁移、密钥隔离、轮询、故障切换和 Token 统计。"""
 import unittest
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -91,6 +92,47 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
         self.b['_record_ai_usage'](provider_id, {'prompt_tokens': 'invalid'})
         row = self.b['_ai_provider_rows']()[0]
         self.assertEqual((row['input_tokens'], row['output_tokens']), (8, 10))
+
+    async def test_referenced_provider_cannot_disable_or_delete(self):
+        provider=(await self.b['create_ai_provider'](self.body()))['provider']['id'];db=self.b['conn'];db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit()
+        job=(await self.b['create_ai_flock_job'](self.b['AIFlockJobInput'](name='引用',groups='-1',prompt='聊',provider_ids=provider)))['id']
+        with self.assertRaises(HTTPException) as disabled:await self.b['update_ai_provider'](provider,self.body(key='',enabled=False))
+        self.assertEqual(disabled.exception.status_code,409)
+        db.execute('UPDATE ai_flock_jobs SET enabled=0 WHERE id=?',(job,));db.commit()
+        with self.assertRaises(HTTPException) as deleted:await self.b['delete_ai_provider'](provider)
+        self.assertEqual(deleted.exception.status_code,409)
+        db.execute('DELETE FROM ai_flock_jobs');db.execute("INSERT INTO settings(key,value) VALUES('flock_learning_provider_ids',?)",(provider,));db.commit()
+        with self.assertRaises(HTTPException):await self.b['delete_ai_provider'](provider)
+
+    async def test_model_discovery_saved_blank_key_normalizes_bounds_and_redacts(self):
+        provider=(await self.b['create_ai_provider'](self.body(base='https://example.invalid/v1/chat/completions')))['provider']['id']
+        self.b['_validate_model_discovery_host']=lambda _endpoint:'93.184.216.34'
+        self.b['_fetch_models_pinned']=AsyncMock(return_value=json.dumps({'data':[{'id':'m'+str(i)} for i in range(510)]+[{'id':'m1'},{}]}).encode())
+        result=await self.b['discover_ai_models'](self.b['AIModelsInput'](provider_id=provider,key=''))
+        self.b['_fetch_models_pinned'].assert_awaited_once_with('https://example.invalid/v1/models','secret-one','93.184.216.34');self.assertEqual(len(result['models']),500);self.assertNotIn('secret-one',str(result))
+        self.b['_fetch_models_pinned']=AsyncMock(side_effect=RuntimeError('Bearer secret-one'))
+        with self.assertRaises(HTTPException) as caught:await self.b['discover_ai_models'](self.b['AIModelsInput'](provider_id=provider))
+        self.assertNotIn('secret-one',str(caught.exception))
+
+    async def test_pinned_backend_ignores_original_host_for_tcp_connect(self):
+        backend=self.b['_PinnedNetworkBackend'].__new__(self.b['_PinnedNetworkBackend']);backend.address='93.184.216.34';backend.backend=SimpleNamespace(connect_tcp=AsyncMock(return_value='stream'))
+        self.assertEqual(await backend.connect_tcp('api.example.com',443,15,None,[]),'stream')
+        backend.backend.connect_tcp.assert_awaited_once_with('93.184.216.34',443,15,None,[])
+
+    async def test_model_discovery_rejects_saved_key_base_change_and_private_hosts(self):
+        provider=(await self.b['create_ai_provider'](self.body()))['provider']['id']
+        with self.assertRaises(HTTPException):
+            await self.b['discover_ai_models'](self.b['AIModelsInput'](provider_id=provider,base='https://changed.invalid/v1',key=''))
+        self.b['httpx']=SimpleNamespace(AsyncClient=AsyncMock(side_effect=AssertionError('NO HTTP')))
+        with self.assertRaises(HTTPException):
+            await self.b['discover_ai_models'](self.b['AIModelsInput'](base='http://127.0.0.1/v1',key='temporary-secret'))
+        original=self.b['socket'].getaddrinfo
+        self.b['socket'].getaddrinfo=lambda *_args,**_kwargs:[(2,1,6,'',('10.0.0.8',443))]
+        try:
+            with self.assertRaises(HTTPException) as caught:
+                await self.b['discover_ai_models'](self.b['AIModelsInput'](base='https://public-name.invalid/v1',key='temporary-secret'))
+            self.assertNotIn('temporary-secret',str(caught.exception))
+        finally:self.b['socket'].getaddrinfo=original
 
 
 if __name__ == '__main__':

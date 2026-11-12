@@ -12,13 +12,16 @@ from contextvars import ContextVar
 import hashlib
 import hmac
 import ipaddress
+import io
 import json
 import logging
 import math
+import os
 from pathlib import Path
 import random
 import re
 import secrets
+import socket
 import sqlite3
 import struct
 import threading
@@ -43,6 +46,7 @@ class HTTPException(Exception):
 
 class Model:
     def __init__(self, **kwargs):
+        self.model_fields_set = set(kwargs)
         for name in self.__annotations__:
             setattr(self, name, kwargs.get(name, getattr(type(self), name, None)))
 
@@ -50,6 +54,8 @@ class Model:
 class Response:
     def __init__(self, body, **kwargs):
         self.body, self.cookies = body, {}
+        self.headers = kwargs.get('headers', {})
+        self.media_type = kwargs.get('media_type')
 
     def set_cookie(self, name, value, **kwargs):
         self.cookies[name] = dict(value=value, **kwargs)
@@ -70,7 +76,14 @@ def load_backend():
     safe_assignments = {'SESSION_TTL', 'CAPTCHA_TTL', 'AUTH_CACHE_MAX', 'CAPTCHA_CACHE_MAX',
                         'RL_WINDOW', 'RL_MAX', 'RL_BLOCK', 'CAPTCHA_AFTER', '_CAPTCHA_FONT', 'MAX_TEST_IMAGE',
                         '_AUTO_COLS', 'RETRY_BASE', 'GLOBAL_SETTING_KEYS', 'SETTING_KEYS', 'DEFAULTS', '_TZ_FALLBACK', '_failure_context',
-                        'DEFAULT_SIGNIN_IMAGE_PROMPT', 'DEFAULT_AI_FLOCK_PROMPT', 'DEFAULT_REGISTRATION_AI_FLOCK_PROMPT'}
+                         'DEFAULT_SIGNIN_IMAGE_PROMPT', 'DEFAULT_AI_FLOCK_PROMPT', 'DEFAULT_REGISTRATION_AI_FLOCK_PROMPT',
+                         '_FLOCK_SKILL_DEFAULTS', 'AI_FLOCK_CONTEXT_MESSAGES', 'AI_FLOCK_MESSAGE_CHARS',
+                         'AI_FLOCK_CONTEXT_CHARS', 'AI_FLOCK_SKILL_CHARS', 'AI_FLOCK_MAX_TOKENS',
+                         'AI_FLOCK_BUDGET_RANGES', 'AI_FLOCK_LEARNING_MESSAGES',
+                         'AI_FLOCK_LEARNING_MESSAGE_CHARS', 'AI_FLOCK_LEARNING_SKILL_CHARS',
+                         'AI_FLOCK_LEARNING_MAX_TOKENS', 'AI_FLOCK_LEARNING_UNLIMITED_MAX_TOKENS',
+                         'AI_FLOCK_LEARNING_RANGES', 'SKILL_MAX_BYTES',
+                         'AI_FLOCK_MEMORY_BLOCK_MAX_BYTES', 'AI_FLOCK_DISTILL_MAX_TOKENS'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -80,11 +93,13 @@ def load_backend():
             selected.append(node)
     names = {name: globals()[name] for name in ('ast', 'asyncio', 'base64', 'OrderedDict', 'datetime',
              'timezone', 'timedelta', 'hashlib', 'hmac', 'ipaddress', 'json', 'math', 'random', 're',
-             'secrets', 'sqlite3', 'struct', 'time', 'zlib', 'ContextVar')}
+              'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'ContextVar')}
     names.update(BaseModel=Model, Optional=Optional, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
-                 HTTPException=HTTPException, JSONResponse=Response, os=SimpleNamespace(environ={}),
-                 log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=Exception,
-                 AuthKeyUnregisteredError=Unauthorized), ZoneInfo=None,
+                  HTTPException=HTTPException, JSONResponse=Response, Response=Response, os=os, io=io,
+                  log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=Exception,
+                  AuthKeyUnregisteredError=Unauthorized), ZoneInfo=None,
+                  SendReactionRequest=lambda **kw: SimpleNamespace(**kw),
+                  ReactionEmoji=lambda **kw: SimpleNamespace(**kw),
                   _captcha=OrderedDict(), _login_fail=OrderedDict(), _auth_gc_at=0.0,
                   _ai_cfg={}, _ai_rr={}, _ai_usage_guard=threading.Lock(),
                  TRUSTED_PROXIES=(), _auto_running={}, signin_plans={}, poll_last={}, auto_last_ts={},
@@ -100,16 +115,27 @@ def load_backend():
                'session_alerted': '_session_alerted', 'cache': '_cache', 'dialog_cache': '_dialog_cache'}
     dict_fields = {'cache','dialog_cache','running','tg_state','hits_count','last_hit_ts','flock_buf',
                     'auto_last_ts','signin_plans','poll_last','auto_tasks','ai_flock_last','ai_flock_blocked'}
-    set_fields = {'tasks','ai_flock_busy_groups'}
+    set_fields = {'tasks','ai_flock_busy_groups','generated_message_ids'}
     class RuntimeFixture:
         id = 'default'
         label = '测试默认账号'
         directory = Path('/tmp/never-read-backend-fixture')
         session_path = '/tmp/never-read-backend-fixture/tg'
         avatar_file = Path('/tmp/never-read-backend-fixture/avatar.jpg')
+        skill_file = Path('/tmp/never-read-backend-fixture/skill.md')
+        @property
+        def ai_flock_lock(self):
+            if self._ai_flock_lock is None:
+                self._ai_flock_lock = asyncio.Lock()
+            return self._ai_flock_lock
+        @property
+        def skill_lock(self):
+            if self._skill_lock is None:
+                self._skill_lock = asyncio.Lock()
+            return self._skill_lock
         def __getattr__(self, name):
             key = aliases.get(name, name)
-            default = {} if name in dict_fields else set() if name in set_fields else False if name in ('handler_registered','session_alerted','closing','closed','stopping','ai_flock_busy') else '' if name=='tg_phone' else None
+            default = {} if name in dict_fields else set() if name in set_fields else False if name in ('handler_registered','session_alerted','closing','closed','stopping','ai_flock_busy') else 0 if name == 'ai_flock_waiting' else '' if name=='tg_phone' else None
             return names.setdefault(key, default)
         def __setattr__(self, name, value):
             names[aliases.get(name, name)] = value
@@ -656,6 +682,17 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         calls = [n for n in ast.walk(node) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == '_fetch_reply']
         self.assertEqual(len(calls), 1)
         self.assertTrue(any(k.arg == 'min_id' and isinstance(k.value, ast.Name) and k.value.id == 'min_id' for k in calls[0].keywords))
+
+    async def test_all_local_message_sends_use_generated_tracker(self):
+        tree=ast.parse(SOURCE.read_text());parents={child:node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        direct=[]
+        for node in ast.walk(tree):
+            if isinstance(node,ast.Call) and isinstance(node.func,ast.Attribute) and node.func.attr in ('send_message','reply','respond'):
+                parent=node
+                while parent in parents and not isinstance(parent,(ast.FunctionDef,ast.AsyncFunctionDef)):parent=parents[parent]
+                direct.append(getattr(parent,'name',''))
+        self.assertEqual(set(direct),{'_send_generated_message'})
+        self.assertGreaterEqual(SOURCE.read_text().count('_event_generated_message(event,'),3)
 
     async def test_db_migration_adds_attempt_and_preserves_legacy_success(self):
         aid = await self.create()

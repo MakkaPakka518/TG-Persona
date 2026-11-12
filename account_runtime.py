@@ -48,7 +48,7 @@ def secure_directory(path, create=False):
 
 def secure_files(directory):
     for name in ("config.db", "config.db-wal", "config.db-shm", "config.db-journal",
-                 "tg.session", "tg.session-journal", "tg.session-wal", "tg.session-shm", "avatar.jpg"):
+                 "tg.session", "tg.session-journal", "tg.session-wal", "tg.session-shm", "avatar.jpg", "skill.md"):
         path = directory / name
         if path.is_symlink() or (path.exists() and not path.is_file()):
             raise AccountError(400, "账号文件不允许符号链接或非普通文件")
@@ -94,6 +94,8 @@ class AccountRuntime:
     ai_flock_busy_groups: set = field(default_factory=set)
     ai_flock_last: dict = field(default_factory=dict)
     ai_flock_blocked: dict = field(default_factory=dict)
+    ai_flock_waiting: int = 0
+    generated_message_ids: set = field(default_factory=set)
     auto_last_ts: dict = field(default_factory=dict)
     signin_plans: dict = field(default_factory=dict)
     poll_last: dict = field(default_factory=dict)
@@ -113,6 +115,7 @@ class AccountRuntime:
     keepalive_task: object = None
     housekeeping_task: object = None
     health_task: object = None
+    ai_learning_task: object = None
     session_alerted: bool = False
     handler_registered: bool = False
     closing: bool = False
@@ -122,6 +125,8 @@ class AccountRuntime:
     tasks: set = field(default_factory=set)
     _lifecycle_lock: object = None
     _requests_idle: object = None
+    _ai_flock_lock: object = None
+    _skill_lock: object = None
     request_count: int = 0
     lock_owner: object = None
 
@@ -147,6 +152,22 @@ class AccountRuntime:
     @property
     def avatar_file(self):
         return self.directory / "avatar.jpg"
+
+    @property
+    def skill_file(self):
+        return self.directory / "skill.md"
+
+    @property
+    def ai_flock_lock(self):
+        if self._ai_flock_lock is None:
+            self._ai_flock_lock = asyncio.Lock()
+        return self._ai_flock_lock
+
+    @property
+    def skill_lock(self):
+        if self._skill_lock is None:
+            self._skill_lock = asyncio.Lock()
+        return self._skill_lock
 
     def check_live(self):
         if self.closing or self.closed or self.stopping:
@@ -257,7 +278,7 @@ class AccountRuntime:
             self.client = None
             self.handler_registered = False
             self.clear_auto_queue()
-            for name in ("watcher_task", "signin_task", "scheduled_task", "poll_task", "keepalive_task", "housekeeping_task", "health_task"):
+            for name in ("watcher_task", "signin_task", "scheduled_task", "poll_task", "keepalive_task", "housekeeping_task", "health_task", "ai_learning_task"):
                 setattr(self, name, None)
             self.tg_phone = ""
             self.tg_state.update(phase="idle", phone="", me=None, err=None, health_error=None)
@@ -271,6 +292,10 @@ class AccountRuntime:
             self.ai_flock_busy_groups.clear()
             self.ai_flock_last.clear()
             self.ai_flock_blocked.clear()
+            self.ai_flock_waiting = 0
+            self.generated_message_ids.clear()
+            self._ai_flock_lock = None
+            self._skill_lock = None
             self.custom_trigger_pending.clear()
             self.custom_trigger_task = None
             self.session_alerted = False
