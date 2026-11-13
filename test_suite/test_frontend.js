@@ -1320,6 +1320,15 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('水群预算横幅随输入更新且鲸鱼学习不改变回复预算',async()=>{
     const card=html.slice(html.indexOf('id="waterAiCard"'),html.indexOf('id="aCntSign"'));for(const text of ['当前水群预算：任务预设 6条/120字/skill 3000字/200 Token','鲸鱼模式仅影响学习，不影响水群回复预算','学习中心：鲸鱼模式生效中，水群仍使用本任务预设'])assert(card.includes(text));ex('openWaterAIJobForm()');q('#waterAiJobContextMessages').value='9';q('#waterAiJobMessageChars').value='240';q('#waterAiJobSkillChars').value='7000';q('#waterAiJobMaxTokens').value='650';ex('renderWaterAIBudgetStatus()');assert.strictEqual(q('#waterAiJobBudgetText').textContent,'当前水群预算：任务预设 9条/240字/skill 7000字/650 Token；鲸鱼模式仅影响学习，不影响水群回复预算');ex("renderFlockSkill({flock_learning_unlimited_active:true})");assert(!q('#waterAiJobWhaleBadge').classList.contains('hidden'));ex("renderFlockSkill({flock_learning_unlimited_active:false})");assert(q('#waterAiJobWhaleBadge').classList.contains('hidden'));
   });
+  await test('每小时发言不限制开关断开整数校验并保存为 -1',async()=>{
+    ex("selectedAccount='hourly-unlimited';accountEpoch++;watchedGroups=[{chat_id:'-1001',name:'群'}];aiProviders=[{id:'0123456789abcdef',enabled:true}];waterAIJobs=[{id:71,name:'不限',enabled:1,groups:'-1001',start_time:'09:00',end_time:'10:00',prompt:'聊',provider_ids:'0123456789abcdef',hourly_limit:-1}];openWaterAIJobForm(71)");
+    assert(q('#waterAiJobHourlyUnlimited').checked);assert(q('#waterAiJobHourlyLimit').disabled);assert.strictEqual(q('#waterAiJobHourlyLimit').value,'12');
+    let body;app.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true}};app.loadWaterAIJobs=async()=>{};await ex('saveWaterAIJob()');assert.strictEqual(body.hourly_limit,-1);
+    ex('resetWaterAIJobForm()');assert(!q('#waterAiJobHourlyUnlimited').checked);assert(!q('#waterAiJobHourlyLimit').disabled);
+    q('#waterAiJobName').value='正常';q('#waterAiJobPrompt').value='聊';ex("waterAIJobGroupSel=new Set(['-1001'])");await ex('saveWaterAIJob()');assert.strictEqual(body.hourly_limit,12);
+    ex("waterAIJobs=[{id:72,name:'不限列表',enabled:1,groups:'-1001',start_time:'09:00',end_time:'10:00',prompt:'聊',provider_ids:'0123456789abcdef',hourly_limit:-1}];renderWaterAIJobs()");assert(q('#waterAiJobsList').innerHTML.includes('每小时最多 不限 条'));
+    assert(html.includes('id="waterAiJobHourlyUnlimited"')&&html.includes('不限制每小时发言'));
+  });
   await test('水群任务限制拒绝越界和非整数且不调用接口',async()=>{
     ex("selectedAccount='limits-job';accountEpoch++;watchedGroups=[{chat_id:'-1001',name:'群'}];aiProviders=[{id:'0123456789abcdef',enabled:true}]");let sent=0;app.api=async()=>{sent++;return {}};const invalid={ContextMessages:['0','51','1.5'],MessageChars:['39','2001','40.1'],SkillChars:['-1','200001','0.5'],MaxTokens:['49','8193','NaN']};
     invalid.SkillChars.push('');for(const [suffix,values] of Object.entries(invalid))for(const value of values){ex('openWaterAIJobForm()');q('#waterAiJobName').value='限制';q('#waterAiJobPrompt').value='人格';ex("waterAIJobGroupSel=new Set(['-1001'])");q('#waterAiJob'+suffix).value=value;await ex('saveWaterAIJob()');assert.strictEqual(sent,0);assert(q('#toast').textContent.includes('整数'));ex('resetWaterAIJobForm()')}

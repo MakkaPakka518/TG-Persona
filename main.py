@@ -2023,7 +2023,7 @@ def _flock_frequency_ready(chat_id, direct_to_self=False):
         return False
     active = now < state["active_until"]
     reason = ""
-    if _flock_hourly_count(source, key) >= source["hourly_limit"]:
+    if source["hourly_limit"] > 0 and _flock_hourly_count(source, key) >= source["hourly_limit"]:
         reason = "最近一小时已达 %s 条发言上限" % source["hourly_limit"]
     elif now - runtime.ai_flock_last.get(key, -1e9) < (20 if active else 60):
         reason = "接话冷却中" if active else "同群发言冷却中"
@@ -2068,7 +2068,7 @@ async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False, *, test_job
     source = _ai_flock_test_source(test_job_id, key) if testing else _ai_flock_source(key)
     if not source or not _has_ai_providers(source["provider_ids"]):
         return
-    if source.get("hourly_limit") and _flock_hourly_count(source, key) >= source["hourly_limit"]:
+    if source["hourly_limit"] > 0 and _flock_hourly_count(source, key) >= source["hourly_limit"]:
         if testing:
             raise HTTPException(409, "最近一小时已达此任务的发言上限")
         return
@@ -2264,7 +2264,7 @@ async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False, *, test_job
         if (not current or current["kind"] != source["kind"] or current["task_id"] != source["task_id"]
                 or current["job_id"] != source["job_id"]):
             return
-        if source.get("hourly_limit") and _flock_hourly_count(source, key) >= source["hourly_limit"]:
+        if source["hourly_limit"] > 0 and _flock_hourly_count(source, key) >= source["hourly_limit"]:
             _flock_stage(progress, "skipped", "最近一小时发言已达上限")
             return
         _flock_stage(progress, "sending", "正在发送到 Telegram")
@@ -6420,7 +6420,7 @@ class AIFlockJobInput(BaseModel):
     end_next_day: int = Field(0, ge=0, le=1)
     min_messages: int = Field(6, ge=1, le=100)
     max_messages: int = Field(8, ge=1, le=100)
-    hourly_limit: int = Field(12, ge=1, le=60)
+    hourly_limit: int = Field(12, ge=-1, le=60)
     active_minutes: int = Field(5, ge=0, le=30)
 
 
@@ -6428,7 +6428,9 @@ def _validated_flock_job(body, exclude_id=None, legacy=False):
     name, prompt = body.name.strip(), body.prompt.strip()
     if not name:
         raise HTTPException(400, "任务名称不能为空")
-    if not 1 <= body.min_messages <= body.max_messages <= 100 or not 1 <= body.hourly_limit <= 60 or not 0 <= body.active_minutes <= 30:
+    if (not 1 <= body.min_messages <= body.max_messages <= 100
+            or body.hourly_limit not in (-1,) and not 1 <= body.hourly_limit <= 60
+            or not 0 <= body.active_minutes <= 30):
         raise HTTPException(400, "消息间隔须为 1–100 且下限不大于上限；小时上限 1–60，活跃时长 0–30 分钟")
     groups = _csv(body.groups)
     if (not groups and not legacy) or len(groups) != len(set(groups)):

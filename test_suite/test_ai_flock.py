@@ -486,6 +486,29 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         self.b['_call_ai_any']=AsyncMock(return_value='- 群聊氛围轻松')
         self.assertEqual((await self.b['_learn_ai_flock'](force=True))['samples'],5);self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],0)
 
+    async def test_hourly_limit_accepts_unlimited(self):
+        provider = await self.provider()
+        db = self.b['conn']
+        db.execute("INSERT INTO watched_groups VALUES('-1','群',0)")
+        db.commit()
+        model = self.b['AIFlockJobInput']
+        with self.assertRaises(HTTPException):
+            await self.b['create_ai_flock_job'](model(name='无效', groups='-1', prompt='聊', provider_ids=provider, hourly_limit=0))
+        created = await self.b['create_ai_flock_job'](model(name='不限', groups='-1', start_time='00:00', end_time='23:59',
+            prompt='聊', provider_ids=provider, hourly_limit=-1))
+        self.assertEqual(db.execute('SELECT hourly_limit FROM ai_flock_jobs WHERE id=?', (created['id'],)).fetchone()[0], -1)
+        db.executemany("INSERT INTO ai_flock_sends(job_id,chat_id,ts) VALUES(?,?,?)",
+                       [(created['id'], '-1', int(self.b['time'].time())) for _ in range(200)])
+        db.commit()
+        runtime = self.b['get_runtime']()
+        runtime.client.get_messages = AsyncMock(return_value=[message(1, '聊点什么')])
+        runtime.client.send_message = AsyncMock(return_value=message(2, out=True))
+        self.b['_call_ai_any'] = AsyncMock(return_value='随便聊聊')
+        self.assertTrue(self.b['_flock_frequency_ready']('-1', True))
+        with patch('asyncio.sleep', new=AsyncMock()):
+            await self.b['_run_ai_flock'](-1, '聊点什么')
+        runtime.client.send_message.assert_awaited_once()
+
     async def test_learning_filter_allows_technical_nouns_but_blocks_command_lines(self):
         allowed = self.b['_safe_skill_markdown']("- 群里常讨论 ssh 配置和内网穿透", label="群知识")
         self.assertIn('ssh', allowed)
