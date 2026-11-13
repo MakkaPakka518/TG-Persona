@@ -768,6 +768,16 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         button.click.assert_not_awaited()
         self.b['_call_ai_any'].assert_not_awaited()
 
+    async def test_button_failure_log_keeps_real_mode(self):
+        await self.b['create_ai_provider'](self.b['AIProviderInput'](
+            note='按钮 AI', base='https://example.invalid/v1', key='fixture-key', model='m'))
+        aid = await self.create(name='AI 签到', target='@dummy', command='/sign', click_btn=1, button_mode='ai')
+        row = self.row(aid)
+        self.assertFalse(self.b['_task_failure'](row, '本轮签到未找到匹配按钮'))
+        detail = json.loads(self.b['conn'].execute('SELECT detail FROM hits ORDER BY id DESC').fetchone()[0])
+        self.assertEqual(detail['button_mode'], 'ai')
+        self.assertIn('AI 未返回', detail['button_ai_result'])
+
     async def test_db_migration_adds_attempt_and_preserves_legacy_success(self):
         aid = await self.create()
         self.b['conn'].execute('UPDATE automations SET last_at=?,last_status=? WHERE id=?', ('2026-10-30', 'running', aid))

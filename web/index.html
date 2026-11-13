@@ -4159,7 +4159,8 @@ function logRow(h){
     add('指令',d.command||h.content);
     add('回复',d.reply||h.reply);
     add('按钮',d.button);
-    add('按钮模式',buttonModeLabel(d.button_mode));
+    if(d.button_mode)add('按钮模式',buttonModeLabel(d.button_mode));
+    add('AI 按钮结果',d.button_ai_result);
     add('验证码',d.captcha);
     if(d.captcha_message_id!=null)add('图片来源','消息 #'+d.captcha_message_id+(d.captcha_prompt?' · '+d.captcha_prompt:''));
     if(d.command_delay!=null)add('命令后等待',d.command_delay+' 秒');
@@ -4177,7 +4178,8 @@ function logRow(h){
     add('已尝试',Array.isArray(d.attempted)?d.attempted.join(' → '):d.payload);
     add('使用注册码',d.payload);
     add('注册按钮',d.button);
-    add('按钮模式',buttonModeLabel(d.button_mode));
+    if(d.button_mode)add('按钮模式',buttonModeLabel(d.button_mode));
+    add('AI 按钮结果',d.button_ai_result);
     add('弹窗',d.popup);
     add('进入状态',d.ready);
     add('最终回复',d.success||h.reply);

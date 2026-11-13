@@ -95,6 +95,28 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.row(aid)['ai_provider_ids'],selected)
         self.assertEqual(self.b['recognize_image_text'].call_args.kwargs['provider_ids'],selected)
 
+    async def test_ai_mode_finds_button_on_message_edited_after_command(self):
+        provider = (await self.b['create_ai_provider'](self.b['AIProviderInput'](
+            note='按钮 AI', base='https://example.invalid/v1', key='fixture-key', model='m')))['provider']['id']
+        phase = {'value':'before'}
+        other = SimpleNamespace(text='用户功能', click=AsyncMock())
+        wanted = SimpleNamespace(text='🎯 签到', click=AsyncMock(side_effect=lambda:phase.update(value='result')))
+        before = message(90, '旧菜单', buttons=[]);before.edit_date=None;before.photo=None;before.document=None
+        edited = message(90, '请选择功能', buttons=[[other,wanted]]);edited.edit_date='now';edited.photo=None;edited.document=None
+        success = message(101, '签到成功');success.edit_date=None;success.photo=None;success.document=None
+        async def send(_entity, _text, **_kwargs):phase['value']='edited';return SimpleNamespace(id=100)
+        async def get(_entity, **_kwargs):return [before] if phase['value']=='before' else [edited] if phase['value']=='edited' else [success]
+        self.b['client']=SimpleNamespace(send_message=AsyncMock(side_effect=send),get_messages=AsyncMock(side_effect=get))
+        self.b['_call_ai_any']=AsyncMock(return_value='2')
+        aid=await self.create(signin_captcha=0,signin_recognition_mode='none',button_mode='ai',ai_provider_ids=provider,
+                              btn_text='签到',command_delay=0,button_delay=0)
+        with patch.object(asyncio,'sleep',new=AsyncMock()):
+            self.assertTrue(await self.b['run_signin'](self.row(aid)))
+        wanted.click.assert_awaited_once();other.click.assert_not_awaited()
+        self.b['_call_ai_any'].assert_awaited_once()
+        detail=self.b['conn'].execute('SELECT detail FROM hits ORDER BY id DESC').fetchone()[0]
+        self.assertIn('"button_mode": "ai"',detail)
+
     async def test_image_mode_uses_custom_prompt_selected_apis_and_sends_object_name(self):
         self.image_mode=True;selected='0123456789abcdef';prompt='识别核心物体，只输出名称'
         aid=await self.create(signin_captcha=0,signin_recognition_mode='image',signin_image_prompt=prompt,ai_provider_ids=selected)

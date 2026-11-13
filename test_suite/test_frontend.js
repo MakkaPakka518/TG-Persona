@@ -679,11 +679,12 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('签到日志显示来源和失败原因且不执行服务端文本',async()=>{
     context.LOG_KINDS={signin:'签到'};context.fmt=()=>'';
     run(slice('let logOpenIds=new Set();','let logQ='));
-    context.logFixture={action:'signin',ok:0,ts:1,chat_id:'@dummy',detail:{task:'fixture',command:'/start',error:'<img src=x onerror=bad()>',captcha_message_id:102,captcha_prompt:'请输入测试信息',command_delay:0,button_delay:3,refresh_buttons:0}};
+    context.logFixture={action:'signin',ok:0,ts:1,chat_id:'@dummy',detail:{task:'fixture',command:'/start',error:'<img src=x onerror=bad()>',button_mode:'ai',button_ai_result:'AI 未返回可映射的按钮或调用失败',captcha_message_id:102,captcha_prompt:'请输入测试信息',command_delay:0,button_delay:3,refresh_buttons:0}};
     const markup=run('logRow(logFixture)');
     assert(markup.includes('失败原因'));assert(markup.includes('图片来源'));assert(markup.includes('消息 #102'));
     assert(markup.includes('命令后等待'));assert(markup.includes('0 秒'));assert(markup.includes('复用同一按钮'));
     assert(markup.includes('&lt;img'));assert(!markup.includes('<img'));
+    assert(markup.includes('AI 选按钮')&&markup.includes('AI 未返回可映射'));assert(!markup.includes('脚本按钮'));
   });
   await test('定时抢注日志区分历史按钮和真实发送指令',async()=>{
     context.logFixture={action:'scheduled_register',ok:0,ts:1,chat_id:'@dummy',content:'/start',detail:{task:'抢注',status:'unconfirmed',button_source:'history',test_only:true,command:'/start',error:'未收到指定内容'}};
