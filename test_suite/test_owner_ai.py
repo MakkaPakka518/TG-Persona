@@ -145,6 +145,31 @@ class OwnerAITests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.b['time'], 'time', return_value=10421):
             self.assertFalse(self.b['_flock_owner_paused']('-1'))
 
+    async def test_correction_and_summary_do_not_start_or_extend_chat_pause(self):
+        await self.provider()
+        self.b['set_setting']('flock_owner_pause_enabled', '1')
+        self.b['set_setting']('flock_summary_enabled', '1')
+        self.b['set_setting']('flock_summary_keywords', '最近他们聊了什么')
+        correction = self.correction_event()
+        self.assertTrue(await self.b['_handle_owner_ai_event'](correction))
+        self.assertEqual(self.b['get_setting']('flock_owner_last_-1', ''), '')
+        self.assertFalse(self.b['_flock_owner_paused']('-1'))
+        await asyncio.gather(*self.tasks)
+        self.assertIn('正确答案是星期五', self.b['_read_study']())
+        self.b['set_setting']('flock_owner_last_-1', str(self.b['time'].time() - 60))
+        original = self.b['get_setting']('flock_owner_last_-1')
+        self.assertTrue(self.b['_flock_owner_paused']('-1'))
+        summary = self.event('最近他们聊了什么', mid=101)
+        self.assertTrue(await self.b['_handle_owner_ai_event'](summary))
+        next_correction = self.correction_event()
+        next_correction.id = 102
+        self.assertTrue(await self.b['_handle_owner_ai_event'](next_correction))
+        await asyncio.gather(*self.tasks)
+        self.assertEqual(self.b['get_setting']('flock_owner_last_-1'), original)
+        self.runtime.client.get_messages.assert_awaited_once()
+        self.assertIn('没有可总结', summary.reply.await_args.args[0])
+        self.assertIn('纠正已写入', next_correction.reply.await_args.args[0])
+
     async def test_manual_owner_speech_cancels_inflight_flock_before_send(self):
         provider = await self.provider()
         self.b['set_setting']('flock_owner_pause_enabled', '1')

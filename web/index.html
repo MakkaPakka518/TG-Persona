@@ -195,6 +195,7 @@ html[data-theme="light"] .grp-pick .gp.on{color:#15803d}
 .recognition-switches label:has(input:checked){border-color:var(--acc);background:var(--acc-soft);color:var(--fg)}
 .recognition-switches input{width:18px;height:18px;flex:0 0 18px;margin:0;accent-color:var(--acc)}
 .ai-provider-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.ai-provider-result:empty{display:none}#foldAiProviders button,#aiTestCard button,#sCaptchaProviders .gp,#aiTestProviders .gp{min-height:44px}
+#waterAiTestForm{min-width:0}#waterAiCard #waterAiTestForm select,#waterAiCard #waterAiTestForm button{min-height:48px;max-width:100%}#waterAiTestForm textarea{font-size:16px;line-height:1.6;min-height:100px}#waterAiTestResult{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}#waterAiTestResult:not(:empty){margin-top:12px}#waterAiTestForm .hint{font-size:12px;color:var(--sub)}.flock-trace button{min-height:48px}.flock-trace pre{margin-top:10px}
 #aiProviderReasoning{min-height:48px;font-size:16px}#aiProviderReasoningHint{font-size:12px;color:var(--sub);overflow-wrap:anywhere}
 .memory-tools{display:flex;gap:8px;flex-wrap:wrap;margin-block:12px}.memory-tools>*{min-width:0;flex:1 1 120px}.memory-row{border-top:.5px solid var(--hair);padding-block:14px;min-width:0}.memory-row pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto;font:inherit;font-size:13px;line-height:1.6}.memory-row .hint{overflow-wrap:anywhere}.memory-row button,#ownerAiCard button,#ownerAiCard input,#ownerAiCard select{min-height:48px}.memory-row textarea{width:100%;min-height:140px;font-size:16px}.memory-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.memory-actions button{flex:1 1 80px}.learning-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;margin-top:12px}.learning-metrics p{margin:0;overflow-wrap:anywhere}.trace-body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;max-height:420px;overflow:auto}.owner-ai-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}.owner-ai-fields>div{min-width:0}#ownerAiCard textarea{font-size:16px}#ownerAiCard label.check{min-height:48px;margin-block:8px}#ownerAiCard .hint{font-size:12px;color:var(--sub)}@media(max-width:430px){.owner-ai-fields{grid-template-columns:minmax(0,1fr)}}
 #waterAiCard{min-width:0;overflow:hidden}#waterAiCard .fold-b,#waterAiCard .water-ai-time,#waterAiCard .water-ai-time>div{min-width:0;max-width:100%}
@@ -965,6 +966,14 @@ section.act,.fold.open .fold-b{animation:none}
           <div class="form-actions"><button class="btn" type="button" id="waterAiJobSave" onclick="saveWaterAIJob()">保存任务</button><button class="ghost" type="button" onclick="resetWaterAIJobForm()">取消</button></div>
         </div>
         <datalist id="aiFlockReactionOptions"></datalist>
+        <div id="waterAiTestForm" class="water-ai-form hidden">
+          <h4 id="waterAiTestTitle">水群测试</h4>
+          <div class="hint">使用此任务已保存的 API、人格与记忆设置，按测试要求生成并向所选群真实发送一条 AI 回复。手动测试可在任务时段外执行，仍遵守暂停、限额与冷却。</div>
+          <label for="waterAiTestGroup">发送到哪个群</label><select id="waterAiTestGroup"></select>
+          <label for="waterAiTestText">让 AI 表达的内容</label><textarea id="waterAiTestText" maxlength="2000" rows="3" placeholder="例如：用我的语气跟大家打个招呼，再问问今晚有什么安排"></textarea>
+          <div class="form-actions"><button class="btn" type="button" id="waterAiTestSend" onclick="runWaterAITest()">AI 生成并发送测试</button><button class="ghost" type="button" id="waterAiTestClose" onclick="closeWaterAITest()">收起</button></div>
+          <div id="waterAiTestResult" role="status" aria-live="polite"></div>
+        </div>
         <div class="hint" style="margin-top:12px">水群任务会继承当前账号在「设置 → AI 学习」中的学习记忆。</div>
       </div>
     </div>
@@ -1453,6 +1462,7 @@ section.act,.fold.open .fold-b{animation:none}
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-8 9-8 9s-8-4-8-9V7zM8 12l3 3 5-6"/></svg>号主指令与 AI 用量限制</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <label class="check"><input type="checkbox" id="ownerPauseEnabled"> 我发言后暂停当前群 AI 水群</label>
+        <div class="hint">仅普通聊天发言触发；纠正、群聊总结指令及其自动回复不会启动或延长暂停。</div>
         <label for="ownerPauseMinutes">暂停分钟数</label><input type="number" id="ownerPauseMinutes" value="10" min="1" max="1440" inputmode="numeric">
         <div class="water-ai-subsection">
           <label class="check"><input type="checkbox" id="ownerCorrectionEnabled"> 启用主人纠正</label>
@@ -3361,6 +3371,7 @@ for(const prefix of ['br','lk','cr'])$('#'+prefix+'AiFlockProviders').addEventLi
 
 // ---------- AI 水群任务与学习 ----------
 let waterAIJobs=[],waterAIJobsSeq=0,editingWaterAIJobId=null,waterAIJobAccount=null,waterAIJobBusy=false;
+let waterAITestJobId=null,waterAITestAccount=null,waterAITestBusy=false,waterAITestSeq=0;
 let waterAIJobGroupSel=new Set(),waterAIJobProviderSel=new Set(),waterAIJobProviderExplicit=false,waterAISkillGroupSel=new Set(),waterAISkillProviderSel=new Set(),waterAISkillProviderExplicit=false;
 let waterAISkillSeq=0,waterAISkillBusy=false,waterAISkillLoading=false,waterAISkillFileVersion=0,waterAISkillReader=null,waterAISkillDraft=null,waterAIStudyFileVersion=0,waterAIStudyReader=null,waterAIStudyDraft=null,flockWhaleActive=false;
 function renderWaterAIBudgetStatus(){const context=$('#waterAiJobContextMessages').value||'6',message=$('#waterAiJobMessageChars').value||'120',skill=$('#waterAiJobSkillChars').value||'3000',tokens=$('#waterAiJobMaxTokens').value||'200';$('#waterAiJobBudgetText').textContent=`当前水群预算：任务预设 ${context}条/${message}字/skill ${skill}字/${tokens} Token；鲸鱼模式仅影响学习，不影响水群回复预算`;$('#waterAiJobWhaleBadge').classList.toggle('hidden',!flockWhaleActive)}
@@ -3372,6 +3383,7 @@ function renderAIFlockReactionPickers(){for(const field of AI_FLOCK_REACTION_FIE
 function waterAIGroupName(id){const group=watchedGroups.find(item=>String(item.chat_id)===id);return String(group?.name||id)}
 function renderWaterAIGroups(){
   pruneGroupSelection(waterAIJobGroupSel);pruneGroupSelection(waterAISkillGroupSel);
+  renderWaterAITestGroups();
   for(const [id,sel] of [['waterAiJobGroups',waterAIJobGroupSel],['waterAiSkillGroups',waterAISkillGroupSel]]){const box=$('#'+id);if(!box)continue;box.innerHTML=watchedGroups.length?watchedGroups.map(g=>`<button type="button" class="gp ${sel.has(String(g.chat_id))?'on':''}" data-water-group="${esc(String(g.chat_id))}">${esc(g.name||g.chat_id)}</button>`).join(''):'<div class="empty" style="padding:6px">请先添加监听群</div>'}
 }
 function renderWaterAIProviderPicks(){
@@ -3382,8 +3394,9 @@ function renderWaterAIProviderPicks(){
 function waterAIJobPayload(job){return {name:String(job.name||'').trim(),enabled:job.enabled?1:0,groups:watchedGroupCsv(job.groups),start_time:String(job.start_time||'09:00'),end_time:String(job.end_time||'22:00'),prompt:String(job.prompt||'').trim(),provider_ids:enabledProviderCsv(job.provider_ids),reaction:String(job.reaction||'').trim(),context_messages:Number(job.context_messages??6),message_chars:Number(job.message_chars??120),skill_chars:Number(job.skill_chars??3000),max_tokens:Number(job.max_tokens??200),knowledge_chars:Number(job.knowledge_chars??2000),knowledge_on_demand:Number(job.knowledge_on_demand??0),end_next_day:Number(job.end_next_day??0)}}
 function renderWaterAIJobs(){
   $('#waterAiCount').textContent=waterAIJobs.length;const box=$('#waterAiJobsList'),c=accountContext();
-  box.innerHTML=waterAIJobs.length?waterAIJobs.map(job=>{const groups=csvValues(job.groups),providers=csvValues(job.provider_ids),limits=waterAIJobPayload(job);return `<div class="water-ai-job" data-water-job-id="${esc(String(job.id))}"><div class="water-ai-job-head"><div class="water-ai-job-name">${esc(job.name||'未命名任务')}</div><span class="tag ${job.enabled?'ok':'off'}">${job.enabled?'已启用':'已停用'}</span></div><div class="water-ai-job-meta">${esc(groups.map(waterAIGroupName).join('、')||'未选择群')}<br>${esc(job.start_time)}–${settingEnabled(job.end_next_day)?'次日 ':''}${esc(job.end_time)}　${providers.length?'已选 '+providers.length+' 个 API':'全部已启用 API'}${job.reaction?'　表情 '+esc(job.reaction):''}<br>上下文 ${limits.context_messages} 条　消息 ${limits.message_chars} 字　skill ${limits.skill_chars} 字　输出 ${limits.max_tokens} Token　study + knowledge ${limits.knowledge_chars===-1?'无上限':limits.knowledge_chars+' 字'}${job.last_reply_at?'<br>最近回复 '+esc(job.last_reply_at)+'：'+esc(job.last_reply):''}</div><div class="water-ai-actions"><button class="ghost" type="button" data-water-action="edit">编辑</button><button class="ghost" type="button" data-water-action="toggle">${job.enabled?'停用':'启用'}</button><button class="ghost" type="button" data-water-action="duplicate">复制</button><button class="danger" type="button" data-water-action="delete">删除</button></div></div>`}).join(''):'<div class="empty">暂无水群任务</div>';
+  box.innerHTML=waterAIJobs.length?waterAIJobs.map(job=>{const groups=csvValues(job.groups),providers=csvValues(job.provider_ids),limits=waterAIJobPayload(job);return `<div class="water-ai-job" data-water-job-id="${esc(String(job.id))}"><div class="water-ai-job-head"><div class="water-ai-job-name">${esc(job.name||'未命名任务')}</div><span class="tag ${job.enabled?'ok':'off'}">${job.enabled?'已启用':'已停用'}</span></div><div class="water-ai-job-meta">${esc(groups.map(waterAIGroupName).join('、')||'未选择群')}<br>${esc(job.start_time)}–${settingEnabled(job.end_next_day)?'次日 ':''}${esc(job.end_time)}　${providers.length?'已选 '+providers.length+' 个 API':'全部已启用 API'}${job.reaction?'　表情 '+esc(job.reaction):''}<br>上下文 ${limits.context_messages} 条　消息 ${limits.message_chars} 字　skill ${limits.skill_chars} 字　输出 ${limits.max_tokens} Token　study + knowledge ${limits.knowledge_chars===-1?'无上限':limits.knowledge_chars+' 字'}${job.last_reply_at?'<br>最近回复 '+esc(job.last_reply_at)+'：'+esc(job.last_reply):''}</div><div class="water-ai-actions"><button class="ghost" type="button" data-water-action="test">水群测试</button><button class="ghost" type="button" data-water-action="edit">编辑</button><button class="ghost" type="button" data-water-action="toggle">${job.enabled?'停用':'启用'}</button><button class="ghost" type="button" data-water-action="duplicate">复制</button><button class="danger" type="button" data-water-action="delete">删除</button></div></div>`}).join(''):'<div class="empty">暂无水群任务</div>';
   box.onclick=e=>{const button=e.target.closest('[data-water-action]'),row=e.target.closest('[data-water-job-id]');if(!button||!row||!box.contains(button)||!isCurrentAccount(c))return;mutateWaterAIJob(row.dataset.waterJobId,button.dataset.waterAction,c)};
+  renderWaterAITestGroups();
 }
 async function loadWaterAIJobs(){const c=accountContext(),seq=++waterAIJobsSeq;try{const d=await api('/api/ai/flock/jobs',{_account:c});if(seq!==waterAIJobsSeq||!isCurrentAccount(c))return;waterAIJobs=(Array.isArray(d)?d:d.jobs||[]).filter(job=>job&&job.id!=null).map(job=>({...job,groups:csvValues(job.groups).join(','),provider_ids:csvValues(job.provider_ids).join(',')}));renderWaterAIJobs()}catch(e){if(seq===waterAIJobsSeq&&isCurrentAccount(c)&&!e.staleAccount)$('#waterAiJobsList').textContent='水群任务加载失败：'+e.message}}
 function openWaterAIJobForm(id=null){
@@ -3404,11 +3417,39 @@ async function saveWaterAIJob(){
   try{await api('/api/ai/flock/jobs'+(id!=null?'/'+encodeURIComponent(id):''),{method:id!=null?'PUT':'POST',body:JSON.stringify(body),_account:c});if(!isCurrentAccount(c))return;resetWaterAIJobForm();toast(id!=null?'水群任务已更新':'水群任务已添加');await loadWaterAIJobs()}catch(e){if(isCurrentAccount(c))toast(e.message,1)}finally{if(isCurrentAccount(c)){waterAIJobBusy=false;$('#waterAiJobSave').disabled=false}}
 }
 async function mutateWaterAIJob(id,action,c=accountContext()){
+  if(action==='test'){if(isCurrentAccount(c))openWaterAITest(id);return}
   if(waterAIJobBusy||!isCurrentAccount(c))return;const job=waterAIJobs.find(item=>String(item.id)===String(id));if(!job)return;if(action==='edit')return openWaterAIJobForm(id);if(action==='delete'&&!window.confirm('删除水群任务「'+String(job.name||id)+'」？'))return;
   let method='PUT',path='/api/ai/flock/jobs/'+encodeURIComponent(id),body=waterAIJobPayload({...job,enabled:!job.enabled});if(action==='duplicate'){method='POST';path='/api/ai/flock/jobs';body=waterAIJobPayload({...job,name:String(job.name||'任务').slice(0,77)+' 副本',enabled:0})}else if(action==='delete'){method='DELETE';body=null}else if(action!=='toggle')return;
   if(body&&rejectBrokenProviderSelection(csvValues(job.provider_ids).length>0,job.provider_ids))return;
   if(body&&!selectedAIProvidersEnabled(body.provider_ids))return toast('水群任务只能选择已启用的 AI API',1);
   waterAIJobBusy=true;try{await api(path,{method,...(body?{body:JSON.stringify(body)}:{}),_account:c});if(!isCurrentAccount(c))return;toast(action==='delete'?'水群任务已删除':action==='duplicate'?'水群任务已复制':body.enabled?'水群任务已启用':'水群任务已停用');await loadWaterAIJobs()}catch(e){if(isCurrentAccount(c))toast(e.message,1)}finally{if(isCurrentAccount(c))waterAIJobBusy=false}
+}
+function syncWaterAITestButtons(){for(const id of ['waterAiTestGroup','waterAiTestText','waterAiTestSend','waterAiTestClose'])$('#'+id).disabled=waterAITestBusy}
+function renderWaterAITestGroups(){
+  if(waterAITestJobId===null||waterAITestBusy)return;
+  const job=waterAIJobs.find(item=>String(item.id)===String(waterAITestJobId)),select=$('#waterAiTestGroup'),previous=select.value;
+  const groups=csvValues(job?.groups).filter(id=>watchedGroups.some(group=>String(group.chat_id)===id));select.replaceChildren();
+  const empty=document.createElement('option');empty.value='';empty.textContent=groups.length?'请选择发送群':'此任务暂无可测试的监听群';select.appendChild(empty);
+  for(const id of groups){const option=document.createElement('option');option.value=id;option.textContent=waterAIGroupName(id);select.appendChild(option)}
+  select.value=groups.includes(previous)?previous:groups.length===1?groups[0]:'';
+}
+function openWaterAITest(id){
+  if(waterAITestBusy)return;const job=waterAIJobs.find(item=>String(item.id)===String(id));if(!job)return;
+  waterAITestSeq++;waterAITestJobId=job.id;waterAITestAccount=accountContext();$('#waterAiTestTitle').textContent='水群测试：'+String(job.name||'未命名任务');$('#waterAiTestGroup').value='';$('#waterAiTestText').value='';$('#waterAiTestResult').textContent='';renderWaterAITestGroups();syncWaterAITestButtons();$('#waterAiTestForm').classList.remove('hidden');$('#waterAiTestForm').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function closeWaterAITest(){if(waterAITestBusy)return;resetWaterAITest()}
+function resetWaterAITest(){waterAITestSeq++;waterAITestBusy=false;waterAITestJobId=null;waterAITestAccount=null;$('#waterAiTestForm').classList.add('hidden');$('#waterAiTestGroup').replaceChildren();$('#waterAiTestText').value='';$('#waterAiTestResult').textContent='';syncWaterAITestButtons()}
+async function runWaterAITest(){
+  if(waterAITestBusy||waterAITestJobId===null)return;const c=waterAITestAccount;if(!c||!isCurrentAccount(c))return;
+  const job=waterAIJobs.find(item=>String(item.id)===String(waterAITestJobId)),chat_id=$('#waterAiTestGroup').value,text=$('#waterAiTestText').value.trim();
+  if(!job||!csvValues(job.groups).includes(chat_id)||!watchedGroups.some(group=>String(group.chat_id)===chat_id))return toast('请选择此任务的监听群',1);
+  if(!text||text.length>2000)return toast('请填写 1–2000 字的测试内容',1);
+  const seq=++waterAITestSeq;waterAITestBusy=true;syncWaterAITestButtons();$('#waterAiTestResult').textContent='AI 正在生成并发送到「'+waterAIGroupName(chat_id)+'」…';
+  try{const data=await api('/api/ai/flock/jobs/'+encodeURIComponent(job.id)+'/test',{method:'POST',body:JSON.stringify({chat_id,text}),_account:c});if(!isCurrentAccount(c)||seq!==waterAITestSeq)return;
+    $('#waterAiTestResult').textContent=data.sent===true?'AI 已发送到「'+waterAIGroupName(chat_id)+'」：\n'+String(data.reply||'')+(data.warning?'\n'+String(data.warning):''):'未发送：'+String(data.reason||'本次没有可发送的 AI 回复');
+    if(data.sent===true)await loadWaterAIJobs();
+  }catch(e){if(isCurrentAccount(c)&&seq===waterAITestSeq)$('#waterAiTestResult').textContent='测试失败：'+e.message+'\n若连接中断，请先查看群内是否已收到消息。'}
+  finally{if(isCurrentAccount(c)&&seq===waterAITestSeq){waterAITestBusy=false;syncWaterAITestButtons()}}
 }
 function settingEnabled(value){return value===true||value===1||value==='1'}
 function syncFlockLearningUnlimited(){const disabled=$('#waterAiSkillUnlimited').checked;for(const [suffix] of AI_FLOCK_LEARNING_LIMIT_SPECS)$('#waterAiSkill'+suffix).disabled=disabled}
@@ -3467,7 +3508,15 @@ let memoryVersion='',memoryOffset=0,memoryBusy=false,memoryLoadSeq=0,memoryDirty
 async function loadMemory(offset=0){if(memoryBusy)return;if(memoryDirty&&!window.confirm('重新载入会放弃未保存的记忆修改，继续？'))return;const c=accountContext(),seq=++memoryLoadSeq,file=$('#memoryFile').value||'study';memoryBusy=true;$('#memoryReload').disabled=true;try{const data=await api('/api/ai/flock/memory?file='+encodeURIComponent(file)+'&q='+encodeURIComponent($('#memorySearch').value)+'&offset='+offset,{_account:c});if(!isCurrentAccount(c)||seq!==memoryLoadSeq)return;memoryVersion=data.version;memoryOffset=data.offset||0;memoryDirty=false;const list=$('#memoryList');list.replaceChildren();for(const item of data.items||[]){const row=document.createElement('div'),meta=document.createElement('div'),preview=document.createElement('pre'),editor=document.createElement('textarea'),actions=document.createElement('div');row.className='memory-row';meta.className='hint';meta.textContent=(item.created_at?beijingStatusTime(item.created_at):'日期未记录')+'　'+String(item.group||'来源群未记录')+'　'+String(item.source||'')+(item.pinned?'　已固定':'');preview.textContent=item.body;editor.value=item.body;editor.className='hidden';editor.setAttribute('aria-label','编辑记忆段落');editor.oninput=()=>{memoryDirty=true};actions.className='memory-actions';const version=data.version,button=(label,handler)=>{const el=document.createElement('button');el.type='button';el.className='ghost';el.textContent=label;el.onclick=()=>{if(isCurrentAccount(c))handler()};actions.appendChild(el);return el};const save=button('保存纠正',()=>mutateMemory(file,item.start,{version,body:editor.value},c));save.classList.add('hidden');button('编辑',()=>{editor.classList.remove('hidden');preview.classList.add('hidden');save.classList.remove('hidden')});button(item.pinned?'取消固定':'固定',()=>mutateMemory(file,item.start,{version,pinned:!item.pinned},c));button('删除',()=>{if(window.confirm('删除这段记忆？此操作不可恢复。'))mutateMemory(file,item.start,{version,remove:true},c)});row.appendChild(meta);row.appendChild(preview);row.appendChild(editor);row.appendChild(actions);list.appendChild(row)}$('#memoryStatus').textContent='共 '+Number(data.total||0)+' 段，当前显示 '+(data.items?.length?memoryOffset+1:0)+'–'+(memoryOffset+(data.items?.length||0))+'；修改保存后自动固定。';$('#memoryPrev').disabled=memoryOffset===0;$('#memoryNext').disabled=memoryOffset+20>=Number(data.total||0)}catch(e){if(isCurrentAccount(c)&&seq===memoryLoadSeq)$('#memoryStatus').textContent='记忆加载失败：'+e.message}finally{if(isCurrentAccount(c)&&seq===memoryLoadSeq){memoryBusy=false;$('#memoryReload').disabled=false}}}
 async function mutateMemory(file,start,body,c){if(memoryBusy||!isCurrentAccount(c))return;memoryBusy=true;try{await api('/api/ai/flock/memory/'+file+'/'+start,{method:'PUT',body:JSON.stringify(body),_account:c});if(!isCurrentAccount(c))return;memoryDirty=false;memoryBusy=false;await loadMemory(memoryOffset)}catch(e){if(isCurrentAccount(c))$('#memoryStatus').textContent='修改失败：'+e.message}finally{if(isCurrentAccount(c))memoryBusy=false}}
 function resetOwnerAIUI(){ownerAILoadSeq++;ownerAIBusy=false;ownerAIProviderSel.clear();memoryLoadSeq++;memoryBusy=false;memoryDirty=false;memoryVersion='';memoryOffset=0;$('#memoryList').replaceChildren();$('#memoryStatus').textContent='';$('#memorySearch').value='';$('#memoryPrev').disabled=true;$('#memoryNext').disabled=true;$('#memoryReload').disabled=false;$('#learningMetrics').replaceChildren();$('#learningLastCollected').textContent='';$('#ownerAIStatus').textContent='';$('#ownerBudgetStatus').textContent='';$('#ownerAISave').disabled=false;for(const id of Object.keys(OWNER_AI_FIELDS)){if(id.endsWith('Enabled'))$('#'+id).checked=false;else $('#'+id).value=id.endsWith('Keywords')?'':id==='ownerPauseMinutes'?10:id==='ownerSummaryHours'?6:id==='ownerSummaryMessages'?200:0}$('#ownerAiCard').classList.remove('open');renderOwnerAIProviderPicks()}
-async function loadFlockTrace(id,button){const c=accountContext(),row=button.closest('.logdetail');button.disabled=true;try{const data=await api('/api/ai/flock/traces/'+id,{_account:c});if(!isCurrentAccount(c)||!row)return;const pre=document.createElement('pre');pre.className='trace-body';pre.textContent=JSON.stringify(data,null,2);row.appendChild(pre);button.textContent='引用明细已展开'}catch(e){if(isCurrentAccount(c)){button.disabled=false;toast(e.message,1)}}}
+async function loadFlockTrace(id){
+  if(!Number.isSafeInteger(Number(id))||Number(id)<=0)return;const key=String(id),c=accountContext();let entry=logTraceCache.get(key);
+  if(entry?.loading)return;
+  if(entry){rememberFlockTraceScroll();entry.open=!entry.open;renderFlockTraces();return}
+  entry={open:true,loading:true,text:'',scrollTop:0};logTraceCache.set(key,entry);renderFlockTraces();
+  try{const data=await api('/api/ai/flock/traces/'+id,{_account:c});if(!isCurrentAccount(c)||logTraceCache.get(key)!==entry)return;entry.text=JSON.stringify(data,null,2);entry.loading=false}
+  catch(e){if(isCurrentAccount(c)&&logTraceCache.get(key)===entry){logTraceCache.delete(key);toast(e.message,1)}}
+  finally{if(isCurrentAccount(c))renderFlockTraces()}
+}
 let knowledgeLoaded=false,knowledgeBusy=false,knowledgeDirty=false,knowledgeSeq=0,knowledgeRevision=0,knowledgeLastUpload='',knowledgeReader=null,knowledgeFileVersion=0,knowledgeDraft=null;
 function syncKnowledgeButtons(){for(const id of ['knowledgeEdit','knowledgeSave','knowledgeExport','knowledgeUpload'])$('#'+id).disabled=knowledgeBusy||!knowledgeLoaded;$('#knowledgeReload').disabled=knowledgeBusy;$('#knowledgeEditor').disabled=!knowledgeLoaded;$('#knowledgeFile').disabled=knowledgeBusy||!knowledgeLoaded;$('#knowledgeImport').disabled=knowledgeBusy||!knowledgeDraft}
 function setKnowledgeEditorOpen(open){$('#knowledgeEditFields').classList.toggle('hidden',!open);$('#knowledgeEdit').setAttribute('aria-expanded',String(open));$('#knowledgeEdit').textContent=open?'收起编辑':'编辑知识'}
@@ -3507,7 +3556,7 @@ function readStudyFile(){const c=accountContext(),version=++waterAIStudyFileVers
 async function importStudy(){const draft=waterAIStudyDraft;if(waterAISkillBusy||!draft||!isCurrentAccount(draft.account)||draft.version!==waterAIStudyFileVersion)return;if(!window.confirm('导入会替换当前 study.md，确定继续？'))return;waterAISkillBusy=true;$('#waterAiStudyImport').disabled=true;try{await api('/api/ai/flock/study/import',{method:'POST',headers:{'Content-Type':'text/markdown; charset=utf-8'},body:draft.content,_account:draft.account});if(!isCurrentAccount(draft.account)||draft!==waterAIStudyDraft)return;clearStudyFile();$('#waterAiSkillStatus').textContent='study.md 已导入';await loadFlockSkill()}catch(e){if(isCurrentAccount(draft.account)){$('#waterAiSkillStatus').textContent='导入失败：'+e.message;$('#waterAiStudyImport').disabled=false}}finally{if(isCurrentAccount(draft.account))waterAISkillBusy=false}}
 async function exportStudy(){if(waterAISkillBusy)return;const c=accountContext();waterAISkillBusy=true;$('#waterAiStudyExport').disabled=true;$('#waterAiSkillStatus').textContent='正在导出 study.md…';try{const response=await fetch('/api/ai/flock/study/export',{headers:{'X-Account-ID':c.id||'default'}});if(!isCurrentAccount(c))return;if(response.status===401){showLoginGate();throw new Error('未登录面板')}if(!response.ok)throw new Error(apiErrorMessage(await response.json().catch(()=>({})),response.status));const blob=await response.blob();if(!isCurrentAccount(c))return;const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='study.md';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);$('#waterAiSkillStatus').textContent='study.md 已导出'}catch(e){if(isCurrentAccount(c))$('#waterAiSkillStatus').textContent='导出失败：'+e.message}finally{if(isCurrentAccount(c)){waterAISkillBusy=false;$('#waterAiStudyExport').disabled=false}}}
 function resetFlockSkillForm(){waterAISkillProviderExplicit=false;waterAISkillGroupSel.clear();waterAISkillProviderSel.clear();$('#waterAiSkillEnabled').checked=false;$('#waterAiSkillStart').value='09:00';$('#waterAiSkillEnd').value='22:00';$('#waterAiSkillUnlimited').checked=false;$('#waterAiSkillUnlimitedStart').value='';$('#waterAiSkillUnlimitedEnd').value='';$('#waterAiSkillDeepEnabled').checked=false;$('#waterAiSkillDeepStart').value='';$('#waterAiSkillDeepEnd').value='';$('#waterAiSkillUploadEnabled').checked=false;$('#waterAiSkillUploadTime').value='03:00';$('#waterAiSkillDistillEnabled').checked=false;$('#waterAiSkillDistillTime').value='04:00';setIntegerFields('waterAiSkill',{},AI_FLOCK_LEARNING_LIMIT_SPECS);syncFlockLearningUnlimited();renderFlockLearningStatus({learning_state:'disabled'});for(const id of ['waterAiSkillSave','waterAiLearnNow','waterAiSkillExam','waterAiDistillNow','waterAiUploadNow','waterAiSkillExport','waterAiStudyExport'])$('#'+id).disabled=false;clearStudyFile();$('#waterAiSkillExamResult').textContent='';$('#waterAiSkillGeneratedStats').classList.add('hidden');renderWaterAIGroups();renderWaterAIProviderPicks()}
-function resetWaterAIState(){waterAIJobsSeq++;waterAISkillSeq++;waterAIJobs=[];waterAIJobGroupSel.clear();waterAIJobProviderSel.clear();editingWaterAIJobId=null;waterAIJobAccount=null;waterAIJobBusy=false;waterAISkillBusy=false;waterAISkillLoading=false;flockWhaleActive=false;clearFlockSkillFile();$('#waterAiJobsList').replaceChildren();$('#waterAiCount').textContent='0';$('#waterAiSkillStatus').textContent='';$('#flockLearningCard').classList.remove('open');resetWaterAIJobForm();resetFlockSkillForm();resetOwnerAIUI()}
+function resetWaterAIState(){waterAIJobsSeq++;waterAISkillSeq++;waterAIJobs=[];waterAIJobGroupSel.clear();waterAIJobProviderSel.clear();editingWaterAIJobId=null;waterAIJobAccount=null;waterAIJobBusy=false;waterAISkillBusy=false;waterAISkillLoading=false;flockWhaleActive=false;clearFlockSkillFile();$('#waterAiJobsList').replaceChildren();$('#waterAiCount').textContent='0';$('#waterAiSkillStatus').textContent='';$('#flockLearningCard').classList.remove('open');resetWaterAIJobForm();resetFlockSkillForm();resetOwnerAIUI();resetWaterAITest()}
 $('#waterAiJobGroups').addEventListener('click',e=>{const b=e.target.closest('[data-water-group]');if(!b)return;const id=b.dataset.waterGroup;waterAIJobGroupSel.has(id)?waterAIJobGroupSel.delete(id):waterAIJobGroupSel.add(id);renderWaterAIGroups()});
 $('#waterAiSkillGroups').addEventListener('click',e=>{const b=e.target.closest('[data-water-group]');if(!b)return;const id=b.dataset.waterGroup;waterAISkillGroupSel.has(id)?waterAISkillGroupSel.delete(id):waterAISkillGroupSel.add(id);renderWaterAIGroups()});
 $('#waterAiJobProviders').addEventListener('click',e=>{const b=e.target.closest('[data-water-provider]');if(b)toggleProviderSelection(waterAIJobProviderSel,b.dataset.waterProvider,renderWaterAIProviderPicks)});
@@ -3997,11 +4046,16 @@ async function resolveAnomaly(id,action,c=accountContext()){
   finally{if(isCurrentAccount(c)){anomalyBusyIds.delete(id);if(logKind==='anomaly')renderAnomalies(c)}}
 }
 let logOpenIds=new Set();
+let logTraceCache=new Map();
+function flockTraceMarkup(id){const entry=logTraceCache.get(String(id)),open=entry?.open,loading=entry?.loading;return '<button type="button" class="ghost" aria-expanded="'+String(!!open)+'" '+(loading?'disabled ':'')+'onclick="event.stopPropagation();loadFlockTrace('+Number(id)+')">'+(loading?'正在加载引用…':open?'收起引用明细':'查看本次引用明细')+'</button>'+(open&&!loading?'<pre class="trace-body">'+esc(entry.text)+'</pre>':'')}
+function rememberFlockTraceScroll(){document.querySelectorAll('[data-flock-trace]').forEach(node=>{const entry=logTraceCache.get(node.dataset.flockTrace),pre=node.querySelector('.trace-body');if(entry&&pre)entry.scrollTop=pre.scrollTop})}
+function restoreFlockTraceScroll(){document.querySelectorAll('[data-flock-trace]').forEach(node=>{const entry=logTraceCache.get(node.dataset.flockTrace),pre=node.querySelector('.trace-body');if(entry&&pre)pre.scrollTop=entry.scrollTop||0})}
+function renderFlockTraces(){rememberFlockTraceScroll();document.querySelectorAll('[data-flock-trace]').forEach(node=>{node.innerHTML=flockTraceMarkup(node.dataset.flockTrace)});restoreFlockTraceScroll()}
 function logStableId(h){
   if(h&&h.id!==undefined&&h.id!==null)return String(h.id);
   return [h?.ts??'',h?.action??'',h?.rule_id??'',h?.chat_id??''].join('|');
 }
-function resetLogOpenState(){logOpenIds.clear();if(typeof logBefore!=='undefined'){logBefore=0;logHasMore=false;if($('#logMore'))$('#logMore').disabled=true}}
+function resetLogOpenState(){logOpenIds.clear();logTraceCache.clear();if(typeof logBefore!=='undefined'){logBefore=0;logHasMore=false;if($('#logMore'))$('#logMore').disabled=true}}
 function logRow(h){
   const okv=(h.ok===undefined||h.ok===null)?-1:(h.ok?1:0);
   const d=h.detail||{},pending=d.status==='unconfirmed';
@@ -4061,13 +4115,13 @@ function logRow(h){
     add('群',d.group||h.grp_name||h.chat_id);
     add('触发消息',d.message||h.content);
     add('回复',d.reply||h.reply);
-    add('来源',d.source==='registration'?'抢注成功水群':d.source==='scheduled'?'定时水群':d.source);
+    add('来源',d.source==='test'?'水群手动测试':d.source==='registration'?'抢注成功水群':d.source==='scheduled'?'定时水群':d.source);
     add('study + knowledge 引用',({full:'每轮引用',relevant:'按需命中',occasional:'普通闲聊补充'}[d.knowledge_mode])||'未引用');
     if(d.knowledge_mode)add('参考字数',String(d.knowledge_chars??0)+' 字');
     add('API',d.provider);add('模型',d.model);add('发送的思考强度',d.reasoning_effort);
     if(d.reference_chars)for(const [name,count] of Object.entries(d.reference_chars))add(name+' 引用',String(count)+' 字');
     add('失败原因',d.error);
-    if(d.has_trace&&Number.isInteger(Number(h.id))&&Number(h.id)>0)lines.push('<button type="button" class="ghost" onclick="event.stopPropagation();loadFlockTrace('+Number(h.id)+',this)">查看本次引用明细</button>');
+    if(d.has_trace&&Number.isSafeInteger(Number(h.id))&&Number(h.id)>0)lines.push('<div class="flock-trace" data-flock-trace="'+Number(h.id)+'">'+flockTraceMarkup(h.id)+'</div>');
   }else if(h.action==='custom'){
     add('目标',d.bot||h.chat_id);
     add('过程',d.steps||h.reply);
@@ -4101,10 +4155,11 @@ function onLogSearch(){
 async function clearLogs(days){
   const tip=days?('删除 '+days+' 天前的日志?'):'清空全部日志?此操作不可恢复';
   if(!confirm(tip))return;
+  const c=accountContext();
   try{
-    const d=await api('/api/logs/clear',{method:'POST',body:JSON.stringify(days?{days:days}:{})});
-    toast('已删除 '+d.deleted+' 条');loadLogs();
-  }catch(e){toast(e.message,1)}
+    const d=await api('/api/logs/clear',{method:'POST',body:JSON.stringify(days?{days:days}:{}),_account:c});
+    if(!isCurrentAccount(c))return;resetLogOpenState();toast('已删除 '+d.deleted+' 条');loadLogs();
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 let logBefore=0,logMoreBusy=false,logHasMore=false;
 async function loadMoreLogs(){
@@ -4115,7 +4170,9 @@ async function loadMoreLogs(){
     if(!isCurrentAccount(c)||kind!==logKind||q!==logQ)return;
     const hits=Array.isArray(d.hits)?d.hits:[];logHasMore=!!d.has_more;
     const box=$('#logList');
+    rememberFlockTraceScroll();
     box.innerHTML+=hits.map(logRow).join('');
+    restoreFlockTraceScroll();
     if(hits.length)logBefore=Number(hits[hits.length-1].id)||logBefore;
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}finally{logMoreBusy=false;if(isCurrentAccount(c))$('#logMore').disabled=!logHasMore||!logBefore}
 }
@@ -4140,10 +4197,16 @@ async function loadLogs(){
     logHasMore=!!d.has_more;logBefore=hits.length?(Number(hits[hits.length-1].id)||0):0;
     if($('#logMore'))$('#logMore').disabled=!logHasMore||!logBefore;
     const visible=new Set(hits.map(logStableId));
-    for(const id of [...logOpenIds])if(!visible.has(id))logOpenIds.delete(id);
     const box=document.getElementById('logList');
-    box.innerHTML=hits.length?hits.map(logRow).join(''):('<div class="empty">'+(logQ?'没有匹配「'+esc(logQ)+'」的记录':'这一类还没有记录')+'</div>');
+    const retained=[...box.querySelectorAll('.logitem[data-log-id]')].filter(item=>!visible.has(item.dataset.logId)&&logTraceCache.get(item.dataset.logId)?.open);
+    for(const item of retained)visible.add(item.dataset.logId);
+    for(const id of [...logOpenIds])if(!visible.has(id))logOpenIds.delete(id);
+    for(const id of logTraceCache.keys())if(!visible.has(id))logTraceCache.delete(id);
+    rememberFlockTraceScroll();
+    box.innerHTML=hits.length||retained.length?hits.map(logRow).join('')+retained.map(item=>item.outerHTML).join(''):('<div class="empty">'+(logQ?'没有匹配「'+esc(logQ)+'」的记录':'这一类还没有记录')+'</div>');
+    restoreFlockTraceScroll();
     box.onclick=e=>{
+      if(e.target.closest('.flock-trace'))return;
       const item=e.target.closest('.logitem[data-log-id]');if(!item||!box.contains(item))return;
       const id=item.dataset.logId;item.classList.toggle('open');
       if(item.classList.contains('open'))logOpenIds.add(id);else logOpenIds.delete(id);

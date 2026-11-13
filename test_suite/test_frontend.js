@@ -1645,5 +1645,32 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     let request;const loader=app.loadMemory;app.loadMemory=async()=>{};app.api=async(p,o)=>{request=[p,o];return {ok:true}};app.memoryEditBody={version:'v1',body:'改正后的内容'};await ex("mutateMemory('study',0,memoryEditBody,accountContext())");
     assert.strictEqual(request[0],'/api/ai/flock/memory/study/0');assert.deepStrictEqual(JSON.parse(request[1].body),{version:'v1',body:'改正后的内容'});assert.strictEqual(request[1]._account.id,'memory-edit');app.loadMemory=loader;
   });
+  await test('水群测试入口只列当前任务监听群，打开不发送消息',async()=>{
+    ex("selectedAccount='test-flock-a';accountEpoch++;resetWaterAITest();watchedGroups=[{chat_id:'-1',name:'群<img>'},{chat_id:'-2',name:'别的群'}];waterAIJobs=[{id:1,name:'任务<img>',groups:'-1,-9',enabled:0}]");
+    let sent=0;app.api=async()=>{sent++;return {ok:true}};ex('renderWaterAIJobs()');assert(q('#waterAiJobsList').innerHTML.includes('data-water-action="test"'));await ex("mutateWaterAIJob('1','test')");
+    assert.strictEqual(sent,0);assert(!q('#waterAiTestForm').classList.contains('hidden'));assert.strictEqual(q('#waterAiTestTitle').textContent,'水群测试：任务<img>');assert.strictEqual(q('#waterAiTestGroup').value,'-1');assert.strictEqual(q('#waterAiTestGroup').children.length,2);assert.strictEqual(q('#waterAiTestGroup').children[1].textContent,'群<img>');
+    q('#waterAiTestText').value=' ';await ex('runWaterAITest()');assert.strictEqual(sent,0);q('#waterAiTestGroup').value='-2';q('#waterAiTestText').value='聊聊天';await ex('runWaterAITest()');assert.strictEqual(sent,0);ex('closeWaterAITest()');assert(q('#waterAiTestForm').classList.contains('hidden'));
+  });
+  await test('水群测试只提交一次模型要求并显示实际回复',async()=>{
+    ex("selectedAccount='test-flock-b';accountEpoch++;resetWaterAITest();watchedGroups=[{chat_id:'-1',name:'测试群'}];waterAIJobs=[{id:7,name:'测试任务',groups:'-1'}];openWaterAITest(7)");q('#waterAiTestText').value='请问大家晚饭吃什么';let done;const requests=[];app.api=(p,o)=>{requests.push([p,o]);return new Promise(r=>done=r)};app.loadWaterAIJobs=async()=>{};
+    const pending=ex('runWaterAITest()');await ex('runWaterAITest()');assert.strictEqual(requests.length,1);assert.strictEqual(requests[0][0],'/api/ai/flock/jobs/7/test');assert.strictEqual(requests[0][1]._account.id,'test-flock-b');assert.deepStrictEqual(JSON.parse(requests[0][1].body),{chat_id:'-1',text:'请问大家晚饭吃什么'});assert(q('#waterAiTestSend').disabled&&q('#waterAiTestGroup').disabled&&q('#waterAiTestText').disabled);
+    done({ok:true,sent:true,reply:'<img src=x>晚饭吃啥呢'});await pending;assert(q('#waterAiTestResult').textContent.includes('<img src=x>晚饭吃啥呢'));assert.strictEqual(q('#waterAiTestResult').innerHTML,'');assert(!q('#waterAiTestSend').disabled);
+  });
+  await test('水群测试未发送与失败明确提示，切换账号忽略迟到结果',async()=>{
+    app.api=async()=>({ok:true,sent:false,reason:'模型选择不回复'});await ex('runWaterAITest()');assert.strictEqual(q('#waterAiTestResult').textContent,'未发送：模型选择不回复');app.api=async()=>{throw new Error('模型不可用')};await ex('runWaterAITest()');assert(q('#waterAiTestResult').textContent.includes('测试失败：模型不可用'));assert(!q('#waterAiTestSend').disabled);
+    let done;app.api=()=>new Promise(r=>done=r);const pending=ex('runWaterAITest()');ex("selectedAccount='test-flock-c';accountEpoch++;resetWaterAIState()");q('#waterAiTestResult').textContent='新账号';done({sent:true,reply:'旧账号回复'});await pending;assert.strictEqual(q('#waterAiTestResult').textContent,'新账号');assert.strictEqual(ex('waterAITestJobId'),null);assert.strictEqual(q('#waterAiTestText').value,'');assert(!q('#waterAiTestSend').disabled);
+  });
+  await test('引用明细在日志轮询重绘后保持展开且无需重复请求',async()=>{
+    app.loadLogs=realLogLoader;ex("selectedAccount='trace-a';accountEpoch++;logKind='ai_flock';logQ='';resetLogOpenState();logOpenIds.add('90')");app.traceHit={id:90,ts:1,action:'ai_flock',ok:1,chat_id:'-1',detail:{has_trace:true}};
+    let done,traceCalls=0;app.api=async path=>{if(path.includes('/traces/')){traceCalls++;return new Promise(r=>done=r)}return {hits:[app.traceHit],counts:{}}};
+    const pending=ex('loadFlockTrace(90)');await ex('loadFlockTrace(90)');assert.strictEqual(traceCalls,1);await ex('loadLogs()');assert(q('#logList').innerHTML.includes('正在加载引用'));
+    done({references:{study:'<img src=x onerror=bad()>私有记忆'}});await pending;await ex('loadLogs()');const first=q('#logList').innerHTML;assert(first.includes('logitem open'));assert(first.includes('收起引用明细'));assert(first.includes('&lt;img'));assert(!first.includes('<img src=x'));assert(first.includes('私有记忆'));
+    await ex('loadLogs()');assert.strictEqual(q('#logList').innerHTML,first);assert.strictEqual(traceCalls,1);
+    await ex('loadFlockTrace(90)');await ex('loadLogs()');assert(!q('#logList').innerHTML.includes('<pre class="trace-body">'));await ex('loadFlockTrace(90)');await ex('loadLogs()');assert(q('#logList').innerHTML.includes('私有记忆'));assert.strictEqual(traceCalls,1);
+  });
+  await test('引用请求切换账号或清空日志后不能恢复旧账号明细',async()=>{
+    ex("selectedAccount='trace-old';accountEpoch++;resetLogOpenState()");let done;app.api=()=>new Promise(r=>done=r);const pending=ex('loadFlockTrace(91)');ex("selectedAccount='trace-new';accountEpoch++;resetLogOpenState()");done({references:{study:'旧账号内容'}});await pending;assert.strictEqual(ex('logTraceCache.size'),0);
+    app.api=async()=>{throw new Error('读取失败')};await ex('loadFlockTrace(91)');assert.strictEqual(ex('logTraceCache.size'),0);app.api=async()=>({references:{study:'新账号内容'}});await ex('loadFlockTrace(91)');assert(ex('logTraceCache.get("91").text.includes("新账号内容")'));ex('resetLogOpenState()');assert.strictEqual(ex('logTraceCache.size'),0);
+  });
   console.log(`前端回归 ${count} 项全部通过`);
 })().catch(e=>{console.error(e);process.exitCode=1});

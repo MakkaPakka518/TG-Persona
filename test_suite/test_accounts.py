@@ -264,6 +264,36 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         for route in ('/api/ai/flock/owner-settings', '/api/ai/flock/memory', '/api/ai/flock/traces/77'):
             self.assertEqual((await self.req('GET', route, aid)).status_code, 401)
 
+    async def test_manual_flock_test_route_is_authenticated_and_account_scoped(self):
+        aid = await self.create()
+        provider = await self.req('POST', '/api/ai/providers', 'default', json={
+            'note': '测试', 'base': 'https://example.invalid/v1', 'key': 'offline-test-key', 'model': 'm'})
+        provider_id = provider.json()['provider']['id']
+        for owner, group in [('default', '-1001'), (aid, '-1002')]:
+            await self.req('POST', '/api/groups', owner, json={'chat_id': group, 'name': '测试群'})
+            created = await self.req('POST', '/api/ai/flock/jobs', owner, json={
+                'name': '测试', 'enabled': 0, 'groups': group, 'prompt': '口语', 'provider_ids': provider_id})
+            self.assertEqual(created.status_code, 200, created.text)
+            self.assertEqual(created.json()['id'], 1)
+            self.rt(owner).client = SimpleNamespace(get_messages=AsyncMock(return_value=[]),
+                send_message=AsyncMock(return_value=SimpleNamespace(id=300, chat_id=int(group))),
+                disconnect=AsyncMock())
+            self.rt(owner).tg_state.update(phase='ready')
+        self.main._call_ai_any = AsyncMock(return_value='这是模型生成的问候')
+        route = '/api/ai/flock/jobs/1/test'
+        for body in ({'chat_id': '-1001', 'text': '测试'}, {'chat_id': '@someone', 'text': '测试'},
+                     {'chat_id': '-1002', 'text': ' '}, {'chat_id': '-1002', 'text': 'x' * 2001}):
+            response = await self.req('POST', route, aid, json=body)
+            self.assertIn(response.status_code, (400, 422), response.text)
+        self.main._call_ai_any.assert_not_awaited()
+        response = await self.req('POST', route, aid, json={'chat_id': '-1002', 'text': '打个招呼'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()['sent'])
+        self.rt(aid).client.send_message.assert_awaited_once_with(-1002, '这是模型生成的问候', parse_mode=None)
+        self.rt().client.send_message.assert_not_awaited()
+        self.http.cookies.clear()
+        self.assertEqual((await self.req('POST', route, 'default', json={'chat_id': '-1001', 'text': '打招呼'})).status_code, 401)
+
     async def test_parallel_clients_login_codes_and_two_factor(self):
         aid = await self.create()
         await asyncio.gather(self.login('default', 123, '00000000001', '00001'),
