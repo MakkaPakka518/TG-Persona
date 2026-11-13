@@ -55,6 +55,27 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException):
             await self.b['delete_ai_provider'](provider_id)
 
+    async def test_reasoning_effort_persists_defaults_and_validates(self):
+        created = await self.b['create_ai_provider'](self.body(reasoning_effort='xhigh'))
+        provider_id = created['provider']['id']
+        self.assertEqual(created['provider']['reasoning_effort'], 'xhigh')
+        self.assertEqual(self.b['_ai_provider_rows']()[0]['reasoning_effort'], 'xhigh')
+        legacy = {'id': 'a' * 16, 'note': '旧配置', 'base': 'https://example.invalid/v1',
+                  'key': 'k', 'model': 'm', 'enabled': True}
+        self.b['set_setting']('ai_providers', json.dumps([legacy]))
+        self.assertEqual(self.b['_ai_provider_rows']()[0]['reasoning_effort'], 'default')
+        self.b['_save_ai_providers']([])
+        for effort in self.b['AI_REASONING_EFFORTS']:
+            self.assertTrue((await self.b['create_ai_provider'](self.body(reasoning_effort=effort)))['ok'])
+        self.b['_save_ai_providers']([])
+        with self.assertRaises(HTTPException):
+            await self.b['create_ai_provider'](self.body(reasoning_effort='turbo'))
+        with self.assertRaises(HTTPException):
+            await self.b['create_ai_provider'](self.body(model='glm-5.3', reasoning_effort='medium'))
+        kept = (await self.b['create_ai_provider'](self.body(reasoning_effort='max')))['provider']['id']
+        self.assertEqual((await self.b['update_ai_provider'](kept, self.body(
+            note='改名', key='', reasoning_effort='max', enabled=False)))['provider']['reasoning_effort'], 'max')
+
     async def test_round_robin_selected_pool_and_failure_fallback(self):
         first = (await self.b['create_ai_provider'](self.body(note='一号')))['provider']['id']
         second = (await self.b['create_ai_provider'](self.body(note='二号', key='secret-two', model='model-two')))['provider']['id']

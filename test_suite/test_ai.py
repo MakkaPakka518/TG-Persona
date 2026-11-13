@@ -208,6 +208,30 @@ class AITest(unittest.IsolatedAsyncioTestCase):
         factory.assert_called_once_with(show_ad=False);self.assertEqual(classifier.call_count,2)
 
 
+    async def test_reasoning_effort_maps_to_openai_and_glm_payloads(self):
+        call = self.b['_call_ai']
+        async def payload_for(cfg):
+            self.calls.clear()
+            await call(cfg, 'x')
+            return self.calls[-1][1]['json']
+        base = {'base': 'https://example.invalid/v1', 'key': 'dummy-key'}
+        openai_high = await payload_for({**base, 'model': 'gpt-x', 'reasoning_effort': 'high'})
+        self.assertEqual(openai_high['reasoning_effort'], 'high')
+        self.assertNotIn('thinking', openai_high)
+        for effort in ('xhigh', 'max', 'medium', 'low', 'none'):
+            payload = await payload_for({**base, 'model': 'gpt-x', 'reasoning_effort': effort})
+            self.assertEqual(payload['reasoning_effort'], effort)
+        self.assertNotIn('reasoning_effort', await payload_for({**base, 'model': 'gpt-x', 'reasoning_effort': 'default'}))
+        glm_low = await payload_for({**base, 'model': 'glm-4.6', 'reasoning_effort': 'low'})
+        self.assertEqual((glm_low['thinking'], glm_low['reasoning_effort']), ({'type': 'enabled'}, 'low'))
+        glm_off = await payload_for({**base, 'model': 'glm-4.6', 'reasoning_effort': 'none'})
+        self.assertEqual(glm_off['thinking'], {'type': 'disabled'})
+        self.assertNotIn('reasoning_effort', glm_off)
+        with self.assertRaisesRegex(ValueError, 'GLM-5.3'):
+            await payload_for({**base, 'model': 'glm-5.3-flash', 'reasoning_effort': 'medium'})
+        with self.assertRaisesRegex(ValueError, '思考强度'):
+            await payload_for({**base, 'model': 'gpt-x', 'reasoning_effort': 'turbo'})
+
     async def test_glm53_assistant_mode_uses_low_reasoning_without_changing_image_calls(self):
         self.b['_call_ai'] = self.b['_call_ai']
         self.b['httpx'] = self.b['httpx']

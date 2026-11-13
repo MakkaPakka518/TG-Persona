@@ -191,6 +191,7 @@ html[data-theme="light"] .grp-pick .gp.on{color:#15803d}
 .ai-provider-head{display:flex;align-items:flex-start;gap:10px}.ai-provider-note{font-weight:600;flex:1;min-width:0;overflow-wrap:anywhere}
 .ai-provider-meta{font-size:12px;color:var(--dim);line-height:1.55;overflow-wrap:anywhere}.ai-token-usage{font-variant-numeric:tabular-nums}
 .ai-provider-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.ai-provider-result:empty{display:none}#foldAiProviders button,#aiTestCard button,#sCaptchaProviders .gp,#aiTestProviders .gp{min-height:44px}
+#aiProviderReasoning{min-height:48px;font-size:16px}#aiProviderReasoningHint{font-size:12px;color:var(--sub);overflow-wrap:anywhere}
 #waterAiCard{min-width:0;overflow:hidden}#waterAiCard .fold-b,#waterAiCard .water-ai-time,#waterAiCard .water-ai-time>div{min-width:0;max-width:100%}
 #waterAiCard input:not([type=checkbox]),#waterAiCard textarea,#waterAiCard button,#flockLearningCard input:not([type=checkbox]),#flockLearningCard button{min-height:44px;min-width:0;max-width:100%;box-sizing:border-box}.water-ai-time{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .water-ai-job{padding:11px 0;border-bottom:1px solid var(--hair)}.water-ai-job:last-child{border-bottom:0}.water-ai-job-head{display:flex;align-items:center;gap:8px}.water-ai-job-name{flex:1;min-width:0;font-weight:600;overflow-wrap:anywhere}.water-ai-job-meta{margin-top:4px;color:var(--dim);font-size:12px;line-height:1.55;overflow-wrap:anywhere}.water-ai-actions,.water-ai-toolbar,.water-ai-model-row{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch;margin-top:9px}.water-ai-actions button{flex:1 1 88px}.water-ai-toolbar button{flex:1 1 150px}.water-ai-form{margin-top:12px;padding-top:12px;border-top:1px solid var(--hair)}.water-ai-subsection{margin-top:16px;padding-top:14px;border-top:1px solid var(--hair)}.water-ai-subsection summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-weight:600;color:var(--sub)}.water-ai-stats{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.water-ai-stats span{flex:1 1 120px;color:var(--dim);font-size:12px}.water-ai-model-row input{flex:1 1 210px}.water-ai-model-row button{flex:0 1 auto}
@@ -1371,6 +1372,9 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="aiProviderKey">API Key</label><input type="password" id="aiProviderKey" maxlength="4096" autocomplete="new-password" placeholder="sk-..." oninput="clearAIProviderModelChoices()">
           <label for="aiProviderModel">模型</label><div class="water-ai-model-row"><input type="text" id="aiProviderModel" list="aiProviderModelOptions" maxlength="256" placeholder="gpt-4o-mini"><button class="ghost" type="button" id="aiProviderModelsBtn" onclick="discoverAIProviderModels()">获取模型</button></div>
           <datalist id="aiProviderModelOptions"></datalist><select id="aiProviderModelList" class="model-choice-list hidden" size="10" aria-label="获取到的模型列表" onchange="selectAIProviderModel()"></select><div id="aiProviderModelsStatus" class="hint" role="status" aria-live="polite"></div>
+          <label for="aiProviderReasoning">思考强度</label>
+          <select id="aiProviderReasoning" aria-describedby="aiProviderReasoningHint"><option value="default">模型默认</option><option value="none">关闭（none）</option><option value="low">低（low）</option><option value="medium">中（medium）</option><option value="high">高（high）</option><option value="xhigh">极高（xhigh）</option><option value="max">最高（max）</option></select>
+          <div class="hint" id="aiProviderReasoningHint">应用于使用此 API 的学习、水群、识别和助手。可用档位取决于模型；GLM-5.3 仅支持默认、low、high、max。思考可能占用输出 Token 预算，高强度时请相应提高任务上限。</div>
           <label class="check"><input type="checkbox" id="aiProviderEnabled" checked> 启用</label>
           <div class="flex" style="margin-top:12px"><button class="btn" type="button" id="aiProviderSave" onclick="saveAIProvider()">保存</button><button class="ghost" type="button" onclick="closeAIProviderForm()">取消</button></div>
         </div>
@@ -3218,11 +3222,13 @@ function renderRegistrationAIProviders(prefix){
 }
 function setRegistrationAIFlock(prefix,providers,reaction){const ids=csvValues(providers);registrationAIProviderExplicit[prefix]=ids.length>0;registrationAIProviderSel[prefix]=new Set(ids);$('#'+prefix+'AiFlockReaction').value=reaction||'';renderRegistrationAIProviders(prefix);syncAIFlockReactionPicker(prefix+'AiFlockReaction')}
 let aiTestResults={};
+const AI_REASONING_LABELS={default:'模型默认',none:'关闭（none）',low:'低（low）',medium:'中（medium）',high:'高（high）',xhigh:'极高（xhigh）',max:'最高（max）'};
 function renderAIProviders(){
   $('#aiProvidersCount').textContent=aiProviders.length;
   $('#aiProvidersList').innerHTML=aiProviders.length?aiProviders.map(p=>`<div class="ai-provider-row" data-ai-id="${p.id}">
     <div class="ai-provider-head"><div class="ai-provider-note">${esc(p.note)}</div><span class="tag ${p.enabled?'ok':'off'}">${p.enabled?'已启用':'已停用'}</span></div>
     <div class="ai-provider-meta">${esc(p.model)}<br>${esc(p.base)}</div>
+    <div class="ai-provider-meta">思考强度：${esc(AI_REASONING_LABELS[p.reasoning_effort]||AI_REASONING_LABELS.default)}</div>
     <div class="ai-provider-meta ai-token-usage">输入 ${formatTokenCount(p.input_tokens)}　输出 ${formatTokenCount(p.output_tokens)} Token</div>
     <div class="ai-provider-actions"><button class="ghost" data-ai-action="test">测试</button><button class="ghost" data-ai-action="edit">编辑</button><button class="ghost" data-ai-action="toggle">${p.enabled?'停用':'启用'}</button><button class="danger" data-ai-action="delete">删除</button></div>
     ${aiTestResults[p.id]?`<div class="hint ai-provider-result" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(aiTestResults[p.id])}</div>`:''}
@@ -3254,12 +3260,13 @@ function openAIProviderForm(id=null){
   aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=id;const p=aiProviders.find(x=>x.id===id);
   $('#aiProviderNote').value=p?.note||'';$('#aiProviderBase').value=p?.base||'';$('#aiProviderKey').value='';
   $('#aiProviderKey').placeholder=p?.key_present?'已保存，留空不修改':'sk-...';$('#aiProviderModel').value=p?.model||'';$('#aiProviderEnabled').checked=p?.enabled??true;
+  $('#aiProviderReasoning').value=p?.reasoning_effort||'default';
   clearAIProviderModelChoices(false);
   $('#aiProviderForm').classList.remove('hidden');$('#aiProviderNote').focus();$('#aiProviderForm').scrollIntoView({behavior:'smooth',block:'center'});
 }
 function clearAIProviderModelChoices(invalidate=true){if(invalidate){aiProviderModelsSeq++;aiProviderModelsBusy=false}$('#aiProviderModelOptions').replaceChildren();$('#aiProviderModelList').replaceChildren();$('#aiProviderModelList').classList.add('hidden');$('#aiProviderModelsStatus').textContent='';$('#aiProviderModelsBtn').disabled=false}
 function selectAIProviderModel(){const value=$('#aiProviderModelList').value;if(!value)return;$('#aiProviderModel').value=value;$('#aiProviderModelsStatus').textContent='已选择模型：'+value}
-function closeAIProviderForm(){aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=null;$('#aiProviderForm').classList.add('hidden');$('#aiProviderKey').value='';clearAIProviderModelChoices(false)}
+function closeAIProviderForm(){aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=null;$('#aiProviderForm').classList.add('hidden');$('#aiProviderKey').value='';$('#aiProviderReasoning').value='default';clearAIProviderModelChoices(false)}
 function redactProviderSecret(message,key){return key?String(message||'').split(key).join('[已隐藏]'):String(message||'')}
 async function discoverAIProviderModels(){
   if(aiProviderModelsBusy)return;const c=accountContext(),providerId=editingAIProviderId,base=$('#aiProviderBase').value.trim(),key=$('#aiProviderKey').value.trim(),seq=++aiProviderModelsSeq,status=$('#aiProviderModelsStatus'),button=$('#aiProviderModelsBtn');
@@ -3278,7 +3285,7 @@ async function discoverAIProviderModels(){
   finally{if(seq===aiProviderModelsSeq&&isCurrentAccount(c)){aiProviderModelsBusy=false;button.disabled=false}}
 }
 async function saveAIProvider(){
-  const body={note:$('#aiProviderNote').value.trim(),base:$('#aiProviderBase').value.trim(),key:$('#aiProviderKey').value.trim(),model:$('#aiProviderModel').value.trim(),enabled:$('#aiProviderEnabled').checked};
+  const body={note:$('#aiProviderNote').value.trim(),base:$('#aiProviderBase').value.trim(),key:$('#aiProviderKey').value.trim(),model:$('#aiProviderModel').value.trim(),reasoning_effort:$('#aiProviderReasoning').value,enabled:$('#aiProviderEnabled').checked};
   if(!body.note||!body.base||!body.model||(!editingAIProviderId&&!body.key))return toast('请填写备注、地址、Key 和模型',1);
   try{await api('/api/ai/providers'+(editingAIProviderId?'/'+editingAIProviderId:''),{method:editingAIProviderId?'PUT':'POST',body:JSON.stringify(body)});closeAIProviderForm();$('#aiTestResult').textContent='AI API 已保存';await loadAIProviders()}
   catch(e){$('#aiTestResult').textContent='保存失败：'+e.message;toast(e.message,1)}
@@ -3294,7 +3301,7 @@ async function mutateAIProvider(id,action){
       const d=await api('/api/ai/providers/'+id+'/test',{method:'POST'});
       aiTestResults[id]='「'+p.note+'」\n'+(d.ok?'连接测试成功':'连接测试失败')+'\n实际回复：'+(d.reply||'（空回复）')+'\n耗时：'+testElapsed(d.elapsed_ms)+(d.ok?'':'\n原因：'+(d.error||'未知'));
       renderAIProviders();
-    }else if(action==='toggle')await api('/api/ai/providers/'+id,{method:'PUT',body:JSON.stringify({note:p.note,base:p.base,key:'',model:p.model,enabled:!p.enabled})});
+    }else if(action==='toggle')await api('/api/ai/providers/'+id,{method:'PUT',body:JSON.stringify({note:p.note,base:p.base,key:'',model:p.model,reasoning_effort:p.reasoning_effort||'default',enabled:!p.enabled})});
     else await api('/api/ai/providers/'+id,{method:'DELETE'});
     if(action!=='test')await loadAIProviders();else await loadAIProviders();
   }catch(e){aiTestResults[id]='「'+p.note+'」\n操作失败：'+e.message;renderAIProviders();$('#aiTestResult').textContent='操作失败：'+e.message;toast(e.message,1)}

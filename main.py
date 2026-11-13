@@ -573,6 +573,9 @@ def _legacy_ai_config():
             "model": str(get_setting("ai_model", "") or "").strip()}
 
 
+AI_REASONING_EFFORTS = ("default", "none", "low", "medium", "high", "xhigh", "max")
+
+
 def _ai_provider_rows(migrate=True):
     try:
         rows = json.loads(get_setting("ai_providers", "") or "[]")
@@ -586,15 +589,19 @@ def _ai_provider_rows(migrate=True):
             continue
         item = {"id": str(row.get("id") or ""), "note": str(row.get("note") or "").strip(),
                 "base": str(row.get("base") or "").strip(), "key": str(row.get("key") or "").strip(),
-                "model": str(row.get("model") or "").strip(), "enabled": bool(row.get("enabled", True)),
-                "input_tokens": max(0, int(row.get("input_tokens") or 0)),
-                "output_tokens": max(0, int(row.get("output_tokens") or 0))}
+                 "model": str(row.get("model") or "").strip(), "enabled": bool(row.get("enabled", True)),
+                 "reasoning_effort": row.get("reasoning_effort", "default"),
+                 "input_tokens": max(0, int(row.get("input_tokens") or 0)),
+                 "output_tokens": max(0, int(row.get("output_tokens") or 0))}
+        if item["reasoning_effort"] not in AI_REASONING_EFFORTS:
+            item["reasoning_effort"] = "default"
         if re.fullmatch(r"[a-f0-9]{16}", item["id"]) and item["base"] and item["key"] and item["model"]:
             clean.append(item)
     if not clean and migrate and get_setting("ai_providers_migrated", "0") != "1":
         legacy = _legacy_ai_config()
         if all(legacy.values()):
             clean = [{"id": secrets.token_hex(8), "note": "原有配置", **legacy, "enabled": True,
+                      "reasoning_effort": "default",
                       "input_tokens": 0, "output_tokens": 0}]
             set_setting("ai_providers", json.dumps(clean, ensure_ascii=False))
         set_setting("ai_providers_migrated", "1")
@@ -612,8 +619,8 @@ def _save_ai_providers(rows):
 
 def _ai_provider_configs():
     return [{"id": row["id"], "note": row["note"], "base": row["base"],
-             "key": row["key"], "model": row["model"]}
-            for row in _ai_provider_rows() if row["enabled"]]
+             "key": row["key"], "model": row["model"], "reasoning_effort": row["reasoning_effort"]}
+             for row in _ai_provider_rows() if row["enabled"]]
 
 
 def _record_ai_usage(provider_id, usage, feature="other"):
@@ -760,24 +767,43 @@ def _ai_endpoint(base):
     return base if base.endswith("/chat/completions") else base + "/chat/completions"
 
 
+def _ai_reasoning_params(cfg, assistant_mode=False):
+    effort = cfg.get("reasoning_effort", "default")
+    if effort not in AI_REASONING_EFFORTS:
+        raise ValueError("思考强度须为模型默认、关闭、低、中、高、极高或最高")
+    model = str(cfg.get("model", "")).strip().rsplit("/", 1)[-1].lower()
+    glm53 = bool(re.fullmatch(r"glm-5\.3(?:-flashx?)?", model))
+    if glm53 and effort not in ("default", "low", "high", "max"):
+        raise ValueError("GLM-5.3 仅支持模型默认、低、高或最高强度，无法关闭思考")
+    if effort != "default":
+        if model.startswith("glm-"):
+            params = {"thinking": {"type": "disabled" if effort == "none" else "enabled"}}
+            if effort != "none":
+                params["reasoning_effort"] = effort
+            return params
+        return {"reasoning_effort": effort}
+    if assistant_mode and glm53:
+        from urllib.parse import urlsplit
+        if (urlsplit(cfg.get("base", "")).hostname or "").lower() == "open.bigmodel.cn":
+            return {"thinking": {"type": "enabled"}, "reasoning_effort": "low"}
+    return {}
+
+
 async def _call_ai(cfg, content, max_tokens=512, assistant_mode=False, feature="other"):
     if not cfg.get("base") or not cfg.get("key") or not cfg.get("model"):
         raise ValueError("请填写 AI API 地址、密钥和模型名")
     endpoint = _ai_endpoint(cfg["base"])
     if httpx is None:
         raise RuntimeError("服务器未安装 httpx，请重新安装项目依赖")
-    payload = {"model": cfg["model"], "messages": [{"role": "user", "content": content}], "max_tokens": max_tokens}
-    if assistant_mode:
-        # GLM-5.3 官方接口强制思考，disabled 会报错；仅助手降低思考强度。
-        # https://docs.bigmodel.cn/cn/guide/capabilities/thinking
-        from urllib.parse import urlsplit
-        host = (urlsplit(endpoint).hostname or "").lower()
-        model = str(cfg["model"]).strip().lower()
-        if host == "open.bigmodel.cn" and re.fullmatch(r"glm-5\.3(?:-flashx?)?", model):
-            payload["thinking"] = {"type": "enabled"}
-            payload["reasoning_effort"] = "low"
-            payload["max_tokens"] = max(max_tokens, 8192)
-    async with httpx.AsyncClient(timeout=90 if assistant_mode else 30, follow_redirects=False) as client:
+    reasoning_params = _ai_reasoning_params(cfg, assistant_mode)
+    model = str(cfg["model"]).strip().rsplit("/", 1)[-1].lower()
+    if assistant_mode and re.fullmatch(r"glm-5\.3(?:-flashx?)?", model) and reasoning_params:
+        max_tokens = max(max_tokens, 8192)
+    payload = {"model": cfg["model"], "messages": [{"role": "user", "content": content}],
+               "max_tokens": max_tokens, **reasoning_params}
+    thinking = (reasoning_params.get("thinking", {}).get("type") == "enabled"
+                or reasoning_params.get("reasoning_effort") not in (None, "none"))
+    async with httpx.AsyncClient(timeout=90 if assistant_mode or thinking else 30, follow_redirects=False) as client:
         # 不自动重发计费请求；失败由用户明确点击重试。
         response = await client.post(endpoint,
             headers={"Authorization": "Bearer " + cfg["key"]}, json=payload)
@@ -801,10 +827,10 @@ async def _call_ai(cfg, content, max_tokens=512, assistant_mode=False, feature="
         except (KeyError, IndexError, TypeError, AttributeError):
             raise RuntimeError("AI 返回格式不兼容，缺少 choices/message/content") from None
         if assistant_mode and finish in ("length", "max_tokens"):
-            raise RuntimeError("AI 输出达到本次上限（" + str(payload["max_tokens"]) + "），正文不完整；未使用截断内容，请简化描述或换用较少思考的模型")
+            raise RuntimeError("AI 输出达到本次上限（" + str(max_tokens) + "），正文不完整；未使用截断内容，请简化描述或换用较少思考的模型")
         if not reply:
             if isinstance(reasoning, str) and reasoning.strip():
-                raise RuntimeError("AI 仅返回思考过程、没有最终正文；未将思考内容用作任务，请检查模型输出设置")
+                raise RuntimeError("AI 仅返回思考过程、没有最终正文；请提高最大输出 Token 或降低思考强度")
             if finish == "content_filter":
                 raise RuntimeError("AI 服务未提供正文（响应被内容过滤），请调整描述")
             raise RuntimeError("AI 返回空正文；接口已响应，但没有可用答案，请重试或检查模型配置")
@@ -6703,26 +6729,32 @@ class AIProviderInput(BaseModel):
     base: str = Field(..., min_length=1, max_length=2048)
     key: str = Field("", max_length=4096)
     model: str = Field(..., min_length=1, max_length=256)
+    reasoning_effort: str = Field("default", max_length=16)
     enabled: bool = True
 
 
 def _public_ai_provider(row):
     return {"id": row["id"], "note": row["note"], "base": row["base"],
-            "model": row["model"], "enabled": row["enabled"], "key_present": bool(row["key"]),
-            "input_tokens": row["input_tokens"], "output_tokens": row["output_tokens"]}
+             "model": row["model"], "enabled": row["enabled"], "key_present": bool(row["key"]),
+            "reasoning_effort": row.get("reasoning_effort", "default"),
+             "input_tokens": row["input_tokens"], "output_tokens": row["output_tokens"]}
 
 
 def _validated_ai_provider(body, previous=None):
     item = {"id": previous["id"] if previous else secrets.token_hex(8),
             "note": body.note.strip(), "base": body.base.strip(),
             "key": body.key.strip() or (previous["key"] if previous else ""),
-            "model": body.model.strip(), "enabled": bool(body.enabled),
+             "model": body.model.strip(), "enabled": bool(body.enabled),
+            "reasoning_effort": (previous.get("reasoning_effort", "default")
+                                 if previous and "reasoning_effort" not in body.model_fields_set
+                                 else body.reasoning_effort),
             "input_tokens": previous["input_tokens"] if previous else 0,
             "output_tokens": previous["output_tokens"] if previous else 0}
     if not item["key"]:
         raise HTTPException(400, "请填写 AI API Key")
     try:
         _ai_endpoint(item["base"])
+        _ai_reasoning_params(item)
     except ValueError as error:
         raise HTTPException(400, str(error)) from None
     return item

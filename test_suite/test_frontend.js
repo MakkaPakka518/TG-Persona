@@ -497,6 +497,22 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     context.providerFixture=[{id:'0123456789abcdef',note:'主线路',base:'https://dummy.invalid/v1',model:'dummy',enabled:true,key_present:true,input_tokens:0,output_tokens:0}];run("aiProviders=providerFixture;openAIProviderForm('0123456789abcdef')");
     assert.strictEqual(element('#aiProviderKey').value,'');assert(element('#aiProviderKey').placeholder.includes('留空不修改'));
   });
+  await test('AI API 思考强度保存回填渲染且旧配置默认跟随模型',async()=>{
+    const options=html.match(/<select id="aiProviderReasoning"[\s\S]*?<\/select>/)[0];
+    for(const effort of ['default','none','low','medium','high','xhigh','max'])assert(options.includes('value="'+effort+'"'));
+    context.providerFixture=[{id:'0123456789abcdef',note:'旧线路',base:'https://dummy.invalid/v1',model:'dummy',enabled:true}];
+    run('aiProviders=providerFixture;renderAIProviders()');assert(element('#aiProvidersList').innerHTML.includes('思考强度：模型默认'));
+    run("openAIProviderForm('0123456789abcdef')");assert.strictEqual(element('#aiProviderReasoning').value,'default');
+    context.providerFixture=[{id:'0123456789abcdef',note:'高强度',base:'https://dummy.invalid/v1',model:'dummy',enabled:true,reasoning_effort:'xhigh'}];
+    run('aiProviders=providerFixture;renderAIProviders()');assert(element('#aiProvidersList').innerHTML.includes('思考强度：极高（xhigh）'));
+    run("openAIProviderForm('0123456789abcdef')");assert.strictEqual(element('#aiProviderReasoning').value,'xhigh');
+    let saved;context.api=async(_p,o)=>{saved=JSON.parse(o.body);return {ok:true}};context.loadAIProviders=async()=>{};
+    await run('saveAIProvider()');assert.strictEqual(saved.reasoning_effort,'xhigh');
+    run('closeAIProviderForm()');assert.strictEqual(element('#aiProviderReasoning').value,'default');
+    context.providerFixture=[{id:'fedcba9876543210',note:'切换',base:'https://dummy.invalid/v1',model:'dummy',enabled:true,reasoning_effort:'max'}];run('aiProviders=providerFixture');
+    context.api=async(_p,o)=>{saved=JSON.parse(o.body);return {ok:true}};
+    await run("mutateAIProvider('fedcba9876543210','toggle')");assert.strictEqual(saved.reasoning_effort,'max');assert.strictEqual(saved.enabled,false);
+  });
   await test('单条 AI API 测试结果显示在对应线路卡片并展示回复耗时和错误',async()=>{
     context.providerFixture=[{id:'0123456789abcdef',note:'主线路',base:'https://dummy.invalid/v1',model:'dummy',enabled:true},{id:'fedcba9876543210',note:'备用线路',base:'https://dummy2.invalid/v1',model:'dummy2',enabled:true}];run('aiProviders=providerFixture;renderAIProviders()');
     assert.strictEqual(run('Object.keys(aiTestResults).length'),0);run('renderAIProviders()');
