@@ -76,6 +76,26 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.b['update_ai_provider'](kept, self.body(
             note='改名', key='', reasoning_effort='max', enabled=False)))['provider']['reasoning_effort'], 'max')
 
+    async def test_client_profile_session_is_stable_and_resets_only_on_switch(self):
+        created = await self.b['create_ai_provider'](self.body(client_profile='opencode'))
+        provider = created['provider']
+        self.assertEqual(provider['client_profile'], 'opencode')
+        row = self.b['_ai_provider_rows']()[0]
+        sid = row['client_session_id']
+        self.assertRegex(sid, r'^ses_[a-f0-9]{64}$')
+        self.assertNotIn(sid, str(provider))
+        await self.b['update_ai_provider'](provider['id'], self.body(client_profile='opencode', note='改名', key=''))
+        self.assertEqual(self.b['_ai_provider_rows']()[0]['client_session_id'], sid)
+        await self.b['update_ai_provider'](provider['id'], self.body(client_profile='codex', key=''))
+        codex_sid = self.b['_ai_provider_rows']()[0]['client_session_id']
+        self.assertRegex(codex_sid, r'^[a-f0-9-]{36}$')
+        self.assertNotEqual(codex_sid, sid)
+        await self.b['update_ai_provider'](provider['id'], self.body(client_profile='none', key=''))
+        row = self.b['_ai_provider_rows']()[0]
+        self.assertEqual((row['client_profile'], row['client_session_id']), ('none', ''))
+        with self.assertRaises(HTTPException):
+            await self.b['create_ai_provider'](self.body(client_profile='cursor'))
+
     async def test_round_robin_selected_pool_and_failure_fallback(self):
         first = (await self.b['create_ai_provider'](self.body(note='一号')))['provider']['id']
         second = (await self.b['create_ai_provider'](self.body(note='二号', key='secret-two', model='model-two')))['provider']['id']

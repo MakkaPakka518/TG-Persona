@@ -1375,6 +1375,9 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="aiProviderReasoning">思考强度</label>
           <select id="aiProviderReasoning" aria-describedby="aiProviderReasoningHint"><option value="default">模型默认</option><option value="none">关闭（none）</option><option value="low">低（low）</option><option value="medium">中（medium）</option><option value="high">高（high）</option><option value="xhigh">极高（xhigh）</option><option value="max">最高（max）</option></select>
           <div class="hint" id="aiProviderReasoningHint">应用于使用此 API 的学习、水群、识别和助手。可用档位取决于模型；GLM-5.3 仅支持默认、low、high、max。思考可能占用输出 Token 预算，高强度时请相应提高任务上限。</div>
+          <label for="aiProviderProfile">客户端伪装</label>
+          <select id="aiProviderProfile" aria-describedby="aiProviderProfileHint"><option value="none">不伪装</option><option value="opencode">opencode</option><option value="codex">codex</option><option value="claude">claude</option></select>
+          <div class="hint" id="aiProviderProfileHint">仅影响发往此 API 的请求头，用于只放行特定客户端的第三方中转站。会话标识按 API 持久保存；伪装可能违反中转站条款，存在被限流或封禁风险。</div>
           <label class="check"><input type="checkbox" id="aiProviderEnabled" checked> 启用</label>
           <div class="flex" style="margin-top:12px"><button class="btn" type="button" id="aiProviderSave" onclick="saveAIProvider()">保存</button><button class="ghost" type="button" onclick="closeAIProviderForm()">取消</button></div>
         </div>
@@ -3223,12 +3226,13 @@ function renderRegistrationAIProviders(prefix){
 function setRegistrationAIFlock(prefix,providers,reaction){const ids=csvValues(providers);registrationAIProviderExplicit[prefix]=ids.length>0;registrationAIProviderSel[prefix]=new Set(ids);$('#'+prefix+'AiFlockReaction').value=reaction||'';renderRegistrationAIProviders(prefix);syncAIFlockReactionPicker(prefix+'AiFlockReaction')}
 let aiTestResults={};
 const AI_REASONING_LABELS={default:'模型默认',none:'关闭（none）',low:'低（low）',medium:'中（medium）',high:'高（high）',xhigh:'极高（xhigh）',max:'最高（max）'};
+const AI_PROFILE_LABELS={none:'不伪装',opencode:'opencode',codex:'codex',claude:'claude'};
 function renderAIProviders(){
   $('#aiProvidersCount').textContent=aiProviders.length;
   $('#aiProvidersList').innerHTML=aiProviders.length?aiProviders.map(p=>`<div class="ai-provider-row" data-ai-id="${p.id}">
     <div class="ai-provider-head"><div class="ai-provider-note">${esc(p.note)}</div><span class="tag ${p.enabled?'ok':'off'}">${p.enabled?'已启用':'已停用'}</span></div>
     <div class="ai-provider-meta">${esc(p.model)}<br>${esc(p.base)}</div>
-    <div class="ai-provider-meta">思考强度：${esc(AI_REASONING_LABELS[p.reasoning_effort]||AI_REASONING_LABELS.default)}</div>
+    <div class="ai-provider-meta">思考强度：${esc(AI_REASONING_LABELS[p.reasoning_effort]||AI_REASONING_LABELS.default)}　客户端：${esc(AI_PROFILE_LABELS[p.client_profile]||AI_PROFILE_LABELS.none)}</div>
     <div class="ai-provider-meta ai-token-usage">输入 ${formatTokenCount(p.input_tokens)}　输出 ${formatTokenCount(p.output_tokens)} Token</div>
     <div class="ai-provider-actions"><button class="ghost" data-ai-action="test">测试</button><button class="ghost" data-ai-action="edit">编辑</button><button class="ghost" data-ai-action="toggle">${p.enabled?'停用':'启用'}</button><button class="danger" data-ai-action="delete">删除</button></div>
     ${aiTestResults[p.id]?`<div class="hint ai-provider-result" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(aiTestResults[p.id])}</div>`:''}
@@ -3260,13 +3264,13 @@ function openAIProviderForm(id=null){
   aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=id;const p=aiProviders.find(x=>x.id===id);
   $('#aiProviderNote').value=p?.note||'';$('#aiProviderBase').value=p?.base||'';$('#aiProviderKey').value='';
   $('#aiProviderKey').placeholder=p?.key_present?'已保存，留空不修改':'sk-...';$('#aiProviderModel').value=p?.model||'';$('#aiProviderEnabled').checked=p?.enabled??true;
-  $('#aiProviderReasoning').value=p?.reasoning_effort||'default';
+  $('#aiProviderReasoning').value=p?.reasoning_effort||'default';$('#aiProviderProfile').value=p?.client_profile||'none';
   clearAIProviderModelChoices(false);
   $('#aiProviderForm').classList.remove('hidden');$('#aiProviderNote').focus();$('#aiProviderForm').scrollIntoView({behavior:'smooth',block:'center'});
 }
 function clearAIProviderModelChoices(invalidate=true){if(invalidate){aiProviderModelsSeq++;aiProviderModelsBusy=false}$('#aiProviderModelOptions').replaceChildren();$('#aiProviderModelList').replaceChildren();$('#aiProviderModelList').classList.add('hidden');$('#aiProviderModelsStatus').textContent='';$('#aiProviderModelsBtn').disabled=false}
 function selectAIProviderModel(){const value=$('#aiProviderModelList').value;if(!value)return;$('#aiProviderModel').value=value;$('#aiProviderModelsStatus').textContent='已选择模型：'+value}
-function closeAIProviderForm(){aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=null;$('#aiProviderForm').classList.add('hidden');$('#aiProviderKey').value='';$('#aiProviderReasoning').value='default';clearAIProviderModelChoices(false)}
+function closeAIProviderForm(){aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=null;$('#aiProviderForm').classList.add('hidden');$('#aiProviderKey').value='';$('#aiProviderReasoning').value='default';$('#aiProviderProfile').value='none';clearAIProviderModelChoices(false)}
 function redactProviderSecret(message,key){return key?String(message||'').split(key).join('[已隐藏]'):String(message||'')}
 async function discoverAIProviderModels(){
   if(aiProviderModelsBusy)return;const c=accountContext(),providerId=editingAIProviderId,base=$('#aiProviderBase').value.trim(),key=$('#aiProviderKey').value.trim(),seq=++aiProviderModelsSeq,status=$('#aiProviderModelsStatus'),button=$('#aiProviderModelsBtn');
@@ -3285,7 +3289,7 @@ async function discoverAIProviderModels(){
   finally{if(seq===aiProviderModelsSeq&&isCurrentAccount(c)){aiProviderModelsBusy=false;button.disabled=false}}
 }
 async function saveAIProvider(){
-  const body={note:$('#aiProviderNote').value.trim(),base:$('#aiProviderBase').value.trim(),key:$('#aiProviderKey').value.trim(),model:$('#aiProviderModel').value.trim(),reasoning_effort:$('#aiProviderReasoning').value,enabled:$('#aiProviderEnabled').checked};
+  const body={note:$('#aiProviderNote').value.trim(),base:$('#aiProviderBase').value.trim(),key:$('#aiProviderKey').value.trim(),model:$('#aiProviderModel').value.trim(),reasoning_effort:$('#aiProviderReasoning').value,client_profile:$('#aiProviderProfile').value,enabled:$('#aiProviderEnabled').checked};
   if(!body.note||!body.base||!body.model||(!editingAIProviderId&&!body.key))return toast('请填写备注、地址、Key 和模型',1);
   try{await api('/api/ai/providers'+(editingAIProviderId?'/'+editingAIProviderId:''),{method:editingAIProviderId?'PUT':'POST',body:JSON.stringify(body)});closeAIProviderForm();$('#aiTestResult').textContent='AI API 已保存';await loadAIProviders()}
   catch(e){$('#aiTestResult').textContent='保存失败：'+e.message;toast(e.message,1)}
@@ -3301,7 +3305,7 @@ async function mutateAIProvider(id,action){
       const d=await api('/api/ai/providers/'+id+'/test',{method:'POST'});
       aiTestResults[id]='「'+p.note+'」\n'+(d.ok?'连接测试成功':'连接测试失败')+'\n实际回复：'+(d.reply||'（空回复）')+'\n耗时：'+testElapsed(d.elapsed_ms)+(d.ok?'':'\n原因：'+(d.error||'未知'));
       renderAIProviders();
-    }else if(action==='toggle')await api('/api/ai/providers/'+id,{method:'PUT',body:JSON.stringify({note:p.note,base:p.base,key:'',model:p.model,reasoning_effort:p.reasoning_effort||'default',enabled:!p.enabled})});
+    }else if(action==='toggle')await api('/api/ai/providers/'+id,{method:'PUT',body:JSON.stringify({note:p.note,base:p.base,key:'',model:p.model,reasoning_effort:p.reasoning_effort||'default',client_profile:p.client_profile||'none',enabled:!p.enabled})});
     else await api('/api/ai/providers/'+id,{method:'DELETE'});
     if(action!=='test')await loadAIProviders();else await loadAIProviders();
   }catch(e){aiTestResults[id]='「'+p.note+'」\n操作失败：'+e.message;renderAIProviders();$('#aiTestResult').textContent='操作失败：'+e.message;toast(e.message,1)}

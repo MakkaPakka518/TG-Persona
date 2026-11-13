@@ -232,6 +232,35 @@ class AITest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, '思考强度'):
             await payload_for({**base, 'model': 'gpt-x', 'reasoning_effort': 'turbo'})
 
+    async def test_client_profiles_inject_exact_headers_and_none_is_unchanged(self):
+        call = self.b['_call_ai']
+        async def headers_for(cfg):
+            self.calls.clear()
+            await call(cfg, 'x')
+            return self.calls[-1][1]['headers']
+        base = {'base': 'https://relay.invalid/v1', 'key': 'dummy-key', 'model': 'm'}
+        self.assertEqual(await headers_for({**base, 'client_profile': 'none'}),
+                         {'Authorization': 'Bearer dummy-key'})
+        sid = 'ses_' + 'a' * 64
+        oc = await headers_for({**base, 'client_profile': 'opencode', 'client_session_id': sid})
+        self.assertEqual(oc['User-Agent'], 'opencode/1.19.5')
+        self.assertEqual((oc['x-opencode-session-id'], oc['x-session-affinity'], oc['X-Session-Id']),
+                         (sid, sid, sid))
+        codex = await headers_for({**base, 'client_profile': 'codex'})
+        self.assertTrue(codex['User-Agent'].startswith('codex_cli_rs/'))
+        self.assertEqual((codex['originator'], codex['OpenAI-Beta']),
+                         ('codex_cli_rs', 'responses=experimental'))
+        self.assertNotIn('chatgpt-account-id', codex)
+        claude = await headers_for({**base, 'client_profile': 'claude'})
+        self.assertEqual(claude['User-Agent'], 'claude-cli/2.0.0 (external, cli)')
+        self.assertEqual((claude['x-app'], claude['anthropic-version']), ('cli', '2023-06-01'))
+        self.assertEqual(claude['Accept'], 'application/json')
+        for headers in (oc, codex, claude):
+            self.assertEqual(headers['Authorization'], 'Bearer dummy-key')
+            self.assertNotIn('dummy-key', str({k: v for k, v in headers.items() if k != 'Authorization'}))
+        with self.assertRaisesRegex(ValueError, '客户端伪装'):
+            await headers_for({**base, 'client_profile': 'cursor'})
+
     async def test_glm53_assistant_mode_uses_low_reasoning_without_changing_image_calls(self):
         self.b['_call_ai'] = self.b['_call_ai']
         self.b['httpx'] = self.b['httpx']

@@ -513,6 +513,21 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     context.api=async(_p,o)=>{saved=JSON.parse(o.body);return {ok:true}};
     await run("mutateAIProvider('fedcba9876543210','toggle')");assert.strictEqual(saved.reasoning_effort,'max');assert.strictEqual(saved.enabled,false);
   });
+  await test('AI API 客户端伪装保存回填切换与关闭',async()=>{
+    const options=html.match(/<select id="aiProviderProfile"[\s\S]*?<\/select>/)[0];
+    for(const profile of ['none','opencode','codex','claude'])assert(options.includes('value="'+profile+'"'));
+    context.providerFixture=[{id:'0123456789abcdef',note:'中转',base:'https://dummy.invalid/v1',model:'dummy',enabled:true}];
+    run('aiProviders=providerFixture;renderAIProviders()');assert(element('#aiProvidersList').innerHTML.includes('客户端：不伪装'));
+    run("openAIProviderForm('0123456789abcdef')");assert.strictEqual(element('#aiProviderProfile').value,'none');
+    context.providerFixture=[{id:'0123456789abcdef',note:'中转',base:'https://dummy.invalid/v1',model:'dummy',enabled:true,client_profile:'opencode'}];
+    run('aiProviders=providerFixture;renderAIProviders()');assert(element('#aiProvidersList').innerHTML.includes('客户端：opencode'));
+    run("openAIProviderForm('0123456789abcdef')");assert.strictEqual(element('#aiProviderProfile').value,'opencode');
+    let saved;context.api=async(_p,o)=>{saved=JSON.parse(o.body);return {ok:true}};context.loadAIProviders=async()=>{};
+    await run('saveAIProvider()');assert.strictEqual(saved.client_profile,'opencode');
+    run('closeAIProviderForm()');assert.strictEqual(element('#aiProviderProfile').value,'none');
+    context.providerFixture=[{id:'fedcba9876543210',note:'备用',base:'https://dummy.invalid/v1',model:'dummy',enabled:true,client_profile:'codex'}];run('aiProviders=providerFixture');
+    await run("mutateAIProvider('fedcba9876543210','toggle')");assert.strictEqual(saved.client_profile,'codex');assert.strictEqual(saved.enabled,false);
+  });
   await test('单条 AI API 测试结果显示在对应线路卡片并展示回复耗时和错误',async()=>{
     context.providerFixture=[{id:'0123456789abcdef',note:'主线路',base:'https://dummy.invalid/v1',model:'dummy',enabled:true},{id:'fedcba9876543210',note:'备用线路',base:'https://dummy2.invalid/v1',model:'dummy2',enabled:true}];run('aiProviders=providerFixture;renderAIProviders()');
     assert.strictEqual(run('Object.keys(aiTestResults).length'),0);run('renderAIProviders()');

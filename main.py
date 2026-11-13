@@ -574,6 +574,7 @@ def _legacy_ai_config():
 
 
 AI_REASONING_EFFORTS = ("default", "none", "low", "medium", "high", "xhigh", "max")
+AI_CLIENT_PROFILES = ("none", "opencode", "codex", "claude")
 
 
 def _ai_provider_rows(migrate=True):
@@ -591,17 +592,21 @@ def _ai_provider_rows(migrate=True):
                 "base": str(row.get("base") or "").strip(), "key": str(row.get("key") or "").strip(),
                  "model": str(row.get("model") or "").strip(), "enabled": bool(row.get("enabled", True)),
                  "reasoning_effort": row.get("reasoning_effort", "default"),
+                 "client_profile": row.get("client_profile", "none"),
+                 "client_session_id": str(row.get("client_session_id") or ""),
                  "input_tokens": max(0, int(row.get("input_tokens") or 0)),
                  "output_tokens": max(0, int(row.get("output_tokens") or 0))}
         if item["reasoning_effort"] not in AI_REASONING_EFFORTS:
             item["reasoning_effort"] = "default"
+        if item["client_profile"] not in AI_CLIENT_PROFILES:
+            item["client_profile"] = "none"
         if re.fullmatch(r"[a-f0-9]{16}", item["id"]) and item["base"] and item["key"] and item["model"]:
             clean.append(item)
     if not clean and migrate and get_setting("ai_providers_migrated", "0") != "1":
         legacy = _legacy_ai_config()
         if all(legacy.values()):
             clean = [{"id": secrets.token_hex(8), "note": "原有配置", **legacy, "enabled": True,
-                      "reasoning_effort": "default",
+                      "reasoning_effort": "default", "client_profile": "none", "client_session_id": "",
                       "input_tokens": 0, "output_tokens": 0}]
             set_setting("ai_providers", json.dumps(clean, ensure_ascii=False))
         set_setting("ai_providers_migrated", "1")
@@ -619,7 +624,8 @@ def _save_ai_providers(rows):
 
 def _ai_provider_configs():
     return [{"id": row["id"], "note": row["note"], "base": row["base"],
-             "key": row["key"], "model": row["model"], "reasoning_effort": row["reasoning_effort"]}
+             "key": row["key"], "model": row["model"], "reasoning_effort": row["reasoning_effort"],
+             "client_profile": row["client_profile"], "client_session_id": row["client_session_id"]}
              for row in _ai_provider_rows() if row["enabled"]]
 
 
@@ -789,6 +795,36 @@ def _ai_reasoning_params(cfg, assistant_mode=False):
     return {}
 
 
+def _new_client_session_id(profile):
+    if profile == "opencode":
+        return "ses_" + secrets.token_hex(32)
+    return str(uuid.uuid4())
+
+
+def _ai_client_headers(cfg):
+    profile = cfg.get("client_profile", "none")
+    if profile not in AI_CLIENT_PROFILES:
+        raise ValueError("客户端伪装只能为 none、opencode、codex 或 claude")
+    if profile == "none":
+        return {}
+    session_id = str(cfg.get("client_session_id") or "") or _new_client_session_id(profile)
+    if profile == "opencode":
+        # 第三方 provider 分支只带这三个会话头，不额外带自有 provider 的标记。
+        return {"User-Agent": "opencode/1.19.5",
+                "x-opencode-session-id": session_id,
+                "x-session-affinity": session_id,
+                "X-Session-Id": session_id}
+    if profile == "codex":
+        return {"User-Agent": "codex_cli_rs/0.20.0 (Mac OS 15.0; arm64) vscode",
+                "originator": "codex_cli_rs",
+                "OpenAI-Beta": "responses=experimental"}
+    return {"User-Agent": "claude-cli/2.0.0 (external, cli)",
+            "x-app": "cli",
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+            "Accept": "application/json"}
+
+
 async def _call_ai(cfg, content, max_tokens=512, assistant_mode=False, feature="other"):
     if not cfg.get("base") or not cfg.get("key") or not cfg.get("model"):
         raise ValueError("请填写 AI API 地址、密钥和模型名")
@@ -805,8 +841,8 @@ async def _call_ai(cfg, content, max_tokens=512, assistant_mode=False, feature="
                 or reasoning_params.get("reasoning_effort") not in (None, "none"))
     async with httpx.AsyncClient(timeout=90 if assistant_mode or thinking else 30, follow_redirects=False) as client:
         # 不自动重发计费请求；失败由用户明确点击重试。
-        response = await client.post(endpoint,
-            headers={"Authorization": "Bearer " + cfg["key"]}, json=payload)
+        headers = {"Authorization": "Bearer " + cfg["key"], **_ai_client_headers(cfg)}
+        response = await client.post(endpoint, headers=headers, json=payload)
         try:
             data = response.json()
         except (ValueError, TypeError):
@@ -6730,6 +6766,7 @@ class AIProviderInput(BaseModel):
     key: str = Field("", max_length=4096)
     model: str = Field(..., min_length=1, max_length=256)
     reasoning_effort: str = Field("default", max_length=16)
+    client_profile: str = Field("none", max_length=16)
     enabled: bool = True
 
 
@@ -6737,10 +6774,24 @@ def _public_ai_provider(row):
     return {"id": row["id"], "note": row["note"], "base": row["base"],
              "model": row["model"], "enabled": row["enabled"], "key_present": bool(row["key"]),
             "reasoning_effort": row.get("reasoning_effort", "default"),
+            "client_profile": row.get("client_profile", "none"),
              "input_tokens": row["input_tokens"], "output_tokens": row["output_tokens"]}
 
 
 def _validated_ai_provider(body, previous=None):
+    profile = (previous.get("client_profile", "none")
+               if previous and "client_profile" not in body.model_fields_set
+               else body.client_profile)
+    if profile not in AI_CLIENT_PROFILES:
+        raise HTTPException(400, "客户端伪装只能为 none、opencode、codex 或 claude")
+    previous_session = previous.get("client_session_id", "") if previous else ""
+    same_profile = bool(previous) and previous.get("client_profile", "none") == profile
+    if profile == "none":
+        session_id = ""
+    elif same_profile and previous_session:
+        session_id = previous_session
+    else:
+        session_id = _new_client_session_id(profile)
     item = {"id": previous["id"] if previous else secrets.token_hex(8),
             "note": body.note.strip(), "base": body.base.strip(),
             "key": body.key.strip() or (previous["key"] if previous else ""),
@@ -6748,6 +6799,8 @@ def _validated_ai_provider(body, previous=None):
             "reasoning_effort": (previous.get("reasoning_effort", "default")
                                  if previous and "reasoning_effort" not in body.model_fields_set
                                  else body.reasoning_effort),
+            "client_profile": profile,
+            "client_session_id": session_id,
             "input_tokens": previous["input_tokens"] if previous else 0,
             "output_tokens": previous["output_tokens"] if previous else 0}
     if not item["key"]:
