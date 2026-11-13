@@ -272,6 +272,13 @@ class OwnerAITests(unittest.IsolatedAsyncioTestCase):
         self.b['_skill_reference'](120, '-1', '闲聊', used_sink=second)
         self.assertNotEqual(set(second), set(used))
 
+    def test_knowledge_paragraph_ids_are_stable_and_prefixed(self):
+        entries = self.b['_knowledge_paragraph_entries']('第一段知识\n\n第二段知识', self.b['_topic_terms']('知识'))
+        self.assertEqual([entry['id'][:1] for entry in entries], ['k', 'k'])
+        self.assertEqual(len({entry['id'] for entry in entries}), 2)
+        again = self.b['_knowledge_paragraph_entries']('第一段知识\n\n第二段知识', [])
+        self.assertEqual({entry['id'] for entry in entries}, {entry['id'] for entry in again})
+
     def test_group_memory_isolation_and_topic_ranking(self):
         content = self.b['_append_study']('', '- 本群聊电影', chat_id='-1')
         content = self.b['_append_study'](content, '- 另一群秘密话题', chat_id='-2')

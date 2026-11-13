@@ -131,6 +131,32 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.b['_call_ai_any'].await_args.kwargs['provider_ids'],provider)
         self.assertEqual(runtime.client.calls[0].msg_id,9);self.assertIn(('-1',9),runtime.generated_message_ids)
 
+    async def test_memory_usage_records_only_after_real_send(self):
+        db, runtime = self.b['conn'], self.b['get_runtime']()
+        db.execute("INSERT INTO watched_groups VALUES('-1','群',0)")
+        db.commit()
+        provider = await self.provider()
+        with tempfile.TemporaryDirectory() as directory:
+            type(runtime).skill_file = Path(directory) / 'skill.md'
+            self.b['_write_skill'](self.b['_append_skill_memory']('', '- 简短自然的聊天风格', stage='detail'))
+            await self.b['create_ai_flock_job'](self.b['AIFlockJobInput'](
+                name='记账', groups='-1', start_time='09:00', end_time='11:00', prompt='聊天',
+                provider_ids=provider, skill_chars=200))
+            runtime.client.get_messages = AsyncMock(return_value=[message(1, '今天真热')])
+            runtime.client.send_message = AsyncMock(return_value=message(2, out=True))
+            self.b['_call_ai_any'] = AsyncMock(return_value='NO_REPLY')
+            with patch('asyncio.sleep', new=AsyncMock()):
+                await self.b['_run_ai_flock'](-1, '今天真热')
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM memory_refs').fetchone()[0], 0)
+            runtime.ai_flock_last.clear()
+            self.b['_call_ai_any'] = AsyncMock(return_value='确实挺热')
+            with patch('asyncio.sleep', new=AsyncMock()):
+                await self.b['_run_ai_flock'](-1, '今天真热')
+            rows = db.execute("SELECT block_id,used FROM memory_refs WHERE file='skill'").fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0][1], 1)
+            self.assertTrue(rows[0][0].startswith('s'))
+
     async def test_flock_context_and_skill_have_hard_token_budgets(self):
         provider=await self.provider();db=self.b['conn'];db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit()
         await self.b['create_ai_flock_job'](self.b['AIFlockJobInput'](name='任务',groups='-1',start_time='09:00',end_time='11:00',prompt='短聊',provider_ids=provider,context_messages=3,message_chars=50,skill_chars=70,max_tokens=333))
