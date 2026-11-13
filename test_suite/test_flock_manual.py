@@ -87,13 +87,61 @@ class ManualFlockTests(unittest.IsolatedAsyncioTestCase):
             await self.run_test()
         self.assertEqual(caught.exception.status_code, 502)
         self.assertEqual(self.runtime.ai_flock_busy_groups, set())
-        for reply in ('NO_REPLY', '', 'https://invalid.example/path', '/start', '多行\n内容', '长' * 81):
+        for reply in ('NO_REPLY', '', 'https://invalid.example/path', '/start', '长' * 81):
             self.runtime.ai_flock_last.clear()
             self.b['_call_ai_any'] = AsyncMock(return_value=reply)
             result = await self.run_test()
             self.assertFalse(result['sent'])
             self.assertTrue(result['reason'])
         self.runtime.client.send_message.assert_not_awaited()
+
+    async def test_short_multiline_reply_is_normalized_and_sent(self):
+        self.b['_call_ai_any'] = AsyncMock(return_value='今晚吃面\n你们呢')
+        result = await self.run_test()
+        self.assertTrue(result['sent'])
+        self.runtime.client.send_message.assert_awaited_once_with(-1, '今晚吃面 你们呢', parse_mode=None)
+
+    async def test_background_test_returns_before_generation_and_can_resume_status(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def model(*_args, **_kwargs):
+            entered.set()
+            await release.wait()
+            return '后台生成成功'
+        self.b['_call_ai_any'] = AsyncMock(side_effect=model)
+        body = self.b['AIFlockTestInput'](chat_id='-1', text='打招呼')
+        queued = await self.b['queue_ai_flock_test'](self.job, body)
+        self.assertTrue(queued['queued'])
+        self.assertNotIn('_task', queued)
+        await entered.wait()
+        try:
+            progress = await self.b['get_ai_flock_test_status'](self.job)
+            self.assertEqual(progress['run_id'], queued['run_id'])
+            self.assertTrue(progress['running'])
+            self.assertEqual(progress['stage'], 'generating')
+            with self.assertRaises(HTTPException):
+                await self.b['queue_ai_flock_test'](self.job, body)
+        finally:
+            release.set()
+            await self.runtime.ai_flock_tests[str(self.job)]['_task']
+        done = await self.b['get_ai_flock_test_status'](self.job)
+        self.assertTrue(done['sent'])
+        self.assertFalse(done['running'])
+        self.runtime.client.send_message.assert_awaited_once()
+
+    async def test_queue_timeout_is_bounded_and_visible(self):
+        self.b['AI_FLOCK_QUEUE_TIMEOUT'] = .01
+        self.b['_call_ai_any'] = AsyncMock(return_value='不该调用')
+        await self.runtime.ai_flock_lock.acquire()
+        try:
+            with self.assertRaises(HTTPException) as caught:
+                await self.run_test()
+            self.assertIn('排队', str(caught.exception))
+            self.assertTrue(self.runtime.ai_flock_lock.locked())
+        finally:
+            self.runtime.ai_flock_lock.release()
+        self.b['_call_ai_any'].assert_not_awaited()
+        detail = self.db.execute("SELECT detail FROM hits WHERE action='ai_flock'").fetchone()[0]
+        self.assertIn('排队', detail)
 
     async def test_rejects_bad_input_foreign_groups_and_missing_job_before_ai(self):
         self.b['_call_ai_any'] = AsyncMock(return_value='不该发送')

@@ -148,6 +148,71 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         skill_part=prompt.split('字：\n',1)[1].split('\n以下是该水群任务的人格补充',1)[0];self.assertEqual(len(skill_part),70);self.assertNotIn('TAIL_MARKER',prompt)
         self.assertEqual(self.b['_call_ai_any'].await_args.kwargs['max_tokens'],333)
 
+    async def test_automatic_flock_switches_input_only_and_stalled_apis_then_sends_once(self):
+        db, runtime = self.b['conn'], self.b['get_runtime']()
+        db.execute("INSERT INTO watched_groups VALUES('-1','测试群',0)")
+        db.commit()
+        models = ['empty', 'thinking', 'truncated', 'stall', 'bigmodel']
+        providers = [(await self.b['create_ai_provider'](self.b['AIProviderInput'](
+            note=model, base='https://example.invalid/v1', key='fixture-key', model=model)))['provider']['id']
+            for model in models]
+        await self.b['create_ai_provider'](self.b['AIProviderInput'](
+            note='未选线路', base='https://example.invalid/v1', key='fixture-key', model='unselected'))
+        await self.b['create_ai_flock_job'](self.b['AIFlockJobInput'](
+            name='多线路自动水群', groups='-1', start_time='09:00', end_time='11:00',
+            prompt='简短自然', provider_ids=','.join(providers)))
+        calls, cancelled = [], []
+        class Client:
+            def __init__(self, **_kwargs): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *_args): pass
+            async def post(self, _url, **kwargs):
+                model = kwargs['json']['model']
+                calls.append(model)
+                if model == 'stall':
+                    try:
+                        await asyncio.Event().wait()
+                    finally:
+                        cancelled.append(model)
+                content = {'empty': '  ', 'thinking': None, 'truncated': '一半的', 'bigmodel': '确实挺热的'}[model]
+                return SimpleNamespace(status_code=200, json=lambda: {
+                    'choices': [{'message': {'content': content, 'reasoning_content': '还在思考' if model == 'thinking' else ''},
+                                 'finish_reason': 'length' if model == 'truncated' else 'stop'}],
+                    'usage': {'prompt_tokens': 15, 'completion_tokens': 0 if model == 'empty' else 8}})
+        self.b['httpx'] = SimpleNamespace(AsyncClient=Client)
+        self.b['AI_FLOCK_PROVIDER_TIMEOUT'] = .1
+        self.b['AI_FLOCK_TOTAL_TIMEOUT'] = 1
+        with patch('asyncio.sleep', new=AsyncMock()):
+            await self.b['_run_ai_flock'](-1, '今天真热')
+        self.assertEqual(calls, models)
+        self.assertEqual(cancelled, ['stall'])
+        runtime.client.send_message.assert_awaited_once_with(-1, '确实挺热的', parse_mode=None)
+        detail = json.loads(db.execute("SELECT detail FROM hits WHERE action='ai_flock' AND ok=1").fetchone()[0])
+        self.assertEqual(detail['provider_id'], providers[-1])
+        self.assertEqual(len(detail['failures']), 4)
+        self.assertEqual(tuple(db.execute('SELECT input_tokens,output_tokens FROM ai_usage WHERE provider_id=?',
+                                          (providers[0],)).fetchone()), (15, 0))
+        runtime.ai_flock_last.clear()
+        with patch('asyncio.sleep', new=AsyncMock()):
+            await self.b['_run_ai_flock'](-1, '确实热')
+        self.assertEqual(calls, models + ['bigmodel'])
+        self.assertEqual(runtime.client.send_message.await_count, 2)
+
+    def test_style_reference_uses_rules_instead_of_raw_recent_samples(self):
+        runtime = self.b['get_runtime']()
+        with tempfile.TemporaryDirectory() as directory:
+            type(runtime).skill_file = Path(directory) / 'skill.md'
+            content = '# 固定人格\n简短自然\n'
+            content = self.b['_append_skill_memory'](content, 'owner: 原始闲聊' * 3000, stage='recent')
+            content = self.b['_append_skill_memory'](content, '- 口语短句，偶尔幽默', stage='detail')
+            self.b['_write_skill'](content)
+            reference = self.b['_skill_reference'](25000)
+            self.assertIn('固定人格', reference)
+            self.assertIn('口语短句', reference)
+            self.assertNotIn('原始闲聊', reference)
+            self.assertLess(len(reference), 200)
+            self.assertEqual(self.b['_read_skill'](), content)
+
     async def test_learning_filters_batch_skill_permissions_and_upload(self):
         provider=await self.provider();runtime=self.b['get_runtime']();db=self.b['conn']
         db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit()

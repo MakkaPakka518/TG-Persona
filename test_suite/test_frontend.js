@@ -1634,7 +1634,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('学习累计统计区分主人群友和待处理，预算显示不限额',async()=>{
     app.metricsFixture={sample_count:0,learning_metrics:{last_collected:1794529129,today:{owner:{collected:2,learned:2},group:{collected:40,learned:40}},total:{owner:{collected:2,learned:2,pending:0},group:{collected:40,learned:40,pending:0}}}};
     ex('renderLearningMetrics(metricsFixture)');assert.strictEqual(q('#waterAiSkillSamples').textContent,'待学习样本：0');
-    const lines=q('#learningMetrics').children.map(n=>n.textContent);assert(lines.some(v=>v.includes('群友：今日采集 40')));assert(lines.some(v=>v.includes('主人：今日采集 2')));
+    const lines=q('#learningMetrics').children.map(n=>n.textContent+n.children.map(item=>item.textContent).join(''));assert(lines.some(v=>v.includes('群友：今日采集 40')));assert(lines.some(v=>v.includes('主人：今日采集 2')));
     assert(!q('#learningLastCollected').textContent.includes('1794529129'));
     app.budgetFixture=[{label:'全部 AI',used:42,limit:0,paused:false}];ex('renderOwnerAIBudgets(budgetFixture)');assert(q('#ownerBudgetStatus').textContent.includes('不限额'));
   });
@@ -1671,6 +1671,18 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('引用请求切换账号或清空日志后不能恢复旧账号明细',async()=>{
     ex("selectedAccount='trace-old';accountEpoch++;resetLogOpenState()");let done;app.api=()=>new Promise(r=>done=r);const pending=ex('loadFlockTrace(91)');ex("selectedAccount='trace-new';accountEpoch++;resetLogOpenState()");done({references:{study:'旧账号内容'}});await pending;assert.strictEqual(ex('logTraceCache.size'),0);
     app.api=async()=>{throw new Error('读取失败')};await ex('loadFlockTrace(91)');assert.strictEqual(ex('logTraceCache.size'),0);app.api=async()=>({references:{study:'新账号内容'}});await ex('loadFlockTrace(91)');assert(ex('logTraceCache.get("91").text.includes("新账号内容")'));ex('resetLogOpenState()');assert.strictEqual(ex('logTraceCache.size'),0);
+  });
+  await test('后台水群测试提交后切后台不中断，回前台只读取状态',async()=>{
+    ex("selectedAccount='background-test';accountEpoch++;resetWaterAITest();document.visibilityState='visible';watchedGroups=[{chat_id:'-1',name:'我的群'}];waterAIJobs=[{id:9,name:'后台测试',groups:'-1'}];openWaterAITest(9)");q('#waterAiTestText').value='打招呼';const calls=[];
+    app.api=async(p,o)=>{calls.push([p,o]);if(o?.method==='POST')return {queued:true,running:true,run_id:'r1',stage:'queued',chat_id:'-1'};return {running:false,run_id:'r1',stage:'sent',sent:true,reply:'后台测试已完成',chat_id:'-1'}};app.loadWaterAIJobs=async()=>{};
+    await ex('runWaterAITest()');assert(q('#waterAiTestSend').disabled);assert(!q('#waterAiTestClose').disabled);assert.strictEqual(calls.length,1);
+    ex("document.visibilityState='hidden'");await ex('pollWaterAITest()');assert.strictEqual(calls.length,1);
+    ex("document.visibilityState='visible'");await ex('pollWaterAITest()');assert.strictEqual(calls[1][0],'/api/ai/flock/jobs/9/test-status');assert(q('#waterAiTestResult').textContent.includes('后台测试已完成'));assert(!q('#waterAiTestSend').disabled);
+    ex('closeWaterAITest();openWaterAITest(9)');await Promise.resolve();assert.strictEqual(calls.filter(([,o])=>o?.method==='POST').length,1);
+  });
+  await test('群聊总结不限制长度开关可以独立保存和回填',async()=>{
+    ex("selectedAccount='summary-unlimited';accountEpoch++;resetOwnerAIUI()");q('#ownerSummaryUnlimitedEnabled').checked=true;let body;app.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true}};await ex('saveOwnerAISettings()');assert.strictEqual(body.flock_summary_unlimited,1);
+    ex('resetOwnerAIUI()');assert(!q('#ownerSummaryUnlimitedEnabled').checked);app.api=async()=>({settings:{flock_summary_unlimited:'1'}});await ex('loadOwnerAISettings()');assert(q('#ownerSummaryUnlimitedEnabled').checked);
   });
   console.log(`前端回归 ${count} 项全部通过`);
 })().catch(e=>{console.error(e);process.exitCode=1});

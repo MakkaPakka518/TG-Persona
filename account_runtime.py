@@ -93,6 +93,9 @@ class AccountRuntime:
     custom_trigger_task: object = None
     ai_flock_busy_groups: set = field(default_factory=set)
     ai_flock_last: dict = field(default_factory=dict)
+    ai_flock_status: dict = field(default_factory=dict)
+    ai_flock_tests: dict = field(default_factory=dict)
+    ai_flock_provider_retry_at: dict = field(default_factory=dict)
     ai_knowledge_last: dict = field(default_factory=dict)
     ai_flock_blocked: dict = field(default_factory=dict)
     ai_flock_waiting: int = 0
@@ -318,6 +321,9 @@ class AccountRuntime:
             self.ai_flock_busy = False
             self.ai_flock_busy_groups.clear()
             self.ai_flock_last.clear()
+            self.ai_flock_status.clear()
+            self.ai_flock_tests.clear()
+            self.ai_flock_provider_retry_at.clear()
             self.ai_knowledge_last.clear()
             self.ai_flock_blocked.clear()
             self.ai_flock_waiting = 0

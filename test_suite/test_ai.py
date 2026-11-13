@@ -276,6 +276,87 @@ class AITest(unittest.IsolatedAsyncioTestCase):
         await self.b['_call_ai']({'base':'https://open.bigmodel.cn/api/paas/v4','key':'dummy-key','model':'glm-5.3-flash'},'image',20,False)
         self.assertNotIn('thinking',self.calls[-1][1]['json'])
 
+    async def test_relay_keeps_compatible_token_budget_and_summary_can_omit_it(self):
+        cfg = {'base': 'https://example.invalid/v1', 'key': 'dummy-key', 'model': 'gpt-6.1-sol', 'reasoning_effort': 'max'}
+        await self.b['_call_ai'](cfg, '聊天', 500, feature='ai_flock')
+        payload = self.calls[-1][1]['json']
+        self.assertEqual(payload['max_tokens'], 500)
+        self.assertNotIn('max_completion_tokens', payload)
+        await self.b['_call_ai'](cfg, '总结', None, feature='summary')
+        self.assertNotIn('max_completion_tokens', self.calls[-1][1]['json'])
+        self.assertNotIn('max_tokens', self.calls[-1][1]['json'])
+        self.response_data = {'choices': [{'message': {'content': '', 'reasoning_content': '思考内容'}, 'finish_reason': 'length'}]}
+        with self.assertRaisesRegex(RuntimeError, '上限'):
+            await self.b['_call_ai'](cfg, '聊天', 500, feature='ai_flock')
+
+    async def test_summary_unlimited_omits_token_limits_for_all_request_variants(self):
+        for model, assistant in [('plain-model', False), ('gpt-6.1-sol', False), ('glm-5.3-flash', True)]:
+            with self.subTest(model=model):
+                cfg = {'base': 'https://open.bigmodel.cn/api/paas/v4', 'key': 'dummy-key', 'model': model}
+                await self.b['_call_ai'](cfg, '完整总结', None, assistant_mode=assistant, feature='summary')
+                payload = self.calls[-1][1]['json']
+                self.assertNotIn('max_tokens', payload)
+                self.assertNotIn('max_completion_tokens', payload)
+                self.assertEqual(self.client_options['timeout'], 90)
+
+    async def test_reasoning_blocks_are_not_treated_as_final_text(self):
+        cfg = {'base': 'https://example.invalid/v1', 'key': 'dummy-key', 'model': 'm'}
+        for content in ([{'type': 'reasoning', 'text': '只有思考'}], {'text': '错误的正文格式'}):
+            with self.subTest(content=content):
+                self.response_data = {'choices': [{'message': {'content': content}}]}
+                with self.assertRaises(RuntimeError):
+                    await self.b['_call_ai'](cfg, '聊天', feature='ai_flock')
+        self.response_data = {'choices': [{'message': {'content': [
+            {'type': 'reasoning', 'text': '不可发送的思考'}, {'type': 'text', 'text': '正常回复'}]}}]}
+        self.assertEqual(await self.b['_call_ai'](cfg, '聊天', feature='ai_flock'), '正常回复')
+
+    async def test_summary_provider_truncation_tries_backup_instead_of_returning_partial_text(self):
+        ids = []
+        for note in ('首选', '备用'):
+            ids.append((await self.b['create_ai_provider'](self.b['AIProviderInput'](
+                note=note, base='https://example.invalid/v1', key='dummy-key', model=note)))['provider']['id'])
+        original, outer = self.b['httpx'].AsyncClient, self
+        complete = '完整的讨论结论。' * 300 + '总结完毕'
+        class Responses(original):
+            async def post(self, url, **kwargs):
+                await super().post(url, **kwargs)
+                first = len(outer.calls) == 1
+                return SimpleNamespace(status_code=200, json=lambda: {'choices': [{
+                    'message': {'content': '只有一半的总结' if first else complete},
+                    'finish_reason': 'length' if first else 'stop'}],
+                    'usage': {'prompt_tokens': 10, 'completion_tokens': 20}})
+        self.b['httpx'] = SimpleNamespace(AsyncClient=Responses)
+        trace = {}
+        answer = await self.b['_call_ai_any']('完整总结', max_tokens=None, provider_ids=','.join(ids),
+                                              feature='summary', trace=trace)
+        self.assertEqual(answer, complete)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn('模型服务商', trace['failures'][0])
+        self.assertEqual(self.b['conn'].execute("SELECT SUM(input_tokens+output_tokens) FROM ai_usage WHERE feature='summary'").fetchone()[0], 60)
+
+    async def test_reasoning_only_response_switches_to_selected_backup(self):
+        ids = []
+        for note in ('首选', '备用'):
+            ids.append((await self.b['create_ai_provider'](self.b['AIProviderInput'](
+                note=note, base='https://example.invalid/v1', key='dummy-key', model=note)))['provider']['id'])
+        original = self.b['httpx'].AsyncClient
+        outer = self
+        class Responses(original):
+            async def post(self, url, **kwargs):
+                response = await super().post(url, **kwargs)
+                if len(outer.calls) == 1:
+                    return SimpleNamespace(status_code=200, json=lambda: {'choices': [
+                        {'message': {'content': None, 'reasoning_content': '只有思考没有正文'}, 'finish_reason': 'stop'}]})
+                return response
+        self.b['httpx'] = SimpleNamespace(AsyncClient=Responses)
+        trace = {}
+        result = await self.b['_call_ai_any']('聊聊天', provider_ids=','.join(ids), feature='ai_flock',
+                                             validate=self.b['_flock_reply'], trace=trace)
+        self.assertEqual(result, '测试成功')
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(trace['provider_id'], ids[1])
+        self.assertIn('没有最终正文', trace['failures'][0])
+
 
 if __name__ == '__main__':
     unittest.main()

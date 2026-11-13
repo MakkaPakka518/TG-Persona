@@ -248,10 +248,18 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
     async def test_owner_settings_memory_and_traces_are_account_scoped(self):
         aid = await self.create()
         root_settings = {'flock_correction_enabled': 1, 'flock_correction_keywords': '改正',
-                         'flock_owner_pause_enabled': 1, 'flock_daily_total_tokens': 1234}
+                         'flock_owner_pause_enabled': 1, 'flock_daily_total_tokens': 1234,
+                         'flock_summary_unlimited': 1}
         response = await self.req('PUT', '/api/ai/flock/owner-settings', 'default', json=root_settings)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual((await self.req('GET', '/api/ai/flock/owner-settings', aid)).json()['settings']['flock_correction_enabled'], '0')
+        self.assertEqual((await self.req('GET', '/api/ai/flock/owner-settings', aid)).json()['settings']['flock_summary_unlimited'], '0')
+        self.assertEqual((await self.req('GET', '/api/ai/flock/owner-settings', 'default')).json()['settings']['flock_summary_unlimited'], '1')
+        self.assertEqual((await self.req('PUT', '/api/ai/flock/owner-settings', 'default', json={'flock_owner_pause_minutes': 5})).status_code, 200)
+        self.assertEqual((await self.req('GET', '/api/ai/flock/owner-settings', 'default')).json()['settings']['flock_summary_unlimited'], '1')
+        self.assertEqual((await self.req('PUT', '/api/ai/flock/owner-settings', 'default', json={'flock_summary_unlimited': 2})).status_code, 422)
+        self.assertEqual((await self.req('PUT', '/api/ai/flock/owner-settings', 'default', json={'flock_summary_unlimited': 0})).status_code, 200)
+        self.assertEqual((await self.req('GET', '/api/ai/flock/owner-settings', 'default')).json()['settings']['flock_summary_unlimited'], '0')
         for owner, content in [('default', '根账号记忆'), (aid, '小号记忆')]:
             self.assertEqual((await self.req('PUT', '/api/ai/flock/study', owner, json={'content': content})).status_code, 200)
             listed = (await self.req('GET', '/api/ai/flock/memory?file=study', owner)).json()
@@ -288,7 +296,11 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.main._call_ai_any.assert_not_awaited()
         response = await self.req('POST', route, aid, json={'chat_id': '-1002', 'text': '打个招呼'})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertTrue(response.json()['sent'])
+        self.assertTrue(response.json()['queued'])
+        await self.rt(aid).ai_flock_tests['1']['_task']
+        status = await self.req('GET', '/api/ai/flock/jobs/1/test-status', aid)
+        self.assertTrue(status.json()['sent'])
+        self.assertFalse((await self.req('GET', '/api/ai/flock/jobs/1/test-status', 'default')).json()['running'])
         self.rt(aid).client.send_message.assert_awaited_once_with(-1002, '这是模型生成的问候', parse_mode=None)
         self.rt().client.send_message.assert_not_awaited()
         self.http.cookies.clear()

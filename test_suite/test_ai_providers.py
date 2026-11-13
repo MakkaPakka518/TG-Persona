@@ -1,5 +1,6 @@
 """多 AI API：迁移、密钥隔离、轮询、故障切换和 Token 统计。"""
 import unittest
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -114,6 +115,90 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
         calls.clear()
         self.assertEqual(await self.b['_call_ai_any']('hello', provider_ids=second), 'ok')
         self.assertEqual(calls, [second])
+
+    async def test_flock_slow_and_invalid_provider_fallback_only_within_selected_pool(self):
+        first = (await self.b['create_ai_provider'](self.body(note='慢线路')))['provider']['id']
+        second = (await self.b['create_ai_provider'](self.body(note='备用')))['provider']['id']
+        await self.b['create_ai_provider'](self.body(note='未选中'))
+        self.b['AI_FLOCK_PROVIDER_TIMEOUT'] = .01
+        self.b['AI_FLOCK_TOTAL_TIMEOUT'] = .2
+        calls = []
+        async def slow(cfg, *_args):
+            calls.append(cfg['id'])
+            if cfg['id'] == first:
+                await asyncio.Event().wait()
+            return '正常回复'
+        self.b['_call_ai'] = slow
+        trace = {}
+        reply = await self.b['_call_ai_any']('聊聊天', provider_ids=first+','+second, feature='ai_flock',
+                                            validate=self.b['_flock_reply'], trace=trace)
+        self.assertEqual(reply, '正常回复')
+        self.assertEqual(calls, [first, second])
+        self.assertIn('超时', trace['failures'][0])
+        self.b['_ai_rr'].clear()
+        self.b['get_runtime']().ai_flock_provider_retry_at.clear()
+        calls.clear()
+        async def invalid(cfg, *_args):
+            calls.append(cfg['id'])
+            return '长' * 100 if cfg['id'] == first else '简短\n回复'
+        self.b['_call_ai'] = invalid
+        self.assertEqual(await self.b['_call_ai_any']('聊聊天', provider_ids=first+','+second,
+            feature='ai_flock', validate=self.b['_flock_reply']), '简短 回复')
+        self.assertEqual(calls, [first, second])
+        calls.clear()
+        with self.assertRaisesRegex(RuntimeError, '没有可切换的备用线路'):
+            await self.b['_call_ai_any']('聊聊天', provider_ids=first, feature='ai_flock', validate=self.b['_flock_reply'])
+        self.assertEqual(calls, [first])
+
+    async def test_flock_reserves_time_for_healthy_provider_after_two_stalled_providers(self):
+        ids = [(await self.b['create_ai_provider'](self.body(note=note)))['provider']['id']
+               for note in ('不出正文一', '不出正文二', '正常线路')]
+        self.b['AI_FLOCK_PROVIDER_TIMEOUT'] = .08
+        self.b['AI_FLOCK_TOTAL_TIMEOUT'] = .09
+        calls, cancelled = [], []
+        async def request(cfg, *_args):
+            calls.append(cfg['id'])
+            if cfg['id'] != ids[-1]:
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.append(cfg['id'])
+            return '备用线路回复'
+        self.b['_call_ai'] = request
+        trace = {}
+        answer = await self.b['_call_ai_any']('聊天', provider_ids=','.join(ids), feature='ai_flock', trace=trace)
+        self.assertEqual(answer, '备用线路回复')
+        self.assertEqual(calls, ids)
+        self.assertEqual(cancelled, ids[:2])
+        self.assertEqual(len(trace['failures']), 2)
+
+    async def test_recently_failed_flock_provider_is_deprioritized_then_can_recover(self):
+        bad = (await self.b['create_ai_provider'](self.body(note='故障')))['provider']['id']
+        good = (await self.b['create_ai_provider'](self.body(note='正常')))['provider']['id']
+        calls = []
+        async def request(cfg, *_args):
+            calls.append(cfg['id'])
+            return '' if cfg['id'] == bad else '正常回复'
+        self.b['_call_ai'] = request
+        for _ in range(3):
+            self.assertEqual(await self.b['_call_ai_any']('聊天', provider_ids=bad+','+good,
+                feature='ai_flock', validate=self.b['_flock_reply']), '正常回复')
+        self.assertEqual(calls, [bad, good, good, good])
+        self.b['get_runtime']().ai_flock_provider_retry_at[bad] = 0
+        self.b['_ai_rr'].clear()
+        self.b['_call_ai'] = AsyncMock(return_value='恢复后的回复')
+        self.assertEqual(await self.b['_call_ai_any']('聊天', provider_ids=bad+','+good,
+            feature='ai_flock', validate=self.b['_flock_reply']), '恢复后的回复')
+        self.assertEqual(self.b['_call_ai'].await_args.args[0]['id'], bad)
+        self.assertNotIn(bad, self.b['get_runtime']().ai_flock_provider_retry_at)
+
+    async def test_flock_explicit_no_reply_does_not_force_provider_fallback(self):
+        first = (await self.b['create_ai_provider'](self.body(note='主线路')))['provider']['id']
+        second = (await self.b['create_ai_provider'](self.body(note='备用')))['provider']['id']
+        self.b['_call_ai'] = AsyncMock(return_value='NO_REPLY')
+        result = await self.b['_call_ai_any']('聊聊天', provider_ids=first+','+second, feature='ai_flock', validate=self.b['_flock_reply'])
+        self.assertEqual(result, 'NO_REPLY')
+        self.b['_call_ai'].assert_awaited_once()
 
     async def test_all_fail_error_is_redacted_and_provider_limit_validates(self):
         await self.b['create_ai_provider'](self.body())

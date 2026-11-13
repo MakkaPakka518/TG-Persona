@@ -59,6 +59,7 @@ class OwnerAITests(unittest.IsolatedAsyncioTestCase):
         settings = await self.b['get_owner_ai_settings']()
         self.assertEqual(settings['settings']['flock_correction_enabled'], '0')
         self.assertEqual(settings['settings']['flock_summary_enabled'], '0')
+        self.assertEqual(settings['settings']['flock_summary_unlimited'], '0')
         self.assertEqual(settings['settings']['flock_owner_pause_enabled'], '0')
         self.assertTrue(all(item['limit'] == 0 for item in settings['budgets']))
 
@@ -132,6 +133,11 @@ class OwnerAITests(unittest.IsolatedAsyncioTestCase):
         prompt = self.b['_call_ai_any'].await_args.args[0]
         self.assertIn('今晚讨论电影', prompt)
         self.assertNotIn('旧消息', prompt)
+        self.assertIn('200–400 字', prompt)
+        self.assertIn('3–5 个短要点', prompt)
+        self.assertIn('不逐条复述', prompt)
+        self.assertIn('最多 800 字', prompt)
+        self.assertEqual(self.b['_call_ai_any'].await_args.kwargs['max_tokens'], 2500)
         self.assertIn('群聊摘要', event.reply.await_args.args[0])
         self.assertEqual(event.reply.await_args.kwargs['parse_mode'], None)
 
@@ -144,6 +150,45 @@ class OwnerAITests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(self.b['_flock_owner_paused']('-2'))
         with patch.object(self.b['time'], 'time', return_value=10421):
             self.assertFalse(self.b['_flock_owner_paused']('-1'))
+
+    async def test_unlimited_summary_does_not_slice_and_sends_all_parts(self):
+        await self.provider()
+        self.b['set_setting']('flock_summary_enabled', '1')
+        self.b['set_setting']('flock_summary_unlimited', '1')
+        now = datetime.now(timezone.utc)
+        self.runtime.client.get_messages.return_value = [SimpleNamespace(id=2, date=now, out=False,
+            raw_text='群里讨论了网络方案', get_sender=AsyncMock(return_value=SimpleNamespace(bot=False)))]
+        answer = ('群友讨论网络方案。' * 250 + '\n') * 2 + '😀' * 1800 + '完整总结结尾'
+        self.b['_call_ai_any'] = AsyncMock(return_value=answer)
+        event = self.event('总结群聊')
+        event.reply.side_effect = [SimpleNamespace(id=mid, chat_id=-1) for mid in range(1000, 1010)]
+        self.b['conn'].execute("INSERT INTO owner_ai_commands VALUES('-1',100,'summary','running')")
+        await self.b['_run_owner_ai_command'](event, 'summary', '')
+        self.assertIsNone(self.b['_call_ai_any'].await_args.kwargs['max_tokens'])
+        self.assertNotIn('最多 800 字', self.b['_call_ai_any'].await_args.args[0])
+        parts = [call.args[0] for call in event.reply.await_args_list]
+        self.assertGreater(len(parts), 1)
+        self.assertTrue(''.join(parts).endswith(answer))
+        self.assertTrue(all(len(part.encode('utf-16-le')) // 2 <= 4096 for part in parts))
+        for index, part in enumerate(parts):
+            self.assertTrue(self.b['_is_generated_message']('-1', 1000 + index, part))
+            row = self.b['conn'].execute("SELECT kind FROM generated_messages WHERE chat_id='-1' AND message_id=?",
+                                         (1000 + index,)).fetchone()
+            self.assertEqual(row[0], 'summary')
+
+    async def test_summary_fits_one_telegram_message_without_local_slicing(self):
+        await self.provider()
+        self.b['set_setting']('flock_summary_enabled', '1')
+        self.runtime.client.get_messages.return_value = [SimpleNamespace(id=2, date=datetime.now(timezone.utc),
+            raw_text='群里讨论网络方案', get_sender=AsyncMock(return_value=SimpleNamespace(bot=False)))]
+        answer = '讨论结论。' * 650 + '😀' * 300 + '完整结尾'
+        self.b['_call_ai_any'] = AsyncMock(return_value=answer)
+        event = self.event('总结群聊')
+        await self.b['_run_owner_ai_command'](event, 'summary', '')
+        event.reply.assert_awaited_once()
+        sent = event.reply.await_args.args[0]
+        self.assertTrue(sent.endswith(answer))
+        self.assertLessEqual(len(sent.encode('utf-16-le')) // 2, 4096)
 
     async def test_correction_and_summary_do_not_start_or_extend_chat_pause(self):
         await self.provider()
@@ -236,6 +281,10 @@ class OwnerAITests(unittest.IsolatedAsyncioTestCase):
             await self.b['_call_ai'](cfg, 'x', feature='learning')
         self.b['_call_ai_request'].assert_not_awaited()
         self.assertEqual(await self.b['_call_ai'](cfg, 'x', feature='ai_flock'), 'ok')
+        self.b['set_setting']('flock_summary_unlimited', '1')
+        self.b['set_setting']('flock_daily_total_tokens', '10')
+        with self.assertRaises(self.b['AIBudgetExceeded']):
+            await self.b['_call_ai'](cfg, '总结', None, feature='summary')
         self.b['_beijing_now'] = lambda: datetime.now(timezone.utc) + timedelta(days=2)
         self.assertEqual(await self.b['_call_ai'](cfg, 'x', feature='learning'), 'ok')
 
