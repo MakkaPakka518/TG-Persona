@@ -1370,7 +1370,7 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="aiProviderNote">备注</label><input type="text" id="aiProviderNote" maxlength="80" placeholder="如：主线路、GLM 备用">
           <label for="aiProviderBase">API 地址（OpenAI 兼容）</label><input type="url" id="aiProviderBase" maxlength="2048" placeholder="https://api.openai.com/v1" oninput="clearAIProviderModelChoices()">
           <label for="aiProviderKey">API Key</label><input type="password" id="aiProviderKey" maxlength="4096" autocomplete="new-password" placeholder="sk-..." oninput="clearAIProviderModelChoices()">
-          <label for="aiProviderModel">模型</label><div class="water-ai-model-row"><input type="text" id="aiProviderModel" list="aiProviderModelOptions" maxlength="256" placeholder="gpt-4o-mini"><button class="ghost" type="button" id="aiProviderModelsBtn" onclick="discoverAIProviderModels()">获取模型</button></div>
+          <label for="aiProviderModel">模型</label><div class="water-ai-model-row"><input type="text" id="aiProviderModel" list="aiProviderModelOptions" maxlength="256" placeholder="gpt-4o-mini" onkeydown="if(event.key==='Escape')hideAIProviderModelList()"><button class="ghost" type="button" id="aiProviderModelsBtn" onclick="discoverAIProviderModels()">获取模型</button></div>
           <datalist id="aiProviderModelOptions"></datalist><select id="aiProviderModelList" class="model-choice-list hidden" size="10" aria-label="获取到的模型列表" onchange="selectAIProviderModel()"></select><div id="aiProviderModelsStatus" class="hint" role="status" aria-live="polite"></div>
           <label for="aiProviderReasoning">思考强度</label>
           <select id="aiProviderReasoning" aria-describedby="aiProviderReasoningHint"><option value="default">模型默认</option><option value="none">关闭（none）</option><option value="low">低（low）</option><option value="medium">中（medium）</option><option value="high">高（high）</option><option value="xhigh">极高（xhigh）</option><option value="max">最高（max）</option></select>
@@ -3269,7 +3269,9 @@ function openAIProviderForm(id=null){
   $('#aiProviderForm').classList.remove('hidden');$('#aiProviderNote').focus();$('#aiProviderForm').scrollIntoView({behavior:'smooth',block:'center'});
 }
 function clearAIProviderModelChoices(invalidate=true){if(invalidate){aiProviderModelsSeq++;aiProviderModelsBusy=false}$('#aiProviderModelOptions').replaceChildren();$('#aiProviderModelList').replaceChildren();$('#aiProviderModelList').classList.add('hidden');$('#aiProviderModelsStatus').textContent='';$('#aiProviderModelsBtn').disabled=false}
-function selectAIProviderModel(){const value=$('#aiProviderModelList').value;if(!value)return;$('#aiProviderModel').value=value;$('#aiProviderModelsStatus').textContent='已选择模型：'+value}
+function hideAIProviderModelList(){$('#aiProviderModelList').classList.add('hidden')}
+if(document.addEventListener)document.addEventListener('click',e=>{const list=$('#aiProviderModelList');if(list.classList.contains('hidden'))return;if(e.target===list||e.target===$('#aiProviderModel')||e.target===$('#aiProviderModelsBtn'))return;hideAIProviderModelList()},true)
+function selectAIProviderModel(){const value=$('#aiProviderModelList').value;if(!value)return;$('#aiProviderModel').value=value;$('#aiProviderModelsStatus').textContent='已选择模型：'+value;hideAIProviderModelList()}
 function closeAIProviderForm(){aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=null;$('#aiProviderForm').classList.add('hidden');$('#aiProviderKey').value='';$('#aiProviderReasoning').value='default';$('#aiProviderProfile').value='none';clearAIProviderModelChoices(false)}
 function redactProviderSecret(message,key){return key?String(message||'').split(key).join('[已隐藏]'):String(message||'')}
 async function discoverAIProviderModels(){
