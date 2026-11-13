@@ -33,11 +33,15 @@ class CustomWorkflowValidationTests(unittest.TestCase):
                          ["send","wait","click","wait_reply","extract","captcha"])
         self.assertEqual(steps[0], {"t":"send","to":"target","text":"/start","reply":False})
         self.assertTrue(steps[2]["fresh"])
+        self.assertEqual(steps[2]["mode"], "script")
+        self.assertEqual(parse_steps([{"t":"click","text":"Next","ai":True}])[0]["mode"], "ai")
+        self.assertEqual(parse_steps([{"t":"click","text":"Next","mode":"fallback"}])[0]["mode"], "fallback")
         self.assertEqual(steps[5]["send_to"], "target")
         for bad in ([{"t":"send","v":"/start"}], [{"t":"until","success":"done"}],
                     [{"t":"send","text":""}], [{"t":"extract","regex":"[","save":"x"}],
                     [{"t":"extract","regex":"x","save":"not valid"}],
-                    [{"t":"wait","ms":True}], [{"t":"click","unknown":1}], []):
+                    [{"t":"wait","ms":True}], [{"t":"click","unknown":1}],
+                    [{"t":"click","mode":"invalid"}], []):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 canonical_steps(bad)
 

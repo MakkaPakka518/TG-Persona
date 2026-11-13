@@ -722,6 +722,52 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(direct),{'_send_generated_message'})
         self.assertGreaterEqual(SOURCE.read_text().count('_event_generated_message(event,'),3)
 
+    async def test_button_modes_script_ai_and_fallback(self):
+        await self.b['create_ai_provider'](self.b['AIProviderInput'](
+            note='按钮 AI', base='https://example.invalid/v1', key='fixture-key', model='m'))
+        first = SimpleNamespace(text='普通功能', click=AsyncMock())
+        wanted = SimpleNamespace(text='立即签到', click=AsyncMock())
+        buttons = [[first, wanted]]
+        self.b['_call_ai_any'] = AsyncMock(return_value='立即签到')
+        selected = await self.b['_select_btn_mode'](buttons, '签到', mode='script')
+        self.assertIs(selected, wanted)
+        self.b['_call_ai_any'].assert_not_awaited()
+        selected = await self.b['_select_btn_mode'](buttons, '不存在', mode='ai', hint='签到任务')
+        self.assertIs(selected, wanted)
+        self.b['_call_ai_any'].assert_awaited_once()
+        self.b['_call_ai_any'].reset_mock()
+        selected = await self.b['_select_btn_mode'](buttons, '签到', mode='fallback')
+        self.assertIs(selected, wanted)
+        self.b['_call_ai_any'].assert_not_awaited()
+        selected = await self.b['_select_btn_mode'](buttons, '不存在', mode='fallback')
+        self.assertIs(selected, wanted)
+        self.b['_call_ai_any'].assert_awaited_once()
+        self.b['_call_ai_any'].reset_mock()
+        cache = {}
+        await self.b['_select_btn_mode'](buttons, '不存在', mode='ai', ai_cache=cache)
+        await self.b['_select_btn_mode'](buttons, '不存在', mode='ai', ai_cache=cache)
+        self.b['_call_ai_any'].assert_awaited_once()
+
+    async def test_replay_is_read_only_and_reports_ai_fallback(self):
+        await self.b['create_ai_provider'](self.b['AIProviderInput'](
+            note='按钮 AI', base='https://example.invalid/v1', key='fixture-key', model='m'))
+        aid = await self.create(name='回放签到', target='@dummy', command='/sign', click_btn=1,
+                                btn_text='签到', button_mode='fallback')
+        button = SimpleNamespace(text='Check now', click=AsyncMock())
+        replay_message = message(8, '请选择功能', buttons=[[button]])
+        self.b['client'] = SimpleNamespace(get_messages=AsyncMock(return_value=[replay_message]),
+                                           send_message=AsyncMock())
+        self.b['resolve_entity'] = AsyncMock(return_value='entity')
+        self.b['_call_ai_any'] = AsyncMock(side_effect=AssertionError('replay must not call AI'))
+        result = await self.b['replay_auto'](aid)
+        self.assertTrue(result['dry_run'])
+        self.assertTrue(result['sources'][0]['messages'][0]['ai_needed'])
+        self.assertEqual(result['sources'][0]['messages'][0]['script_match'], '')
+        self.assertIn('未发送', result['notice'])
+        self.b['client'].send_message.assert_not_awaited()
+        button.click.assert_not_awaited()
+        self.b['_call_ai_any'].assert_not_awaited()
+
     async def test_db_migration_adds_attempt_and_preserves_legacy_success(self):
         aid = await self.create()
         self.b['conn'].execute('UPDATE automations SET last_at=?,last_status=? WHERE id=?', ('2026-10-30', 'running', aid))
@@ -735,6 +781,7 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.assertIn('signin_recognition_mode', a.keys())
         self.assertIn('signin_image_prompt', a.keys())
         self.assertIn('signin_image_action', a.keys())
+        self.assertIn('button_mode', a.keys())
 
 
 if __name__ == '__main__':

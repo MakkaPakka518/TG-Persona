@@ -141,7 +141,7 @@ def canonical_steps(value):
     schemas = {
         "send": {"t", "to", "text", "reply"},
         "wait": {"t", "ms"},
-        "click": {"t", "to", "text", "emoji", "index", "any", "ai", "fresh", "timeout_ms"},
+        "click": {"t", "to", "text", "emoji", "index", "any", "ai", "mode", "fresh", "timeout_ms"},
         "wait_reply": {"t", "from", "success", "fail", "regex", "timeout_ms", "save"},
         "extract": {"t", "from", "regex", "group", "save"},
         "captcha": {"t", "from", "length", "send_to", "template"},
@@ -158,12 +158,16 @@ def canonical_steps(value):
         elif kind == "wait":
             step = {"t": kind, "ms": _integer(raw.get("ms", 1000), "wait ms", 0, 3600000)}
         elif kind == "click":
+            legacy_ai = _boolean(raw.get("ai", False), "click ai")
+            mode = _string(raw.get("mode", "ai" if legacy_ai else "script"), "click mode", 16)
+            if mode not in ("script", "ai", "fallback"):
+                raise ValueError("click mode must be script, ai, or fallback")
             step = {"t": kind, "to": _destination(raw.get("to", "target"), "click to"),
                     "text": _string(raw.get("text", ""), "click text", 1024),
                     "emoji": _string(raw.get("emoji", ""), "click emoji", 128),
                     "index": _integer(raw.get("index", 0), "click index", 0, 100),
                     "any": _boolean(raw.get("any", False), "click any"),
-                    "ai": _boolean(raw.get("ai", False), "click ai"),
+                    "ai": mode == "ai", "mode": mode,
                     "fresh": _boolean(raw.get("fresh", True), "click fresh"),
                     "timeout_ms": _integer(raw.get("timeout_ms", 30000), "click timeout_ms", 1, 3600000)}
         elif kind == "wait_reply":
@@ -190,7 +194,7 @@ def canonical_steps(value):
                     "length": _integer(raw.get("length", 4), "captcha length", 1, 16),
                     "send_to": _destination(raw.get("send_to", "target"), "captcha send_to"),
                     "template": _string(raw.get("template", ""), "captcha template", MAX_TEXT)}
-        if kind == "click" and step["ai"] and any("{credential." in step[field]
+        if kind == "click" and step["mode"] != "script" and any("{credential." in step[field]
                                                      for field in ("to", "text", "emoji")):
             raise ValueError("AI click steps cannot use credential variables")
         result.append(step)

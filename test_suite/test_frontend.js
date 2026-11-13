@@ -141,7 +141,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     element('#trClosedRetry').checked=true;element('#trClosedKeywords').value='注册已关闭';element('#trClosedInterval').value='7';
     let body;context.api=async(_path,options)=>{body=JSON.parse(options.body);return {}};
     await run("saveAuto('scheduled_register')");
-    assert.deepStrictEqual(JSON.parse(JSON.stringify(body)),{type:'scheduled_register',name:'限时注册',scheduled_at:'2026-10-30T09:00:01',target:'@dummy_bot',command:'/start',click_btn:1,btn_text:'开始注册',history_first:1,fail_kw:'注册已关闭',poll_interval:7,keywords:'请输入注册码',reply_text:'TEST-CODE',success_kw:'注册成功',result_timeout:45,retries:0});
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(body)),{type:'scheduled_register',name:'限时注册',scheduled_at:'2026-10-30T09:00:01',target:'@dummy_bot',command:'/start',click_btn:1,btn_text:'开始注册',button_mode:'script',history_first:1,fail_kw:'注册已关闭',poll_interval:7,keywords:'请输入注册码',reply_text:'TEST-CODE',success_kw:'注册成功',result_timeout:45,retries:0});
   });
   await test('签到表单包含两段中文秒数标签、默认值及范围步进',async()=>{
     const form=html.slice(html.indexOf('id="af-signin"'),html.indexOf('id="af-grabcodes"'));
@@ -277,7 +277,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
       for(const id of ['#sIsChat','#sClickBtn'])element(id).checked=true;element('#sRecognitionMode').value='captcha';
       let request;context.api=async(p,o)=>{request=[p,o];return {}};await run("saveAuto('signin')");
       assert.strictEqual(request[0],editing?'/api/autos/42':'/api/autos');assert.strictEqual(request[1].method,editing?'PUT':'POST');
-      const expected={type:'signin',name:'完整任务',target:'@dummy_bot',command:'/checkin',icon_url:'https://dummy.invalid/icon.png',is_chat:1,win_start:'09:00',win_end:'10:00',click_btn:1,btn_text:'签到',btn_emoji:'✅',click_times:3,click_interval:500,refresh_buttons:0,command_delay:0,button_delay:2.7,result_delay:delay,result_timeout:timeout,success_kw:'成功',fail_kw:'明确失败',points_pat:'积分:(\\d+)',retries:0,signin_recognition_mode:'captcha',signin_image_prompt:run('DEFAULT_SIGNIN_IMAGE_PROMPT'),signin_image_action:'reply',signin_captcha:1};
+      const expected={type:'signin',name:'完整任务',target:'@dummy_bot',command:'/checkin',icon_url:'https://dummy.invalid/icon.png',is_chat:1,win_start:'09:00',win_end:'10:00',click_btn:1,btn_text:'签到',btn_emoji:'✅',click_times:3,click_interval:500,refresh_buttons:0,button_mode:'script',command_delay:0,button_delay:2.7,result_delay:delay,result_timeout:timeout,success_kw:'成功',fail_kw:'明确失败',points_pat:'积分:(\\d+)',retries:0,signin_recognition_mode:'captcha',signin_image_prompt:run('DEFAULT_SIGNIN_IMAGE_PROMPT'),signin_image_action:'reply',signin_captcha:1};
       if(editing)expected.enabled=0;assert.deepStrictEqual(JSON.parse(request[1].body),expected);
     }
   });
@@ -744,7 +744,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(ex("stepIssue([{t:'captcha',from:'last.text',length:'4',send_to:'',template:'{code}'}],true)").includes('第 1 步：数值字段必须是整数'));
     assert(ex("stepIssue([{...STEP_HINTS.click,timeout_ms:0}],true)").includes('等待上限'));
     assert(ex("stepIssue([{...STEP_HINTS.extract,regex:'(.)',save:'bad name'}],true)").includes('变量名'));
-    assert(ex("stepIssue([{...STEP_HINTS.click,ai:true,text:'{credential.secret}'}],true)").includes('AI 选按钮'));
+    assert(ex("stepIssue([{...STEP_HINTS.click,ai:true,mode:'ai',text:'{credential.secret}'}],true)").includes('AI 选按钮'));
     assert(ex("triggerIssue({mode:'schedule',at:'2026-02-30T09:00:00'})").includes('日期无效'));
     assert.throws(()=>ex("parseSteps(JSON.stringify(Array.from({length:51},()=>({t:'wait',ms:0}))))"),/50/);
     ex("setVisualSteps(JSON.stringify(Array.from({length:50},()=>({t:'wait',ms:0}))));fillStep('wait')");assert.strictEqual(JSON.parse(q('#cSteps').value).length,50);
@@ -878,6 +878,15 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     app.window.confirm=()=>true;app.api=async(p,o)=>{requests.push([p,o]);return {ok:true,tested:true}};app.loadAutos=async()=>{};
     await ex('testAuto(77)');assert.deepStrictEqual(requests.map(x=>x[0]),['/api/autos/77/test']);assert.strictEqual(requests[0][1].method,'POST');assert.strictEqual(ex('autoTestBusy.size'),0);app.window.confirm=()=>false;
   });
+  await test('按钮三模式保存回填且只读试运行不要求确认',async()=>{
+    for(const id of ['sButtonMode','trButtonMode','brButtonMode','lkButtonMode','crButtonMode','pButtonMode'])assert(html.includes('id="'+id+'"'));
+    assert(html.includes('AI 模式')&&html.includes('AI 兜底')&&html.includes('脚本模式（默认）'));
+    ex("selectedAccount='replay';accountEpoch++;autos=[{id:61,type:'signin',name:'回放签到',enabled:1,target:'@bot',button_mode:'fallback'}];autoReplayBusy.clear();autoReplayResults.clear()");
+    const requests=[];app.api=async(p,o)=>{requests.push([p,o]);return {ok:true,dry_run:true,task:'回放签到',type:'signin',button_mode:'fallback',plan:['发送签到指令','按fallback模式选择按钮'],sources:[{target:'@bot',messages:[{id:8,text:'请选择功能',buttons:['Check now'],script_match:'',ai_needed:true,trigger_match:null}]}],notice:'只读试运行未发送消息、未点击按钮、未调用 AI'}};
+    await ex("replayAuto(61,accountContext())");assert.strictEqual(requests[0][0],'/api/autos/61/replay');assert.strictEqual(requests[0][1].method,'POST');assert(ex('autoReplayResults.get(61)').includes('执行时需要 AI'));assert(ex('autoReplayResults.get(61)').includes('未调用 AI'));assert.strictEqual(ex('autoReplayBusy.size'),0);
+    ex("watchedGroups=[];aiProviders=[{id:'0123456789abcdef',enabled:true}];editAuto=null;cancelAutoEdit('signin')");q('#sName').value='模式';q('#sTarget').value='@bot';q('#sCmd').value='/sign';q('#sClickBtn').checked=true;q('#sButtonMode').value='ai';let body;app.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true,id:62}};app.loadAutos=async()=>{};await ex("saveAuto('signin')");assert.strictEqual(body.button_mode,'ai');
+    ex("autos=[{id:62,type:'signin',name:'模式',target:'@bot',command:'/sign',click_btn:1,button_mode:'fallback',enabled:0,win_start:'08:00',win_end:'12:00'}];editAutoItem(62)");assert.strictEqual(q('#sButtonMode').value,'fallback');
+  });
   await test('群链接抢注表单与凭据分离保存，任务体不含安全码',async()=>{
     const form=html.slice(html.indexOf('id="af-link_register"'),html.indexOf('id="af-custom"'));
     for(const id of ['lkName','lkGroups','lkButton','lkReady','lkExisting','lkUser','lkSecret','lkMode','lkLimit','lkWwait','lkSuccess','lkFail','lkGroupReply','lkGroupReplyText','lkGroupReplyDelay','lkTimeout'])assert(form.includes('id="'+id+'"'));
@@ -895,7 +904,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert.deepStrictEqual(requests.map(x=>x[0]),['/api/autos','/api/autos/88/link-credential']);
     const body=JSON.parse(requests[0][1].body);
     assert(!('lkUser' in body)&&!('link_secret' in body)&&!JSON.stringify(body).includes('测试安全码'));
-    assert.deepStrictEqual(body,{type:'link_register',name:'链接抢注',groups:'',btn_text:'注册',keywords:'已进入注册状态',success_kw:'注册成功',fail_kw:'',link_mode:1,link_limit:3,link_wait:6,result_timeout:30,retries:0,existing_kw:'已有号',success_reply_enabled:1,success_reply_text:'拿下',success_reply_delay:7,ai_flock_enabled:1,ai_flock_minutes:5,ai_flock_prompt:'注册成功人格',ai_flock_provider_ids:'0123456789abcdef,fedcba9876543210',ai_flock_reaction:'👍',ai_flock_context_messages:6,ai_flock_message_chars:120,ai_flock_skill_chars:3000,ai_flock_max_tokens:200,ai_flock_knowledge_chars:2000,ai_flock_knowledge_on_demand:0});
+    assert.deepStrictEqual(body,{type:'link_register',name:'链接抢注',groups:'',btn_text:'注册',button_mode:'script',keywords:'已进入注册状态',success_kw:'注册成功',fail_kw:'',link_mode:1,link_limit:3,link_wait:6,result_timeout:30,retries:0,existing_kw:'已有号',success_reply_enabled:1,success_reply_text:'拿下',success_reply_delay:7,ai_flock_enabled:1,ai_flock_minutes:5,ai_flock_prompt:'注册成功人格',ai_flock_provider_ids:'0123456789abcdef,fedcba9876543210',ai_flock_reaction:'👍',ai_flock_context_messages:6,ai_flock_message_chars:120,ai_flock_skill_chars:3000,ai_flock_max_tokens:200,ai_flock_knowledge_chars:2000,ai_flock_knowledge_on_demand:0});
     assert.deepStrictEqual(JSON.parse(requests[1][1].body),{user:'测试用户',secret:'测试安全码'});
   });
   await test('群链接抢注测试按钮调用测试接口',async()=>{

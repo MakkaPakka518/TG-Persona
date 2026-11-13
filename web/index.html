@@ -700,6 +700,7 @@ section.act,.fold.open .fold-b{animation:none}
           <input type="text" id="trCommand" placeholder="如: /start" required>
           <label for="trButton">点击按钮关键词</label>
           <input type="text" id="trButton" placeholder="如: 开始注册" required>
+          <label for="trButtonMode">按钮处理模式</label><select id="trButtonMode"><option value="script">脚本模式（默认）</option><option value="ai">AI 模式</option><option value="fallback">AI 兜底</option></select>
           <label class="timed-history-toggle" style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="trHistoryFirst" style="width:auto"> 优先点击最近回复卡片中的匹配按钮</label>
           <div class="hint">开启后先检查机器人最近一张带按钮的回复；找到按钮关键词就直接点击，找不到才发送上方指令。</div>
           <label class="timed-history-toggle" style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="trClosedRetry" style="width:auto"> 关闭弹窗出现时自动重试点击</label>
@@ -741,6 +742,7 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="brCommand">私聊首条指令</label><input type="text" id="brCommand" maxlength="1000" value="/start" placeholder="/start">
           <div class="hint">从按钮链接自动识别机器人，忽略链接的 start 参数，发送上方指令。</div>
           <label for="brButton">Bot 注册按钮关键词</label><input type="text" id="brButton" value="创建" required>
+          <label for="brButtonMode">按钮处理模式</label><select id="brButtonMode"><option value="script">脚本模式（默认）</option><option value="ai">AI 模式</option><option value="fallback">AI 兜底</option></select>
           <label for="brReady">进入注册状态关键词</label><input type="text" id="brReady" value="注册状态" required>
           <label for="brExisting">已有号关键词（选填，整句匹配）</label><textarea id="brExisting" rows="2" maxlength="1000"></textarea>
           <label for="brUser">注册用户名</label><input type="text" id="brUser" autocomplete="off" placeholder="编辑时留空沿用">
@@ -791,6 +793,7 @@ section.act,.fold.open .fold-b{animation:none}
           <div class="hint">机器人从链接自动识别；仅处理 start=服务名-天数-Register_代码，例如 TEST-30-Register_xxx。</div>
           <label for="lkButton">注册按钮关键词</label>
           <input type="text" id="lkButton" value="注册" placeholder="如: 注册" required>
+          <label for="lkButtonMode">按钮处理模式</label><select id="lkButtonMode"><option value="script">脚本模式（默认）</option><option value="ai">AI 模式</option><option value="fallback">AI 兜底</option></select>
           <label for="lkReady">进入注册状态关键词</label>
           <input type="text" id="lkReady" value="已进入注册状态" placeholder="如: 已进入注册状态" required>
           <label for="lkExisting">已有号关键词（选填，整句匹配）</label>
@@ -859,6 +862,7 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="crBot">该群的 Bot 用户名</label><input type="text" id="crBot" required placeholder="如：@testkky_makka_bot" autocomplete="off">
           <div class="hint">接收群成员和 Bot 发出的兑换码，自动拼接 /start 服务名-天数-Register_代码。首次使用机器人先发送一次 /start。</div>
           <label for="crButton">注册按钮关键词</label><input type="text" id="crButton" value="注册" required>
+          <label for="crButtonMode">按钮处理模式</label><select id="crButtonMode"><option value="script">脚本模式（默认）</option><option value="ai">AI 模式</option><option value="fallback">AI 兜底</option></select>
           <label for="crReady">进入注册状态关键词</label><input type="text" id="crReady" value="已进入注册状态" required>
           <label for="crExisting">已有号关键词（选填，整句匹配）</label><textarea id="crExisting" rows="2" maxlength="1000">无法启用续期功能</textarea>
           <label for="crUser">注册用户名</label><input type="text" id="crUser" autocomplete="off" placeholder="编辑时留空沿用">
@@ -1039,6 +1043,8 @@ section.act,.fold.open .fold-b{animation:none}
             </div>
             <label>按钮文字(选填,留空自动匹配 签到/确认/领取;可逗号分隔)</label>
             <input type="text" id="sBtnText" placeholder="如: 签到,确认">
+            <label for="sButtonMode">按钮处理模式</label><select id="sButtonMode"><option value="script">脚本模式（默认）</option><option value="ai">AI 模式</option><option value="fallback">AI 兜底</option></select>
+            <div class="hint">脚本模式只按文字/表情匹配；AI 模式直接由 AI 选择；AI 兜底仅在脚本找不到时调用 AI。</div>
             <div class="flex">
               <div><label>连点次数(有的 bot 要点多次才生效)</label><input type="number" id="sClicks" value="1" min="1" max="20"></div>
               <div><label>连点间隔(毫秒)</label><input type="number" id="sClickGap" value="300" min="50" max="3000" step="50"></div>
@@ -1254,6 +1260,7 @@ section.act,.fold.open .fold-b{animation:none}
           <div id="pGroups" class="grp-pick"></div>
           <label>触发关键词(逗号分隔,消息文本含其中任意词即抢)</label>
           <input type="text" id="pKeywords" placeholder="🎁,红包,领红包" value="🎁,红包">
+          <label for="pButtonMode">按钮处理模式</label><select id="pButtonMode"><option value="script">脚本模式（默认）</option><option value="ai">AI 模式</option><option value="fallback">AI 兜底</option></select>
           <div class="flex">
             <div><label>同群冷却(秒)</label><input type="number" id="pCd" value="5" min="0"></div>
           </div>
@@ -1751,7 +1758,7 @@ async function loadAccounts(){
 }
 function resetAccountCaches(){
   state={tg:{},logged_in:false,running:false,stats:{watched_groups:0,rules:0,hits:0}};
-  autos=[];openedAutoIds.clear();persistAutoExpanded();autoStopBusy.clear();autoTestBusy.clear();autoStopAllBusy=false;syncStopAllButton();closeIconPicker();signinGlobalDirty=false;signinGlobalBusy=false;$('#signinGlobalSave').disabled=false;$('#signinGlobalResult').textContent='';renderSigninGlobal();
+  autos=[];openedAutoIds.clear();persistAutoExpanded();autoStopBusy.clear();autoTestBusy.clear();autoReplayBusy.clear();autoReplayResults.clear();autoStopAllBusy=false;syncStopAllButton();closeIconPicker();signinGlobalDirty=false;signinGlobalBusy=false;$('#signinGlobalSave').disabled=false;$('#signinGlobalResult').textContent='';renderSigninGlobal();
   allGroups=[];allRules=[];watchedGroups=[];ruleGroupSel.clear();
   Object.values(autoGroupSel).forEach(sel=>sel.clear());selectedAutoIds.clear();
   editingRule=null;editAuto=null;editAutoAccount=null;ruleEditAccount=null;tgPhase='idle';window._prevLoggedIn=null;if(typeof resetAIAssistant==='function')resetAIAssistant();
@@ -2143,7 +2150,7 @@ try{const saved=JSON.parse(sessionStorage.getItem('tgp_open_autos')||'null');if(
 function persistAutoExpanded(){try{sessionStorage.setItem('tgp_open_autos',JSON.stringify({account:selectedAccount,ids:[...openedAutoIds]}))}catch(e){}}
 function toggleAutoExpanded(id){if(!autos.some(a=>a.id===id))return;openedAutoIds.has(id)?openedAutoIds.delete(id):openedAutoIds.add(id);persistAutoExpanded();const a=autos.find(x=>x.id===id);renderAutoList(a.type)}
 let autos=[], editAuto=null, editAutoAccount=null;
-let autoStopBusy=new Set(), autoTestBusy=new Set(), autoStopAllBusy=false;
+let autoStopBusy=new Set(), autoTestBusy=new Set(), autoReplayBusy=new Set(), autoReplayResults=new Map(), autoStopAllBusy=false;
 function hasActiveAutos(){return autos.some(a=>a.running===true||a.queued===true)}
 function syncStopAllButton(){const btn=$('#autoStopAll');if(btn)btn.disabled=autoStopAllBusy||!hasActiveAutos()}
 let selectedAutoIds=new Set(), batchPreview=null, batchSeq=0, batchBusy=false;
@@ -2241,8 +2248,8 @@ function renderAutoList(type){
         ${action('expand','▸',`aria-label="${open?'收起':'展开'}任务详情" aria-expanded="${open}"`)}
       </div>
 
-      ${open?`<div class="auto-details"><div class="s">${autoDesc(a)}</div><div class="s">归属当前账号：${esc(label)}（${esc(c.id)}）</div><div class="s">有效窗口：${esc(autoWindow(a))}</div><pre class="auto-result">${esc(autoLastResult(a))}</pre>${assistantBlock(a)}</div>`:''}
-      <div class="auto-actions">${['scheduled_register','link_register','code_register'].includes(a.type)?action('test',autoTestBusy.has(a.id)?'测试中…':'测试流程',autoTestBusy.has(a.id)?'disabled':''):''}${action('toggle',a.enabled?'停用':'启用')}${action('edit','编辑')}${action('duplicate','复制')}${action('delete','删除')}</div>
+      ${open?`<div class="auto-details"><div class="s">${autoDesc(a)}</div><div class="s">归属当前账号：${esc(label)}（${esc(c.id)}）</div><div class="s">有效窗口：${esc(autoWindow(a))}</div><pre class="auto-result">${esc(autoLastResult(a))}</pre>${autoReplayResults.has(a.id)?`<pre class="auto-result">${esc(autoReplayResults.get(a.id))}</pre>`:''}${assistantBlock(a)}</div>`:''}
+      <div class="auto-actions">${action('replay',autoReplayBusy.has(a.id)?'回放中…':'只读试运行',autoReplayBusy.has(a.id)?'disabled':'')}${['scheduled_register','link_register','code_register'].includes(a.type)?action('test',autoTestBusy.has(a.id)?'测试中…':'测试流程',autoTestBusy.has(a.id)?'disabled':''):''}${action('toggle',a.enabled?'停用':'启用')}${action('edit','编辑')}${action('duplicate','复制')}${action('delete','删除')}</div>
     </div>`;
   }).join('');
   for(const holder of box.querySelectorAll('[data-task-icon]')){const a=list.find(x=>x.id===Number(holder.dataset.taskIcon));if(a)holder.appendChild(makeTaskIcon(a.name,a.icon_url))}
@@ -2254,6 +2261,7 @@ function renderAutoList(type){
     if(action==='select')toggleAutoSelection(id,button.checked);
     else if(action==='expand')toggleAutoExpanded(id);
     else if(action==='aidiag'){if(typeof diagnoseAuto==='function')diagnoseAuto(id)}
+    else if(action==='replay')replayAuto(id,c);
     else if(action==='stop')stopAuto(id,c);
     else ({run:runAuto,test:testAuto,toggle:toggleAuto,edit:editAutoItem,duplicate:dupAuto,delete:delAuto}[action])?.(id);
   };
@@ -2264,15 +2272,16 @@ function autoCanRun(a){
   try{return JSON.parse(a.custom_trigger||'{"mode":"manual"}').mode==='manual'}catch(e){return false}
 }
 function signinRecognitionMode(a){const mode=String(a?.signin_recognition_mode||'');return ['none','captcha','image'].includes(mode)?mode:(a?.signin_captcha?'captcha':'none')}
+function buttonModeLabel(mode){return ({script:'脚本按钮',ai:'AI 选按钮',fallback:'AI 兜底'}[mode]||'脚本按钮')}
 function autoDesc(a){
-  if(a.type==='code_register')return `群：${esc(a.groups)}；Bot：${esc(a.target)}；${Number(a.link_mode)===0?'随机一条':'串行最多 '+esc(String(a.link_limit??4))+' 条'}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒回群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
-  if(a.type==='button_register')return `群：${esc(a.groups||'全部监听群')}；开注：${esc(a.announcement_kw)}；群按钮：${esc(a.announcement_button)}；指令：${esc(a.command||'/start')}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒向原群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
+  if(a.type==='code_register')return `群：${esc(a.groups)}；Bot：${esc(a.target)}；${buttonModeLabel(a.button_mode)}；${Number(a.link_mode)===0?'随机一条':'串行最多 '+esc(String(a.link_limit??4))+' 条'}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒回群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
+  if(a.type==='button_register')return `群：${esc(a.groups||'全部监听群')}；开注：${esc(a.announcement_kw)}；群按钮：${esc(a.announcement_button)}；${buttonModeLabel(a.button_mode)}；指令：${esc(a.command||'/start')}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒向原群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
   if(a.type==='signin'){
     const mode=signinRecognitionMode(a),recognition=mode==='captcha'?' · 验证码识别':mode==='image'?(a.signin_image_action==='click'?' · 图片识别点选':' · 图片识别回复'):'';
-    return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${recognition}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
+    return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+buttonModeLabel(a.button_mode)+' · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${recognition}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
   }
-  if(a.type==='scheduled_register')return `${esc(a.target)}，${esc(a.command)}，${esc(autoWindow(a))}，按钮 ${esc(a.btn_text)}${a.history_first?'，历史卡片优先':''}${Number(a.poll_interval)>0?'，关闭弹窗每 '+esc(String(a.poll_interval))+' 秒重试':''}，收到 ${esc(a.keywords)} 后回复，成功 ${esc(a.success_kw)}，每步等待 ${esc(String(a.result_timeout??30))}秒`;
-  if(a.type==='link_register')return `群:${esc(a.groups||'全部监听群')} · 自动识别机器人 · 按钮 ${esc(a.btn_text)}${Number(a.link_mode)===0?' · 随机一条':' · 串行最多 '+esc(String(a.link_limit??4))+' 条'} · 失效等待 ${esc(String(a.link_wait??5))}秒 · 成功 ${esc(a.success_kw)}${a.existing_kw?' · 已有号即停止':''}${a.success_reply_enabled?' · 成功后 '+esc(String(a.success_reply_delay??5))+' 秒群内发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?' · AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}${a.link_credential_set?' · 已保存账号信息':' · 未填写账号信息'}`;
+  if(a.type==='scheduled_register')return `${esc(a.target)}，${esc(a.command)}，${esc(autoWindow(a))}，按钮 ${esc(a.btn_text)}，${buttonModeLabel(a.button_mode)}${a.history_first?'，历史卡片优先':''}${Number(a.poll_interval)>0?'，关闭弹窗每 '+esc(String(a.poll_interval))+' 秒重试':''}，收到 ${esc(a.keywords)} 后回复，成功 ${esc(a.success_kw)}，每步等待 ${esc(String(a.result_timeout??30))}秒`;
+  if(a.type==='link_register')return `群:${esc(a.groups||'全部监听群')} · 自动识别机器人 · 按钮 ${esc(a.btn_text)} · ${buttonModeLabel(a.button_mode)}${Number(a.link_mode)===0?' · 随机一条':' · 串行最多 '+esc(String(a.link_limit??4))+' 条'} · 失效等待 ${esc(String(a.link_wait??5))}秒 · 成功 ${esc(a.success_kw)}${a.existing_kw?' · 已有号即停止':''}${a.success_reply_enabled?' · 成功后 '+esc(String(a.success_reply_delay??5))+' 秒群内发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?' · AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}${a.link_credential_set?' · 已保存账号信息':' · 未填写账号信息'}`;
   if(a.type==='grabcodes')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)} · ${a.action==='send'?'群内发送':'回复'}${a.poll_interval>0?' · 轮询'+a.poll_interval+'s@'+esc(a.target):''}`;
   if(a.type==='redpacket')return `群:${esc(a.groups||'全部监听群')} · 触发:${esc(a.keywords)}`;
   if(a.type==='keepalive'){
@@ -2309,6 +2318,7 @@ function editAutoItem(id){
     $('#sBtnWrap').classList.toggle('hidden',!a.click_btn);
     $('#sBtnText').value=a.btn_text||'';
     $('#sBtnEmoji').value=a.btn_emoji||'';
+    $('#sButtonMode').value=a.button_mode||'script';
     $('#sClicks').value=a.click_times||1;
     $('#sClickGap').value=a.click_interval||300;
     $('#sRefreshButtons').value=String(a.refresh_buttons??1);
@@ -2322,13 +2332,13 @@ function editAutoItem(id){
   }else if(t==='scheduled_register'){
     const [date='',clock='']=String(a.scheduled_at||'').split('T'),parts=clock.split(':');
     $('#trName').value=a.name;$('#trDate').value=date;$('#trTime').value=parts.slice(0,2).join(':');$('#trSecond').value=parts[2]||'0';$('#trTarget').value=a.target||'';
-    $('#trCommand').value=a.command||'';$('#trButton').value=a.btn_text||'';$('#trTrigger').value=a.keywords||'';
+    $('#trCommand').value=a.command||'';$('#trButton').value=a.btn_text||'';$('#trButtonMode').value=a.button_mode||'script';$('#trTrigger').value=a.keywords||'';
     $('#trHistoryFirst').checked=!!a.history_first;
     $('#trClosedRetry').checked=Number(a.poll_interval)>0;$('#trClosedKeywords').value=a.fail_kw||'自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value=Number(a.poll_interval)>0?a.poll_interval:5;$('#trClosedRetryFields').classList.toggle('hidden',!$('#trClosedRetry').checked);
     $('#trReply').value=a.reply_text||'';$('#trSuccess').value=a.success_kw||'';$('#trTimeout').value=a.result_timeout??30;
     $('#trCancel').style.display='inline-block';
   }else if(t==='link_register'){
-    $('#lkName').value=a.name;$('#lkButton').value=a.btn_text||'注册';
+    $('#lkName').value=a.name;$('#lkButton').value=a.btn_text||'注册';$('#lkButtonMode').value=a.button_mode||'script';
     $('#lkReady').value=a.keywords||'已进入注册状态';$('#lkUser').value='';$('#lkSecret').value='';
     $('#lkExisting').value=a.existing_kw||'';$('#lkGroupReply').checked=!!a.success_reply_enabled;
     $('#lkGroupReplyText').value=a.success_reply_text||'';$('#lkGroupReplyDelay').value=a.success_reply_delay??5;$('#lkGroupReplyFields').classList.toggle('hidden',!$('#lkGroupReply').checked);
@@ -2340,14 +2350,14 @@ function editAutoItem(id){
   }else if(t==='button_register'){
     $('#brName').value=a.name;setAutoGroups('button_register',a.groups);
     $('#brAnnouncement').value=a.announcement_kw||'';$('#brAnnouncementButton').value=a.announcement_button||'点击注册';$('#brCommand').value=a.command||'/start';
-    $('#brButton').value=a.btn_text||'创建';$('#brReady').value=a.keywords||'注册状态';$('#brExisting').value=a.existing_kw||'';
+    $('#brButton').value=a.btn_text||'创建';$('#brButtonMode').value=a.button_mode||'script';$('#brReady').value=a.keywords||'注册状态';$('#brExisting').value=a.existing_kw||'';
     $('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value=a.success_kw||'成功';$('#brFail').value=a.fail_kw||'';$('#brTimeout').value=a.result_timeout??30;
     $('#brGroupReply').checked=!!a.success_reply_enabled;$('#brReplyText').value=a.success_reply_text||'';$('#brReplyDelay').value=a.success_reply_delay??5;
     $('#brGroupReplyFields').classList.toggle('hidden',!$('#brGroupReply').checked);$('#brCancel').style.display='inline-block';
     $('#brAiFlock').checked=!!a.ai_flock_enabled;$('#brAiFlockMinutes').value=a.ai_flock_minutes??5;$('#brAiFlockPrompt').value=a.ai_flock_prompt||DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('br',a.ai_flock_provider_ids,a.ai_flock_reaction);setIntegerFields('brAiFlock',a,AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#brAiFlockKnowledgeOnDemand').checked=settingEnabled(a.ai_flock_knowledge_on_demand);$('#brAiFlockFields').classList.toggle('hidden',!$('#brAiFlock').checked);
   }else if(t==='code_register'){
     $('#crName').value=a.name;renderCodeGroupOptions(a.groups);$('#crBot').value=a.target||'';
-    $('#crButton').value=a.btn_text||'注册';$('#crReady').value=a.keywords||'已进入注册状态';$('#crExisting').value=a.existing_kw||'';
+    $('#crButton').value=a.btn_text||'注册';$('#crButtonMode').value=a.button_mode||'script';$('#crReady').value=a.keywords||'已进入注册状态';$('#crExisting').value=a.existing_kw||'';
     $('#crUser').value='';$('#crSecret').value='';$('#crMode').value=String(a.link_mode??1);$('#crLimit').value=a.link_limit??4;$('#crWait').value=a.link_wait??3;
     $('#crSuccess').value=a.success_kw||'成功';$('#crFail').value=a.fail_kw||'';$('#crTimeout').value=a.result_timeout??30;
     $('#crGroupReply').checked=!!a.success_reply_enabled;$('#crReplyText').value=a.success_reply_text||'';$('#crReplyDelay').value=a.success_reply_delay??5;
@@ -2369,7 +2379,7 @@ function editAutoItem(id){
     $('#kUnit').value=String(unit);$('#kEvery').value=Math.max(1,Math.round(iv/unit));
     $('#kDel').value=a.cooldown||0;$('#kCancel').style.display='inline-block';
   }else{
-    $('#pName').value=a.name;setAutoGroups('redpacket',a.groups);$('#pKeywords').value=a.keywords;
+    $('#pName').value=a.name;setAutoGroups('redpacket',a.groups);$('#pKeywords').value=a.keywords;$('#pButtonMode').value=a.button_mode||'script';
     $('#pCd').value=a.cooldown;$('#pCancel').style.display='inline-block';
   }
   openAutoForm(editAuto.type);
@@ -2379,14 +2389,14 @@ function editAutoItem(id){
 }
 function cancelAutoEdit(t){
   editAuto=null;editAutoAccount=null;if(typeof assistantFormDraft!=='undefined')assistantFormDraft=null;
-  ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sRecognitionMode').value='none';$('#sImageAction').value='reply';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
-    scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
+  ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sButtonMode').value='script';$('#sRecognitionMode').value='none';$('#sImageAction').value='reply';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
+    scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trButtonMode').value='script';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
-    link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkAiFlock').checked=false;$('#lkAiFlockMinutes').value='5';$('#lkAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('lk','','');setIntegerFields('lkAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#lkAiFlockKnowledgeOnDemand').checked=false;$('#lkAiFlockFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
+    link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkButtonMode').value='script';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkAiFlock').checked=false;$('#lkAiFlockMinutes').value='5';$('#lkAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('lk','','');setIntegerFields('lkAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#lkAiFlockKnowledgeOnDemand').checked=false;$('#lkAiFlockFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
     custom:()=>{$('#cName').value='';$('#cTarget').value='';setCustomTrigger('{"mode":"manual"}');setVisualSteps('[]');$('#cUser').value='';$('#cSecret').value='';$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cRetries').value=2;$('#cCancel').style.display='none'},
-    code_register:()=>{$('#crName').value='';$('#crGroup').value='';$('#crBot').value='';$('#crButton').value='注册';$('#crReady').value='已进入注册状态';$('#crExisting').value='无法启用续期功能';$('#crUser').value='';$('#crSecret').value='';$('#crMode').value='1';$('#crLimit').value=4;$('#crWait').value=3;$('#crSuccess').value='成功';$('#crFail').value='';$('#crTimeout').value=30;$('#crGroupReply').checked=false;$('#crReplyText').value='';$('#crReplyDelay').value=5;$('#crReplyFields').classList.add('hidden');$('#crAiFlock').checked=false;$('#crAiFlockMinutes').value=5;$('#crAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('cr','','');setIntegerFields('crAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#crAiFlockKnowledgeOnDemand').checked=false;$('#crAiFlockFields').classList.add('hidden');$('#crCancel').style.display='none'},
-    button_register:()=>{$('#brName').value='';setAutoGroups('button_register','');$('#brAnnouncement').value='定时注册';$('#brAnnouncementButton').value='点击注册';$('#brCommand').value='/start';$('#brButton').value='创建';$('#brReady').value='注册状态';$('#brExisting').value='';$('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value='成功';$('#brFail').value='';$('#brTimeout').value=30;$('#brGroupReply').checked=true;$('#brReplyText').value='拿下！';$('#brReplyDelay').value=5;$('#brGroupReplyFields').classList.remove('hidden');$('#brAiFlock').checked=false;$('#brAiFlockMinutes').value=5;$('#brAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('br','','');setIntegerFields('brAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#brAiFlockKnowledgeOnDemand').checked=false;$('#brAiFlockFields').classList.add('hidden');$('#brCancel').style.display='none'},
-    redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pCd').value='5';$('#pCancel').style.display='none'},
+    code_register:()=>{$('#crName').value='';$('#crGroup').value='';$('#crBot').value='';$('#crButton').value='注册';$('#crButtonMode').value='script';$('#crReady').value='已进入注册状态';$('#crExisting').value='无法启用续期功能';$('#crUser').value='';$('#crSecret').value='';$('#crMode').value='1';$('#crLimit').value=4;$('#crWait').value=3;$('#crSuccess').value='成功';$('#crFail').value='';$('#crTimeout').value=30;$('#crGroupReply').checked=false;$('#crReplyText').value='';$('#crReplyDelay').value=5;$('#crReplyFields').classList.add('hidden');$('#crAiFlock').checked=false;$('#crAiFlockMinutes').value=5;$('#crAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('cr','','');setIntegerFields('crAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#crAiFlockKnowledgeOnDemand').checked=false;$('#crAiFlockFields').classList.add('hidden');$('#crCancel').style.display='none'},
+    button_register:()=>{$('#brName').value='';setAutoGroups('button_register','');$('#brAnnouncement').value='定时注册';$('#brAnnouncementButton').value='点击注册';$('#brCommand').value='/start';$('#brButton').value='创建';$('#brButtonMode').value='script';$('#brReady').value='注册状态';$('#brExisting').value='';$('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value='成功';$('#brFail').value='';$('#brTimeout').value=30;$('#brGroupReply').checked=true;$('#brReplyText').value='拿下！';$('#brReplyDelay').value=5;$('#brGroupReplyFields').classList.remove('hidden');$('#brAiFlock').checked=false;$('#brAiFlockMinutes').value=5;$('#brAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('br','','');setIntegerFields('brAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#brAiFlockKnowledgeOnDemand').checked=false;$('#brAiFlockFields').classList.add('hidden');$('#brCancel').style.display='none'},
+    redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pButtonMode').value='script';$('#pCd').value='5';$('#pCancel').style.display='none'},
     keepalive:()=>{$('#kName').value='';$('#kTarget').value='';$('#kText').value='';$('#kEvery').value=7;$('#kUnit').value='86400';$('#kDel').value=10;$('#kCancel').style.display='none'}})[t]();
 }
 function pickGrabAct(v){
@@ -2399,13 +2409,13 @@ let visualSteps=[],stepsError='',customTriggerMode='manual';
 const STEP_HINTS={
   send:{t:'send',to:'target',text:'/start',reply:false},
   wait:{t:'wait',ms:2000},
-  click:{t:'click',to:'target',text:'',emoji:'',index:0,any:false,ai:false,fresh:true,timeout_ms:30000},
+  click:{t:'click',to:'target',text:'',emoji:'',index:0,any:false,ai:false,mode:'script',fresh:true,timeout_ms:30000},
   wait_reply:{t:'wait_reply',from:'target',success:'成功',fail:'',regex:false,timeout_ms:30000,save:''},
   extract:{t:'extract',from:'last.text',regex:'',group:1,save:'value'},
   captcha:{t:'captcha',from:'target',length:4,send_to:'target',template:'{captcha}'}
 };
 const STEP_FIELDS={
-  send:['t','to','text','reply'],wait:['t','ms'],click:['t','to','text','emoji','index','any','ai','fresh','timeout_ms'],
+  send:['t','to','text','reply'],wait:['t','ms'],click:['t','to','text','emoji','index','any','ai','mode','fresh','timeout_ms'],
   wait_reply:['t','from','success','fail','regex','timeout_ms','save'],extract:['t','from','regex','group','save'],captcha:['t','from','length','send_to','template']
 };
 const STEP_NAMES={send:'发送消息',wait:'等待',click:'点击按钮',wait_reply:'等待回复',extract:'提取内容',captcha:'识别验证码'};
@@ -2484,6 +2494,7 @@ function parseSteps(text){
   let list;try{list=JSON.parse(text.trim()||'[]')}catch(e){throw new Error('高级步骤内容无法读取，请检查格式，或使用示例模板重新开始')}
   if(!Array.isArray(list))throw new Error('步骤应是一组按顺序排列的卡片');
   if(list.length>50)throw new Error('最多支持 50 个步骤，请先删除多余步骤');
+  for(const step of list)if(step&&step.t==='click'&&!step.mode)step.mode=step.ai?'ai':'script';
   return list;
 }
 function stepsUseCredential(list,target=''){return /\{credential\.(?:user|secret)\}/.test(target)||list.some(step=>step&&typeof step==='object'&&Object.values(step).some(value=>typeof value==='string'&&/\{credential\.(?:user|secret)\}/.test(value)))}
@@ -2517,10 +2528,11 @@ function stepIssue(list,requireOne=false){
     if(s.t==='wait'&&(s.ms<0||s.ms>3600000))return prefix+'等待时间须为 0–3600 秒';
     if((s.t==='click'||s.t==='wait_reply')&&(s.timeout_ms<1||s.timeout_ms>3600000))return prefix+'等待上限须为 0.001–3600 秒';
     if(s.t==='click'&&(s.index<0||s.index>100))return prefix+'按钮序号须为 0–100';
+    if(s.t==='click'&&!['script','ai','fallback'].includes(s.mode))return prefix+'按钮模式只能为脚本、AI 或 AI 兜底';
     if(s.t==='extract'&&(!s.regex.trim()||!s.save.trim()||s.group<0||s.group>20))return prefix+'请填写提取正则和变量名，分组须为 0–20';
     if(s.t==='captcha'&&(s.length<1||s.length>16))return prefix+'验证码长度须为 1–16';
     for(const value of strings){const issue=templateIssue(s[value]);if(issue)return prefix+issue}
-    if(s.t==='click'&&s.ai&&[s.to,s.text,s.emoji].some(value=>value.includes('{credential.')))return prefix+'AI 选按钮不能使用账号凭据变量';
+    if(s.t==='click'&&s.mode!=='script'&&[s.to,s.text,s.emoji].some(value=>value.includes('{credential.')))return prefix+'AI 选按钮不能使用账号凭据变量';
     if(['wait_reply','extract'].includes(s.t)&&s.save&&!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(s.save))return prefix+'变量名只能使用字母、数字和下划线，且不能以数字开头';
   }
   return '';
@@ -2549,6 +2561,11 @@ function stepField(parent,index,key,labelText,type='text',options={}){
   });
   parent.appendChild(label);
 }
+function stepSelect(parent,index,key,labelText,choices){
+  const s=visualSteps[index],label=document.createElement('label'),select=document.createElement('select');label.textContent=labelText;
+  for(const [value,text] of choices){const option=document.createElement('option');option.value=value;option.textContent=text;select.appendChild(option)}
+  select.value=String(s[key]||'script');select.addEventListener('change',()=>{s[key]=select.value;if(key==='mode')s.ai=select.value==='ai';syncStepJSON()});label.appendChild(select);parent.appendChild(label);
+}
 function renderStepCards(){
   const box=$('#stepCards');box.replaceChildren();
   if(!visualSteps.length){box.textContent='还没有步骤，点下方按钮添加，或使用示例模板';return}
@@ -2561,7 +2578,8 @@ function renderStepCards(){
     if(type==='wait')stepField(card,i,'ms','等待（秒）','number',{milliseconds:true,step:.001,decimal:true});
     if(type==='click'){
       stepField(card,i,'to','目标（target、用户名、群 ID 或模板）');stepField(card,i,'text','按钮文字');stepField(card,i,'emoji','按钮表情');stepField(card,i,'index','按钮序号（0 为第一个）','number',{min:0,step:1});
-      const checks=document.createElement('div');checks.className='custom-checks';stepField(checks,i,'any','匹配任意按钮','checkbox');stepField(checks,i,'ai','由 AI 选择按钮','checkbox');stepField(checks,i,'fresh','只使用最新按钮','checkbox');card.appendChild(checks);
+      stepSelect(card,i,'mode','按钮处理模式',[['script','脚本模式'],['ai','AI 模式'],['fallback','AI 兜底']]);
+      const checks=document.createElement('div');checks.className='custom-checks';stepField(checks,i,'any','匹配任意按钮','checkbox');stepField(checks,i,'fresh','只使用最新按钮','checkbox');card.appendChild(checks);
       stepField(card,i,'timeout_ms','等待按钮上限（秒）','number',{milliseconds:true,step:.001,decimal:true});
     }
     if(type==='wait_reply'){
@@ -2653,7 +2671,7 @@ async function saveAuto(type){
       win_start:$('#sWinStart').value.trim(),win_end:$('#sWinEnd').value.trim(),click_btn:$('#sClickBtn').checked?1:0,
       btn_text:$('#sBtnText').value.trim(),btn_emoji:$('#sBtnEmoji').value.trim(),
       click_times:+$('#sClicks').value||1,click_interval:+$('#sClickGap').value||300,
-      refresh_buttons:$('#sRefreshButtons').value==='0'?0:1,
+      refresh_buttons:$('#sRefreshButtons').value==='0'?0:1,button_mode:$('#sButtonMode').value,
       command_delay:$('#sCommandDelay').value.trim()===''?1.6:Number($('#sCommandDelay').value),
       button_delay:$('#sButtonDelay').value.trim()===''?2:Number($('#sButtonDelay').value),
       result_delay:$('#sResultDelay').value.trim()===''?0:Number($('#sResultDelay').value),
@@ -2680,7 +2698,7 @@ async function saveAuto(type){
     const closedKeywords=$('#trClosedKeywords').value.trim(),closedInterval=Number($('#trClosedInterval').value);
     const scheduled=/^\d{4}-\d{2}-\d{2}$/.test(date)&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clock)&&Number.isInteger(second)&&second>=0&&second<=59?date+'T'+clock+':'+String(second).padStart(2,'0'):'';
     body={type,name:$('#trName').value.trim(),scheduled_at:scheduled,target:$('#trTarget').value.trim(),
-      command:$('#trCommand').value.trim(),click_btn:1,btn_text:$('#trButton').value.trim(),
+      command:$('#trCommand').value.trim(),click_btn:1,btn_text:$('#trButton').value.trim(),button_mode:$('#trButtonMode').value,
       history_first:$('#trHistoryFirst').checked?1:0,
       fail_kw:closedRetry?closedKeywords:'',poll_interval:closedRetry?closedInterval:0,
       keywords:$('#trTrigger').value.trim(),reply_text:$('#trReply').value.trim(),success_kw:$('#trSuccess').value.trim(),
@@ -2699,7 +2717,7 @@ async function saveAuto(type){
   }else if(type==='button_register'){
     const flockLimits=validIntegerFields('brAiFlock',AI_FLOCK_LIMIT_SPECS,'ai_flock_');if(!flockLimits)return;
     body={type,name:$('#brName').value.trim(),groups:getAutoGroups(type),announcement_kw:$('#brAnnouncement').value.trim(),announcement_button:$('#brAnnouncementButton').value.trim(),command:$('#brCommand').value.trim()||'/start',
-      btn_text:$('#brButton').value.trim(),keywords:$('#brReady').value.trim(),existing_kw:$('#brExisting').value.trim(),success_kw:$('#brSuccess').value.trim(),fail_kw:$('#brFail').value.trim(),result_timeout:Number($('#brTimeout').value),
+      btn_text:$('#brButton').value.trim(),button_mode:$('#brButtonMode').value,keywords:$('#brReady').value.trim(),existing_kw:$('#brExisting').value.trim(),success_kw:$('#brSuccess').value.trim(),fail_kw:$('#brFail').value.trim(),result_timeout:Number($('#brTimeout').value),
       success_reply_enabled:$('#brGroupReply').checked?1:0,success_reply_text:$('#brReplyText').value.trim(),success_reply_delay:Number($('#brReplyDelay').value),retries:0,enabled:0};
     Object.assign(body,{ai_flock_enabled:$('#brAiFlock').checked?1:0,ai_flock_minutes:Number($('#brAiFlockMinutes').value),ai_flock_prompt:$('#brAiFlockPrompt').value.trim(),ai_flock_provider_ids:enabledProviderCsv(registrationAIProviderSel.br),ai_flock_reaction:$('#brAiFlockReaction').value.trim(),ai_flock_knowledge_on_demand:$('#brAiFlockKnowledgeOnDemand').checked?1:0},flockLimits);
     if(!body.name||!body.announcement_kw||!body.announcement_button||!body.btn_text||!body.keywords||!body.success_kw)return toast('请填写开注关键词、按钮文字和注册流程',1);
@@ -2714,7 +2732,7 @@ async function saveAuto(type){
     const mode=Number($('#lkMode').value),limit=Number($('#lkLimit').value),wait=Number($('#lkWwait').value),timeout=Number($('#lkTimeout').value);
     const groupReply=$('#lkGroupReply').checked,groupReplyText=$('#lkGroupReplyText').value.trim(),groupReplyDelay=Number($('#lkGroupReplyDelay').value);
     body={type,name:$('#lkName').value.trim(),groups:getAutoGroups('link_register'),
-      btn_text:$('#lkButton').value.trim(),keywords:$('#lkReady').value.trim(),
+      btn_text:$('#lkButton').value.trim(),button_mode:$('#lkButtonMode').value,keywords:$('#lkReady').value.trim(),
       success_kw:$('#lkSuccess').value.trim(),fail_kw:$('#lkFail').value.trim(),
       link_mode:mode,link_limit:limit,link_wait:wait,result_timeout:timeout,retries:0,
       existing_kw:$('#lkExisting').value.trim(),success_reply_enabled:groupReply?1:0,
@@ -2732,7 +2750,7 @@ async function saveAuto(type){
   }else if(type==='code_register'){
     const flockLimits=validIntegerFields('crAiFlock',AI_FLOCK_LIMIT_SPECS,'ai_flock_');if(!flockLimits)return;
     body={type,name:$('#crName').value.trim(),groups:$('#crGroup').value,target:$('#crBot').value.trim(),
-      btn_text:$('#crButton').value.trim(),keywords:$('#crReady').value.trim(),existing_kw:$('#crExisting').value.trim(),success_kw:$('#crSuccess').value.trim(),fail_kw:$('#crFail').value.trim(),
+      btn_text:$('#crButton').value.trim(),button_mode:$('#crButtonMode').value,keywords:$('#crReady').value.trim(),existing_kw:$('#crExisting').value.trim(),success_kw:$('#crSuccess').value.trim(),fail_kw:$('#crFail').value.trim(),
       link_mode:Number($('#crMode').value),link_limit:Number($('#crLimit').value),link_wait:Number($('#crWait').value),result_timeout:Number($('#crTimeout').value),
       success_reply_enabled:$('#crGroupReply').checked?1:0,success_reply_text:$('#crReplyText').value.trim(),success_reply_delay:Number($('#crReplyDelay').value),retries:0,enabled:0};
     Object.assign(body,{ai_flock_enabled:$('#crAiFlock').checked?1:0,ai_flock_minutes:Number($('#crAiFlockMinutes').value),ai_flock_prompt:$('#crAiFlockPrompt').value.trim(),ai_flock_provider_ids:enabledProviderCsv(registrationAIProviderSel.cr),ai_flock_reaction:$('#crAiFlockReaction').value.trim(),ai_flock_knowledge_on_demand:$('#crAiFlockKnowledgeOnDemand').checked?1:0},flockLimits);
@@ -2771,10 +2789,12 @@ async function saveAuto(type){
     if(!body.reply_text)return toast('请填写要发送的内容',1);
     if(iv<60)return toast('间隔最少 1 分钟',1);
   }else{
-    body={type,name:$('#pName').value.trim(),groups:getAutoGroups('redpacket'),keywords:$('#pKeywords').value.trim(),
+    body={type,name:$('#pName').value.trim(),groups:getAutoGroups('redpacket'),keywords:$('#pKeywords').value.trim(),button_mode:$('#pButtonMode').value,
       cooldown:+$('#pCd').value||5};
     if(!body.name)return toast('请填写任务名称',1);
   }
+  const aiButtonMode=(body.button_mode&&body.button_mode!=='script')||(type==='custom'&&parseSteps(body.custom_steps).some(step=>step.t==='click'&&step.mode!=='script'));
+  if(aiButtonMode&&!aiProviders.some(provider=>provider.enabled))return toast('AI 按钮模式需要先在设置中添加并启用 AI API',1);
   if(['link_register','button_register','code_register'].includes(type)&&!selectedAIProvidersEnabled(body.ai_flock_provider_ids))return toast('水群任务只能选择已启用的 AI API',1);
   if(['link_register','button_register','code_register'].includes(type)&&body.ai_flock_enabled){
     if(!aiProviders.some(provider=>provider.enabled))return toast('请先到设置添加并启用 AI API',1);
@@ -2826,6 +2846,19 @@ async function testAuto(id){
     toast(d.ok?'测试流程成功，请查看日志':'测试流程未成功，请查看日志',d.ok?0:1);await loadAutos();
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
   finally{if(isCurrentAccount(c)){autoTestBusy.delete(id);renderAutoList(a.type)}}
+}
+function replayText(data){
+  const lines=['只读试运行：'+String(data.task||''),'按钮模式：'+buttonModeLabel(data.button_mode),'计划：'];
+  for(const step of data.plan||[])lines.push('  '+step);
+  for(const source of data.sources||[]){lines.push('来源：'+String(source.target||''));if(source.error)lines.push('  错误：'+String(source.error));for(const message of source.messages||[]){lines.push('  消息 #'+String(message.id||0)+(message.text?'：'+String(message.text):''));if(message.media)lines.push('    含媒体');if(message.trigger_match!=null)lines.push('    触发条件：'+(message.trigger_match?'命中':'未命中'));if(message.buttons?.length)lines.push('    按钮：'+message.buttons.join('、'));if(message.script_match)lines.push('    脚本命中：'+message.script_match);if(message.ai_needed)lines.push('    执行时需要 AI 选按钮（本次未调用）')}}
+  lines.push(String(data.notice||''));return lines.join('\n');
+}
+async function replayAuto(id,c=accountContext()){
+  const a=autos.find(item=>item.id===id);if(!a||autoReplayBusy.has(id)||!isCurrentAccount(c))return;
+  autoReplayBusy.add(id);openedAutoIds.add(id);persistAutoExpanded();renderAutoList(a.type);
+  try{const data=await api('/api/autos/'+id+'/replay',{method:'POST',_account:c});if(!isCurrentAccount(c))return;autoReplayResults.set(id,replayText(data));renderAutoList(a.type)}
+  catch(e){if(isCurrentAccount(c)){autoReplayResults.set(id,'只读试运行失败：'+e.message);renderAutoList(a.type)}}
+  finally{if(isCurrentAccount(c)){autoReplayBusy.delete(id);renderAutoList(a.type)}}
 }
 function renderAllAutoLists(){syncStopAllButton();Object.keys(AUTO_TYPE).forEach(renderAutoList)}
 async function stopAuto(id,c=accountContext()){
@@ -2947,8 +2980,8 @@ async function exportConfig(selected){
 }
 
 // ---------- AI 助手：所有保存和应用均由用户确认 ----------
-const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,scheduled_at,click_btn,btn_text,btn_emoji,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_provider_ids,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_knowledge_chars,groups,keywords,action,reply_text,poll_interval,custom_trigger,custom_steps,chain_retry,cooldown,enabled'.split(',');
-const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',scheduled_at:'计划时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',result_delay:'结果判断前延迟（秒）',result_timeout:'等待最终回复上限（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',signin_recognition_mode:'图片处理',signin_image_prompt:'图片识别提示词',signin_image_action:'图片识别动作',ai_provider_ids:'识别 API',custom_trigger:'触发条件',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
+const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,scheduled_at,click_btn,btn_text,btn_emoji,button_mode,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_provider_ids,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_knowledge_chars,groups,keywords,action,reply_text,poll_interval,custom_trigger,custom_steps,chain_retry,cooldown,enabled'.split(',');
+const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',scheduled_at:'计划时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',button_mode:'按钮处理模式',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',result_delay:'结果判断前延迟（秒）',result_timeout:'等待最终回复上限（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',signin_recognition_mode:'图片处理',signin_image_prompt:'图片识别提示词',signin_image_action:'图片识别动作',ai_provider_ids:'识别 API',custom_trigger:'触发条件',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
 const AI_RANGES={command_delay:[0,120],button_delay:[0,120],result_delay:[0,120],result_timeout:[1,300],refresh_buttons:[0,1],click_times:[1,20],click_interval:[50,3000],retries:[0,5],poll_interval:[60,7776000]};
 const AI_TEXT_FIELDS=['win_start','win_end','success_kw','fail_kw','btn_text','btn_emoji','command'];
 let aiDraft=null,aiDraftBusy=false,aiDraftSeq=0,assistantFormDraft=null,aiDiagnoses=new Map();
@@ -4126,6 +4159,7 @@ function logRow(h){
     add('指令',d.command||h.content);
     add('回复',d.reply||h.reply);
     add('按钮',d.button);
+    add('按钮模式',buttonModeLabel(d.button_mode));
     add('验证码',d.captcha);
     if(d.captcha_message_id!=null)add('图片来源','消息 #'+d.captcha_message_id+(d.captcha_prompt?' · '+d.captcha_prompt:''));
     if(d.command_delay!=null)add('命令后等待',d.command_delay+' 秒');
@@ -4143,6 +4177,7 @@ function logRow(h){
     add('已尝试',Array.isArray(d.attempted)?d.attempted.join(' → '):d.payload);
     add('使用注册码',d.payload);
     add('注册按钮',d.button);
+    add('按钮模式',buttonModeLabel(d.button_mode));
     add('弹窗',d.popup);
     add('进入状态',d.ready);
     add('最终回复',d.success||h.reply);
