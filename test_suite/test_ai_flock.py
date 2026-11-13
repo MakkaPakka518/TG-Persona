@@ -256,7 +256,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
             result=await self.b['_learn_ai_flock']();self.assertTrue(result['learned'])
             path=runtime.skill_file;self.assertEqual(path.stat().st_mode&0o777,0o600);self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],13)
             prompt=self.b['_call_ai_any'].await_args.args[0];self.assertIn('Exclude facts, identities, links, credentials, commands',prompt);self.assertEqual(prompt.count('"chat_id"'),12);self.assertNotIn('长'*61,prompt);self.assertIn('Q'*500,prompt);self.assertNotIn('Q'*501,prompt);self.assertEqual(self.b['_call_ai_any'].await_args.kwargs['max_tokens'],777)
-            learned=self.b['_read_skill']();self.assertTrue(learned.startswith('Q'*700));self.assertEqual([block['meta']['stage'] for block in self.b['_skill_memory_blocks'](learned)],['recent','detail'])
+            learned=self.b['_read_skill']();self.assertTrue(learned.startswith('Q'*700));self.assertEqual([block['meta']['stage'] for block in self.b['_skill_memory_blocks'](learned)],['detail'])
             self.b['_write_study']('- 群内常聊电影，氛围轻松');runtime.tg_state={'phase':'ready'};runtime.client=SimpleNamespace(send_file=AsyncMock())
             uploaded=await self.b['_upload_flock_skill']();self.assertTrue(uploaded['ok']);call=runtime.client.send_file.await_args
             self.assertEqual(uploaded['files'],['skill.md','study.md']);runtime.client.send_file.assert_awaited_once();self.assertEqual(call.args[0],'me');self.assertEqual([item.name for item in call.args[1]],['skill.md','study.md']);self.assertTrue(call.kwargs['force_document']);self.assertEqual(len(call.kwargs['caption']),2);self.assertNotIn('今天挺开心',str(call.kwargs['caption']))
@@ -486,6 +486,56 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         self.b['_call_ai_any']=AsyncMock(return_value='- 群聊氛围轻松')
         self.assertEqual((await self.b['_learn_ai_flock'](force=True))['samples'],5);self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],0)
 
+    async def test_learning_filter_allows_technical_nouns_but_blocks_command_lines(self):
+        allowed = self.b['_safe_skill_markdown']("- 群里常讨论 ssh 配置和内网穿透", label="群知识")
+        self.assertIn('ssh', allowed)
+        for text in ("curl https://example.invalid/x", "sudo rm -rf /tmp/x", "ssh root@1.2.3.4"):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                self.b['_safe_skill_markdown'](text, label='群知识')
+        # 句中名词提及不再被误杀
+        self.assertIn('ssh', self.b['_safe_skill_markdown']('- 讨论 ssh 端口与密钥登录', label='群知识'))
+        with self.assertRaises(ValueError):
+            self.b['_safe_skill_markdown']('- api_key = abcdef', label='群知识')
+
+    async def test_learning_samples_keep_at_least_a_thousand(self):
+        self.b['_schedule_ai_learning'] = Mock()
+        db = self.b['conn']
+        db.executemany('INSERT INTO ai_learning_samples(ts,chat_id,text,role) VALUES(0,?,?,?)',
+                       [('-1', '样本' + str(i), 'group') for i in range(1200)])
+        db.commit()
+        self.b['_store_learning_samples']([(0, '-1', '新样本', 'group')])
+        count = db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0]
+        self.assertGreaterEqual(count, 1000)
+        self.assertIn('新样本', db.execute('SELECT text FROM ai_learning_samples ORDER BY id DESC').fetchone()[0])
+
+    async def test_study_over_group_limit_is_distilled_before_write(self):
+        provider = await self.provider()
+        runtime, db = self.b['get_runtime'](), self.b['conn']
+        db.execute("INSERT INTO watched_groups VALUES('-1','群',0)")
+        db.commit()
+        for key, value in {'flock_learning_enabled': '1', 'flock_learning_groups': '-1',
+                           'flock_learning_start': '17:00', 'flock_learning_end': '19:00',
+                           'flock_learning_provider_ids': provider}.items():
+            self.b['set_setting'](key, value)
+        with tempfile.TemporaryDirectory() as directory:
+            type(runtime).skill_file = Path(directory) / 'skill.md'
+            type(runtime).study_file = Path(directory) / 'study.md'
+            content = ''
+            for index in range(85):
+                content = self.b['_append_study'](content, '- 群知识条目 ' + str(index), chat_id='-1')
+            self.b['_write_study'](content)
+            db.executemany('INSERT INTO ai_learning_samples(ts,chat_id,text,role) VALUES(0,?,?,?)',
+                           [('-1', '群友聊了很多内容 ' + str(i), 'group') for i in range(10)])
+            db.commit()
+            async def model(prompt, *_args, **_kwargs):
+                return '- 合并后的群知识' if 'group-chat notes' in prompt else '- 简短自然'
+            self.b['_call_ai_any'] = AsyncMock(side_effect=model)
+            await self.b['_learn_ai_flock'](force=True)
+            blocks = [b for b in self.b['_study_blocks'](self.b['_read_study']())
+                      if str(b['meta'].get('chat_id')) == '-1' and b['meta'].get('source') != 'correction']
+            self.assertLessEqual(len(blocks), self.b['STUDY_PER_GROUP_MAX'])
+            self.assertTrue(any(block['meta'].get('source') == 'distill' for block in blocks))
+
     async def test_high_cost_context_split_processes_all_and_retains_failures(self):
         provider=await self.provider();runtime=self.b['get_runtime']();db=self.b['conn']
         db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit()
@@ -500,7 +550,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
                 return '- safe style'
             self.b['_call_ai_any']=AsyncMock(side_effect=model);result=await self.b['_learn_ai_flock']()
             self.assertEqual((result['samples'],result['failed_samples']),(9,1));self.assertEqual([tuple(row) for row in db.execute('SELECT text FROM ai_learning_samples')],[('FAIL3内容足够长',)])
-            self.assertEqual(len(self.b['_skill_memory_blocks'](self.b['_read_skill']())),8);self.assertEqual(len(self.b['_study_blocks'](self.b['_read_study']())),1)
+            self.assertEqual(len(self.b['_skill_memory_blocks'](self.b['_read_skill']())),4);self.assertEqual(len(self.b['_study_blocks'](self.b['_read_study']())),1)
         self.assertTrue(self.b['_is_context_length_error'](RuntimeError('AI API 未返回有效 JSON（HTTP 413）')))
         self.assertTrue(self.b['_is_context_length_error'](RuntimeError('context_length_exceeded: maximum context window')))
 

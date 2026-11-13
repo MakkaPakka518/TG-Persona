@@ -759,9 +759,9 @@ section.act,.fold.open .fold-b{animation:none}
             <div class="water-ai-limits">
               <div><label for="brAiFlockContextMessages">上下文消息数</label><input id="brAiFlockContextMessages" type="number" value="6" min="1" max="50" step="1" inputmode="numeric"></div>
               <div><label for="brAiFlockMessageChars">单条消息字数</label><input id="brAiFlockMessageChars" type="number" value="120" min="40" max="2000" step="1" inputmode="numeric"></div>
-              <div><label for="brAiFlockSkillChars">skill 字数</label><input id="brAiFlockSkillChars" type="number" value="3000" min="0" max="200000" step="1" inputmode="numeric"></div>
+              <div><label for="brAiFlockSkillChars">skill 引用预算</label><input id="brAiFlockSkillChars" type="number" value="3000" min="0" max="200000" step="1" inputmode="numeric"></div>
               <div><label for="brAiFlockMaxTokens">最大输出 Token</label><input id="brAiFlockMaxTokens" type="number" value="200" min="50" max="8192" step="1" inputmode="numeric"></div>
-              <div><label for="brAiFlockKnowledgeChars">study.md + knowledge.md 引用字数（0 不引用）</label><input id="brAiFlockKnowledgeChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="brAiFlockKnowledgeUnlimited" onchange="syncKnowledgeLimit('brAiFlock')"> 两份文件引用无上限</label><label class="button-reply-toggle"><input type="checkbox" id="brAiFlockKnowledgeOnDemand"> 按需引用两份文件</label></div>
+              <div><label for="brAiFlockKnowledgeChars">study.md + knowledge.md 引用预算（0 不引用）</label><input id="brAiFlockKnowledgeChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="brAiFlockKnowledgeUnlimited" onchange="syncKnowledgeLimit('brAiFlock')"> 两份文件引用无上限</label><label class="button-reply-toggle"><input type="checkbox" id="brAiFlockKnowledgeOnDemand"> 按需引用两份文件</label></div>
             </div>
             <div class="hint">可按模型能力和费用手动调小或调大，不同任务可分别设置。</div>
             <label>使用的 AI API（可多选）</label><div id="brAiFlockProviders" class="grp-pick"></div>
@@ -827,9 +827,9 @@ section.act,.fold.open .fold-b{animation:none}
             <div class="water-ai-limits">
               <div><label for="lkAiFlockContextMessages">上下文消息数</label><input id="lkAiFlockContextMessages" type="number" value="6" min="1" max="50" step="1" inputmode="numeric"></div>
               <div><label for="lkAiFlockMessageChars">单条消息字数</label><input id="lkAiFlockMessageChars" type="number" value="120" min="40" max="2000" step="1" inputmode="numeric"></div>
-              <div><label for="lkAiFlockSkillChars">skill 字数</label><input id="lkAiFlockSkillChars" type="number" value="3000" min="0" max="200000" step="1" inputmode="numeric"></div>
+              <div><label for="lkAiFlockSkillChars">skill 引用预算</label><input id="lkAiFlockSkillChars" type="number" value="3000" min="0" max="200000" step="1" inputmode="numeric"></div>
               <div><label for="lkAiFlockMaxTokens">最大输出 Token</label><input id="lkAiFlockMaxTokens" type="number" value="200" min="50" max="8192" step="1" inputmode="numeric"></div>
-              <div><label for="lkAiFlockKnowledgeChars">study.md + knowledge.md 引用字数（0 不引用）</label><input id="lkAiFlockKnowledgeChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="lkAiFlockKnowledgeUnlimited" onchange="syncKnowledgeLimit('lkAiFlock')"> 两份文件引用无上限</label><label class="button-reply-toggle"><input type="checkbox" id="lkAiFlockKnowledgeOnDemand"> 按需引用两份文件</label></div>
+              <div><label for="lkAiFlockKnowledgeChars">study.md + knowledge.md 引用预算（0 不引用）</label><input id="lkAiFlockKnowledgeChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="lkAiFlockKnowledgeUnlimited" onchange="syncKnowledgeLimit('lkAiFlock')"> 两份文件引用无上限</label><label class="button-reply-toggle"><input type="checkbox" id="lkAiFlockKnowledgeOnDemand"> 按需引用两份文件</label></div>
             </div>
             <div class="hint">可按模型能力和费用手动调小或调大，不同任务可分别设置。</div>
             <label>使用的 AI API（可多选）</label><div id="lkAiFlockProviders" class="grp-pick"></div>
@@ -880,9 +880,9 @@ section.act,.fold.open .fold-b{animation:none}
             <div class="water-ai-limits">
               <div><label for="crAiFlockContextMessages">上下文消息数</label><input id="crAiFlockContextMessages" type="number" value="6" min="1" max="50" step="1" inputmode="numeric"></div>
               <div><label for="crAiFlockMessageChars">单条消息字数</label><input id="crAiFlockMessageChars" type="number" value="120" min="40" max="2000" step="1" inputmode="numeric"></div>
-              <div><label for="crAiFlockSkillChars">skill 字数</label><input id="crAiFlockSkillChars" type="number" value="3000" min="0" max="200000" step="1" inputmode="numeric"></div>
+              <div><label for="crAiFlockSkillChars">skill 引用预算</label><input id="crAiFlockSkillChars" type="number" value="3000" min="0" max="200000" step="1" inputmode="numeric"></div>
               <div><label for="crAiFlockMaxTokens">最大输出 Token</label><input id="crAiFlockMaxTokens" type="number" value="200" min="50" max="8192" step="1" inputmode="numeric"></div>
-              <div><label for="crAiFlockKnowledgeChars">study.md + knowledge.md 引用字数（0 不引用）</label><input id="crAiFlockKnowledgeChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="crAiFlockKnowledgeUnlimited" onchange="syncKnowledgeLimit('crAiFlock')"> 两份文件引用无上限</label><label class="button-reply-toggle"><input type="checkbox" id="crAiFlockKnowledgeOnDemand"> 按需引用两份文件</label></div>
+              <div><label for="crAiFlockKnowledgeChars">study.md + knowledge.md 引用预算（0 不引用）</label><input id="crAiFlockKnowledgeChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="crAiFlockKnowledgeUnlimited" onchange="syncKnowledgeLimit('crAiFlock')"> 两份文件引用无上限</label><label class="button-reply-toggle"><input type="checkbox" id="crAiFlockKnowledgeOnDemand"> 按需引用两份文件</label></div>
             </div>
             <div class="hint">可按模型能力和费用手动调小或调大，不同任务可分别设置。</div>
             <label>使用的 AI API（可多选）</label><div id="crAiFlockProviders" class="grp-pick"></div>
@@ -953,9 +953,9 @@ section.act,.fold.open .fold-b{animation:none}
           <div class="water-ai-limits">
             <div><label for="waterAiJobContextMessages">上下文消息数</label><input id="waterAiJobContextMessages" type="number" value="6" min="1" max="50" step="1" inputmode="numeric"></div>
             <div><label for="waterAiJobMessageChars">单条消息字数</label><input id="waterAiJobMessageChars" type="number" value="120" min="40" max="2000" step="1" inputmode="numeric"></div>
-            <div><label for="waterAiJobSkillChars">skill 字数</label><input id="waterAiJobSkillChars" type="number" value="3000" min="0" max="200000" step="1" inputmode="numeric"></div>
+            <div><label for="waterAiJobSkillChars">skill 引用预算</label><input id="waterAiJobSkillChars" type="number" value="3000" min="0" max="200000" step="1" inputmode="numeric"></div>
             <div><label for="waterAiJobMaxTokens">最大输出 Token</label><input id="waterAiJobMaxTokens" type="number" value="200" min="50" max="8192" step="1" inputmode="numeric"></div>
-            <div><label for="waterAiJobKnowledgeChars">study.md + knowledge.md 引用字数（0 不引用）</label><input id="waterAiJobKnowledgeChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="waterAiJobKnowledgeUnlimited" onchange="syncKnowledgeLimit('waterAiJob')"> 两份文件引用无上限</label><label class="button-reply-toggle"><input type="checkbox" id="waterAiJobKnowledgeOnDemand"> 按需引用两份文件</label></div>
+            <div><label for="waterAiJobKnowledgeChars">study.md + knowledge.md 引用预算（0 不引用）</label><input id="waterAiJobKnowledgeChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="waterAiJobKnowledgeUnlimited" onchange="syncKnowledgeLimit('waterAiJob')"> 两份文件引用无上限</label><label class="button-reply-toggle"><input type="checkbox" id="waterAiJobKnowledgeOnDemand"> 按需引用两份文件</label></div>
           </div>
           <div class="water-ai-limits water-ai-frequency">
             <div><label for="waterAiJobMinMessages">最少间隔消息</label><input id="waterAiJobMinMessages" type="number" value="6" min="1" max="100" step="1" inputmode="numeric"></div>
@@ -1417,7 +1417,7 @@ section.act,.fold.open .fold-b{animation:none}
         <div class="water-ai-limits">
           <div><label for="waterAiSkillBatchSize">每批样本数</label><input id="waterAiSkillBatchSize" type="number" value="20" min="10" max="200" step="1" inputmode="numeric"></div>
           <div><label for="waterAiSkillMessageChars">单条样本字数</label><input id="waterAiSkillMessageChars" type="number" value="160" min="40" max="4096" step="1" inputmode="numeric"></div>
-          <div><label for="waterAiSkillSkillChars">skill 字数</label><input id="waterAiSkillSkillChars" type="number" value="6000" min="500" max="5242880" step="1" inputmode="numeric"></div>
+          <div><label for="waterAiSkillSkillChars">学习时 skill 参考字数</label><input id="waterAiSkillSkillChars" type="number" value="6000" min="500" max="5242880" step="1" inputmode="numeric"></div>
           <div><label for="waterAiSkillMaxTokens">最大输出 Token</label><input id="waterAiSkillMaxTokens" type="number" value="600" min="100" max="32768" step="1" inputmode="numeric"></div>
         </div>
         <div class="hint">以上预算仅用于普通学习；数值会在鲸鱼模式结束后继续使用。</div>
@@ -1433,7 +1433,7 @@ section.act,.fold.open .fold-b{animation:none}
         <label for="waterAiSkillUploadTime">上传时间（北京时间）</label><input type="time" id="waterAiSkillUploadTime" value="03:00">
         <label class="check water-ai-distill"><input type="checkbox" id="waterAiSkillDistillEnabled"> 每日提炼生成记忆</label>
         <label for="waterAiSkillDistillTime">提炼时间（北京时间）</label><input type="time" id="waterAiSkillDistillTime" value="04:00">
-        <div class="hint">生成记忆保留 1 天完整内容；超过 1 天转为详细记忆，超过 7 天转为摘要，超过 60 天且至少经过 3 次提炼后逐渐淡化。每天按所选北京时间提炼；接近 5 MiB 时先压缩最旧生成记忆，空间仍不足则按时间删除最旧生成记忆。手动导入或固定的 Markdown 永远不会被自动删除。</div>
+        <div class="hint">学习只写入提炼后的详细记忆，不再保存原始消息副本。近期超过 40 条合并为详细记忆，详细超过 200 条合并为摘要，摘要超过 300 条转为淡化；淡化 3 次或长期无人引用后删除。单条记忆最多 700 字。淘汰时优先保留常被引用和固定内容，手动导入或固定的 Markdown 永远不会被自动删除。</div>
         <div id="waterAiSkillActiveStatus" class="learning-status state-waiting" role="status" aria-live="polite"><span class="learning-status-dot" aria-hidden="true"></span><div class="learning-status-main"><div class="learning-status-title" id="waterAiSkillStateTitle">未启用</div><div class="learning-status-meta" id="waterAiSkillStateMeta"></div><div class="learning-status-error" id="waterAiSkillStateError"></div></div></div>
         <button class="btn" type="button" id="waterAiSkillSave" style="margin-top:12px" onclick="saveFlockSkill()">保存学习设置</button>
         <div class="water-ai-stats"><span id="waterAiSkillSamples">样本：--</span><span id="waterAiSkillSize">skill.md：--</span><span id="waterAiStudySize">study.md：--</span><span id="waterAiSkillLastUpload">上次上传：--</span></div>
@@ -3266,7 +3266,7 @@ let aiProviders=[],aiProvidersLoaded=false,staleReferenceNoticeShown=false,editi
 const registrationAIProviderSel={br:new Set(),lk:new Set(),cr:new Set()},registrationAIProviderExplicit={br:false,lk:false,cr:false};
 function formatTokenCount(value){return Number(value||0).toLocaleString('zh-CN')}
 function csvValues(value){return (Array.isArray(value)?value:value instanceof Set?[...value]:String(value||'').split(/[,，]/)).map(x=>String(x).trim()).filter(Boolean)}
-const AI_FLOCK_LIMIT_SPECS=[['ContextMessages','context_messages',6,1,50,'上下文消息数'],['MessageChars','message_chars',120,40,2000,'单条消息字数'],['SkillChars','skill_chars',3000,0,200000,'skill 字数'],['MaxTokens','max_tokens',200,50,8192,'最大输出 Token'],['KnowledgeChars','knowledge_chars',2000,0,5242880,'study.md + knowledge.md 引用字数']];
+const AI_FLOCK_LIMIT_SPECS=[['ContextMessages','context_messages',6,1,50,'上下文消息数'],['MessageChars','message_chars',120,40,2000,'单条消息字数'],['SkillChars','skill_chars',3000,0,200000,'skill 引用预算'],['MaxTokens','max_tokens',200,50,8192,'最大输出 Token'],['KnowledgeChars','knowledge_chars',2000,0,5242880,'study.md + knowledge.md 引用预算']];
 const AI_FLOCK_LEARNING_LIMIT_SPECS=[['BatchSize','flock_learning_batch_size',20,10,200,'每批样本数'],['MessageChars','flock_learning_message_chars',160,40,4096,'单条样本字数'],['SkillChars','flock_learning_skill_chars',6000,500,5242880,'skill 字数'],['MaxTokens','flock_learning_max_tokens',600,100,32768,'最大输出 Token']];
 function syncKnowledgeLimit(prefix){$('#'+prefix+'KnowledgeChars').disabled=$('#'+prefix+'KnowledgeUnlimited').checked}
 function setIntegerFields(idPrefix,data,specs,fieldPrefix=''){for(const [suffix,field,fallback] of specs){const value=data?.[fieldPrefix+field]??fallback;if(suffix==='KnowledgeChars'){$('#'+idPrefix+'KnowledgeUnlimited').checked=Number(value)===-1;$('#'+idPrefix+suffix).value=Number(value)===-1?fallback:value;syncKnowledgeLimit(idPrefix)}else $('#'+idPrefix+suffix).value=value}}

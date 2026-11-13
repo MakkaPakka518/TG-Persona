@@ -225,7 +225,7 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
 
     def test_study_capacity_drops_oldest_managed_section(self):
         original = self.b['KNOWLEDGE_MAX_BYTES']
-        self.b['KNOWLEDGE_MAX_BYTES'] = 260
+        self.b['KNOWLEDGE_MAX_BYTES'] = 430
         try:
             content = self.b['_append_study']('', 'OLDEST-' + 'A' * 80)
             content = self.b['_append_study'](content, 'MIDDLE-' + 'B' * 80)
@@ -234,7 +234,7 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
             self.b['KNOWLEDGE_MAX_BYTES'] = original
         self.assertNotIn('OLDEST-', content)
         self.assertIn('NEWEST-', content)
-        self.b['KNOWLEDGE_MAX_BYTES'] = 120
+        self.b['KNOWLEDGE_MAX_BYTES'] = 200
         try:
             with self.assertRaisesRegex(ValueError, 'study.md 容量不足'):
                 self.b['_append_study']('F' * 110, 'NEWEST')
