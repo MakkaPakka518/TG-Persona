@@ -1421,6 +1421,23 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     ex("selectedAccount='distill-a';accountEpoch++;waterAISkillBusy=false");let done,loads=0;app.api=()=>new Promise(r=>done=r);app.loadFlockSkill=async()=>{loads++};const pending=ex("runFlockSkillAction('distill-now')");assert(q('#waterAiDistillNow').disabled);ex("selectedAccount='distill-b';accountEpoch++;resetWaterAIState()");q('#waterAiSkillStatus').textContent='新账号状态';done({distilled:true});await pending;assert.strictEqual(q('#waterAiSkillStatus').textContent,'新账号状态');assert.strictEqual(loads,0);assert.strictEqual(ex('waterAISkillBusy'),false);
     app.api=async()=>{throw new Error('mock distill unavailable')};app.loadFlockSkill=async()=>{};await ex("runFlockSkillAction('distill-now')");assert(q('#waterAiSkillStatus').textContent.includes('提炼失败：mock distill unavailable'));assert(!q('#waterAiDistillNow').disabled);
   });
+  await test('验证码识别两个开关同排等宽且保留触控高度',async()=>{
+    const card=html.slice(html.indexOf('id="aiTestCard"'),html.indexOf('id="aiTestProviders"'));
+    assert(card.includes('class="recognition-switches"'));
+    assert(!card.includes('class="flex" style="gap:18px"'));
+    for(const id of ['sAiOn','sOcrOn'])assert((card.match(new RegExp('id="'+id+'"','g'))||[]).length===1);
+    for(const css of ['.recognition-switches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}','min-height:44px','flex:0 0 auto'])assert(html.includes(css));
+  });
+  await test('桌面宽屏使用瀑布流分栏且手机布局不受影响',async()=>{
+    const wide=html.slice(html.indexOf('/* 宽屏：导航置顶、内容双列'),html.indexOf('section.act,.fold.open .fold-b{animation:none}'));
+    for(const css of ['columns:2','column-gap:12px','column-span:all','break-inside:avoid','-webkit-column-break-inside:avoid'])assert(wide.includes(css));
+    assert(wide.includes('display:block;columns:2'));
+    for(const id of ['#tab-overview.act','#tab-autos.act','#tab-groups.act','#tab-settings.act'])assert(wide.includes(id));
+    assert(!wide.includes('grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start'));
+    assert(html.includes('@media(max-width:430px)')&&html.includes('@media(max-width:340px)'));
+    const narrow=html.slice(0,html.indexOf('@media(min-width:900px)'));
+    assert(!narrow.includes('columns:2'));
+  });
   await test('学习卡片390与430宽度静态规则阻止文件和网格横向溢出',async()=>{
     for(const css of ['#flockLearningCard{min-width:0;overflow:hidden}','#flockLearningCard .fold-b','#flockLearningCard input[type=datetime-local]','#flockLearningCard input[type=file]{display:block;width:100%;overflow:hidden}','input[type=file]::file-selector-button','@media(max-width:430px)','grid-template-columns:repeat(2,minmax(0,1fr))','@media(max-width:340px)'])assert(html.includes(css));assert(html.includes('#flockLearningCard .water-ai-toolbar,#flockLearningCard .water-ai-stats{display:grid'));assert(html.includes('.learning-exam-result{max-width:100%'));assert(html.includes('.model-choice-list{width:100%;max-width:100%'));assert(html.includes('.ai-flock-emojis{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr))'));assert(html.includes('.water-ai-limits>div{min-width:0}'));
   });
