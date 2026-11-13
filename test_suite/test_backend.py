@@ -86,7 +86,7 @@ def load_backend():
                          'AI_FLOCK_LEARNING_MESSAGE_CHARS', 'AI_FLOCK_LEARNING_SKILL_CHARS',
                          'AI_FLOCK_LEARNING_MAX_TOKENS', 'AI_FLOCK_LEARNING_UNLIMITED_MAX_TOKENS',
                           'AI_FLOCK_LEARNING_RANGES', 'SKILL_MAX_BYTES', 'KNOWLEDGE_MAX_BYTES', 'AI_FLOCK_KNOWLEDGE_CHARS',
-                          'AI_FLOCK_MEMORY_BLOCK_MAX_BYTES', 'AI_FLOCK_DISTILL_MAX_TOKENS', '_KNOWLEDGE_INTENT', 'AUTO_BACKUP_PREFIX', 'AI_REASONING_EFFORTS', 'AI_CLIENT_PROFILES'}
+                          'AI_FLOCK_MEMORY_BLOCK_MAX_BYTES', 'AI_FLOCK_DISTILL_MAX_TOKENS', '_KNOWLEDGE_INTENT', 'AUTO_BACKUP_PREFIX', 'AI_REASONING_EFFORTS', 'AI_CLIENT_PROFILES', '_OWNER_AI_DEFAULTS'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -143,6 +143,11 @@ def load_backend():
             if self._knowledge_lock is None:
                 self._knowledge_lock = asyncio.Lock()
             return self._knowledge_lock
+        @property
+        def ai_budget_lock(self):
+            if self._ai_budget_lock is None:
+                self._ai_budget_lock = asyncio.Lock()
+            return self._ai_budget_lock
         def __getattr__(self, name):
             key = aliases.get(name, name)
             default = {} if name in dict_fields else set() if name in set_fields else False if name in ('handler_registered','session_alerted','closing','closed','stopping','ai_flock_busy','ai_learning_busy','ai_skill_upload_busy') else 0 if name in ('ai_flock_waiting','ai_learning_next_at') else '' if name=='tg_phone' else None

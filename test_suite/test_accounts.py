@@ -245,6 +245,25 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         for method, route in [('GET', ''), ('PUT', ''), ('POST', '/import'), ('GET', '/export')]:
             self.assertEqual((await self.req(method, '/api/ai/flock/study' + route, aid, json={'content': 'x'})).status_code, 401)
 
+    async def test_owner_settings_memory_and_traces_are_account_scoped(self):
+        aid = await self.create()
+        root_settings = {'flock_correction_enabled': 1, 'flock_correction_keywords': '改正',
+                         'flock_owner_pause_enabled': 1, 'flock_daily_total_tokens': 1234}
+        response = await self.req('PUT', '/api/ai/flock/owner-settings', 'default', json=root_settings)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((await self.req('GET', '/api/ai/flock/owner-settings', aid)).json()['settings']['flock_correction_enabled'], '0')
+        for owner, content in [('default', '根账号记忆'), (aid, '小号记忆')]:
+            self.assertEqual((await self.req('PUT', '/api/ai/flock/study', owner, json={'content': content})).status_code, 200)
+            listed = (await self.req('GET', '/api/ai/flock/memory?file=study', owner)).json()
+            self.assertEqual(listed['items'][0]['body'], content)
+        self.rt().db.execute("INSERT INTO ai_flock_traces VALUES(77,?)", ('{"references":{"study":"private"}}',))
+        self.rt().db.commit()
+        self.assertEqual((await self.req('GET', '/api/ai/flock/traces/77', aid)).status_code, 404)
+        self.assertEqual((await self.req('GET', '/api/ai/flock/traces/77', 'default')).status_code, 200)
+        self.http.cookies.clear()
+        for route in ('/api/ai/flock/owner-settings', '/api/ai/flock/memory', '/api/ai/flock/traces/77'):
+            self.assertEqual((await self.req('GET', route, aid)).status_code, 401)
+
     async def test_parallel_clients_login_codes_and_two_factor(self):
         aid = await self.create()
         await asyncio.gather(self.login('default', 123, '00000000001', '00001'),

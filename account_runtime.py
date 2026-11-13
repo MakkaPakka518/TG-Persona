@@ -121,6 +121,7 @@ class AccountRuntime:
     ai_learning_busy: bool = False
     ai_learning_next_at: int = 0
     ai_skill_upload_busy: bool = False
+    _ai_budget_lock: object = None
     session_alerted: bool = False
     handler_registered: bool = False
     closing: bool = False
@@ -188,6 +189,12 @@ class AccountRuntime:
         if self._knowledge_lock is None:
             self._knowledge_lock = asyncio.Lock()
         return self._knowledge_lock
+
+    @property
+    def ai_budget_lock(self):
+        if self._ai_budget_lock is None:
+            self._ai_budget_lock = asyncio.Lock()
+        return self._ai_budget_lock
 
     def check_live(self):
         if self.closing or self.closed or self.stopping:

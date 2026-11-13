@@ -1614,5 +1614,36 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(js.includes("autoCheckVersion();"));
     assert(js.includes("await loadUpd(true)"));
   });
+  await test('号主指令默认关闭限额为零，关键词必填且单独保存',async()=>{
+    ex("selectedAccount='owner-settings';accountEpoch++;resetOwnerAIUI()");
+    assert(!q('#ownerCorrectionEnabled').checked&&!q('#ownerSummaryEnabled').checked&&!q('#ownerPauseEnabled').checked);
+    for(const id of ['ownerDailyTotal','ownerDailyLearning','ownerDailyFlock'])assert.strictEqual(q('#'+id).value,'0');
+    q('#ownerCorrectionEnabled').checked=true;let sent=0;app.api=async()=>{sent++;return {ok:true}};
+    await ex('saveOwnerAISettings()');assert.strictEqual(sent,0);
+    q('#ownerCorrectionKeywords').value='改正';q('#ownerSummaryKeywords').value='最近他们聊了什么';q('#ownerSummaryEnabled').checked=true;q('#ownerPauseEnabled').checked=true;q('#ownerPauseMinutes').value='15';
+    let request;app.api=async(p,o)=>{request=[p,o];return {ok:true}};await ex('saveOwnerAISettings()');
+    assert.strictEqual(request[0],'/api/ai/flock/owner-settings');const body=JSON.parse(request[1].body);
+    assert.strictEqual(body.flock_owner_pause_minutes,15);assert.strictEqual(body.flock_correction_keywords,'改正');assert.strictEqual(body.flock_daily_total_tokens,0);assert.strictEqual(request[1]._account.id,'owner-settings');
+  });
+  await test('号主设置与记忆迟到响应不能泄露到新账号',async()=>{
+    ex("selectedAccount='owner-a';accountEpoch++;resetOwnerAIUI()");let done;app.api=()=>new Promise(r=>done=r);const pending=ex('loadOwnerAISettings()');
+    ex("selectedAccount='owner-b';accountEpoch++;resetOwnerAIUI()");done({settings:{flock_correction_enabled:'1',flock_correction_keywords:'旧账号内容'}});await pending;assert.strictEqual(q('#ownerCorrectionKeywords').value,'');assert(!q('#ownerCorrectionEnabled').checked);
+    q('#memoryFile').value='study';app.api=()=>new Promise(r=>done=r);const memory=ex('loadMemory()');
+    ex("selectedAccount='owner-c';accountEpoch++;resetOwnerAIUI()");done({items:[{body:'旧账号私密记忆'}],version:'1'});await memory;assert.strictEqual(q('#memoryList').children.length,0);
+  });
+  await test('学习累计统计区分主人群友和待处理，预算显示不限额',async()=>{
+    app.metricsFixture={sample_count:0,learning_metrics:{last_collected:1794529129,today:{owner:{collected:2,learned:2},group:{collected:40,learned:40}},total:{owner:{collected:2,learned:2,pending:0},group:{collected:40,learned:40,pending:0}}}};
+    ex('renderLearningMetrics(metricsFixture)');assert.strictEqual(q('#waterAiSkillSamples').textContent,'待学习样本：0');
+    const lines=q('#learningMetrics').children.map(n=>n.textContent);assert(lines.some(v=>v.includes('群友：今日采集 40')));assert(lines.some(v=>v.includes('主人：今日采集 2')));
+    assert(!q('#learningLastCollected').textContent.includes('1794529129'));
+    app.budgetFixture=[{label:'全部 AI',used:42,limit:0,paused:false}];ex('renderOwnerAIBudgets(budgetFixture)');assert(q('#ownerBudgetStatus').textContent.includes('不限额'));
+  });
+  await test('记忆查看只显示纯文本，保存携带版本与冻结账号',async()=>{
+    ex("selectedAccount='memory-edit';accountEpoch++;resetOwnerAIUI()");q('#memoryFile').value='study';q('#memorySearch').value='电影';
+    app.api=async(p,o)=>{assert(p.includes('file=study')&&p.includes('q='));return {version:'v1',offset:0,total:1,items:[{start:0,body:'<img src=x>电影',group:'本群',created_at:1794529129,pinned:false,source:'learning'}]}};
+    await ex('loadMemory()');const row=q('#memoryList').children[0];assert.strictEqual(row.children[1].textContent,'<img src=x>电影');assert.strictEqual(row.children[1].innerHTML,'');
+    let request;const loader=app.loadMemory;app.loadMemory=async()=>{};app.api=async(p,o)=>{request=[p,o];return {ok:true}};app.memoryEditBody={version:'v1',body:'改正后的内容'};await ex("mutateMemory('study',0,memoryEditBody,accountContext())");
+    assert.strictEqual(request[0],'/api/ai/flock/memory/study/0');assert.deepStrictEqual(JSON.parse(request[1].body),{version:'v1',body:'改正后的内容'});assert.strictEqual(request[1]._account.id,'memory-edit');app.loadMemory=loader;
+  });
   console.log(`前端回归 ${count} 项全部通过`);
 })().catch(e=>{console.error(e);process.exitCode=1});
