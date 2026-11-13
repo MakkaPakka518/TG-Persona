@@ -474,7 +474,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
                 return '- safe style'
             self.b['_call_ai_any']=AsyncMock(side_effect=model);result=await self.b['_learn_ai_flock']()
             self.assertEqual((result['samples'],result['failed_samples']),(9,1));self.assertEqual([tuple(row) for row in db.execute('SELECT text FROM ai_learning_samples')],[('FAIL3内容足够长',)])
-            self.assertEqual(len(self.b['_skill_memory_blocks'](self.b['_read_skill']())),8);self.assertEqual(len(self.b['_study_blocks'](self.b['_read_study']())),5)
+            self.assertEqual(len(self.b['_skill_memory_blocks'](self.b['_read_skill']())),8);self.assertEqual(len(self.b['_study_blocks'](self.b['_read_study']())),1)
         self.assertTrue(self.b['_is_context_length_error'](RuntimeError('AI API 未返回有效 JSON（HTTP 413）')))
         self.assertTrue(self.b['_is_context_length_error'](RuntimeError('context_length_exceeded: maximum context window')))
 

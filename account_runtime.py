@@ -72,6 +72,49 @@ def open_database(path):
     return db
 
 
+class AIRequestScheduler:
+    """One learning request, with a foreground slot and priority between requests."""
+    def __init__(self):
+        self.condition = asyncio.Condition()
+        self.waiting = []
+        self.active = []
+        self.foreground_streak = 0
+
+    @property
+    def active_learning(self):
+        return "learning" in self.active
+
+    def status(self):
+        return {"active": len(self.active), "active_learning": self.active_learning,
+                "waiting_learning": sum(item[1] == "learning" for item in self.waiting),
+                "waiting_foreground": sum(item[1] != "learning" for item in self.waiting)}
+
+    @asynccontextmanager
+    async def slot(self, feature, serialized=False):
+        ticket = (object(), feature)
+        async with self.condition:
+            self.waiting.append(ticket)
+            try:
+                while True:
+                    eligible = [item for item in self.waiting if item[1] != "learning" or not self.active_learning]
+                    learning_turn = self.foreground_streak >= 3
+                    eligible.sort(key=lambda item: (item[1] == "learning") != learning_turn)
+                    if (eligible and eligible[0] == ticket and len(self.active) < (1 if serialized else 2)):
+                        break
+                    await self.condition.wait()
+                self.active.append(feature)
+                self.foreground_streak = 0 if feature == "learning" else self.foreground_streak + 1
+            finally:
+                self.waiting.remove(ticket)
+                self.condition.notify_all()
+        try:
+            yield
+        finally:
+            async with self.condition:
+                self.active.remove(feature)
+                self.condition.notify_all()
+
+
 @dataclass(eq=False)
 class AccountRuntime:
     id: str
@@ -96,6 +139,7 @@ class AccountRuntime:
     ai_flock_status: dict = field(default_factory=dict)
     ai_flock_tests: dict = field(default_factory=dict)
     ai_flock_provider_retry_at: dict = field(default_factory=dict)
+    ai_flock_frequency: dict = field(default_factory=dict)
     ai_knowledge_last: dict = field(default_factory=dict)
     ai_flock_blocked: dict = field(default_factory=dict)
     ai_flock_waiting: int = 0
@@ -125,6 +169,7 @@ class AccountRuntime:
     ai_learning_next_at: int = 0
     ai_skill_upload_busy: bool = False
     _ai_budget_lock: object = None
+    _ai_scheduler: object = None
     session_alerted: bool = False
     handler_registered: bool = False
     closing: bool = False
@@ -139,6 +184,12 @@ class AccountRuntime:
     _knowledge_lock: object = None
     request_count: int = 0
     lock_owner: object = None
+
+    @property
+    def ai_scheduler(self):
+        if self._ai_scheduler is None:
+            self._ai_scheduler = AIRequestScheduler()
+        return self._ai_scheduler
 
     @property
     def lifecycle_lock(self):
@@ -324,6 +375,7 @@ class AccountRuntime:
             self.ai_flock_status.clear()
             self.ai_flock_tests.clear()
             self.ai_flock_provider_retry_at.clear()
+            self.ai_flock_frequency.clear()
             self.ai_knowledge_last.clear()
             self.ai_flock_blocked.clear()
             self.ai_flock_waiting = 0

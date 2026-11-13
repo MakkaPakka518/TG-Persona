@@ -164,8 +164,9 @@ class OwnerAITests(unittest.IsolatedAsyncioTestCase):
         event.reply.side_effect = [SimpleNamespace(id=mid, chat_id=-1) for mid in range(1000, 1010)]
         self.b['conn'].execute("INSERT INTO owner_ai_commands VALUES('-1',100,'summary','running')")
         await self.b['_run_owner_ai_command'](event, 'summary', '')
-        self.assertIsNone(self.b['_call_ai_any'].await_args.kwargs['max_tokens'])
-        self.assertNotIn('最多 800 字', self.b['_call_ai_any'].await_args.args[0])
+        summary_call = self.b['_call_ai_any'].await_args_list[0]
+        self.assertIsNone(summary_call.kwargs['max_tokens'])
+        self.assertNotIn('最多 800 字', summary_call.args[0])
         parts = [call.args[0] for call in event.reply.await_args_list]
         self.assertGreater(len(parts), 1)
         self.assertTrue(''.join(parts).endswith(answer))

@@ -34,6 +34,7 @@ import uuid
 import shutil
 import zlib
 from telethon.extensions import markdown as telethon_markdown
+from account_runtime import AIRequestScheduler
 from custom_workflow import (canonical_steps, canonical_trigger, group_matches, parse_steps,
                              parse_trigger, redact as redact_custom, render_template, search_pattern,
                              uses_credentials, uses_default_target, uses_trigger_context, validate_template)
@@ -118,7 +119,7 @@ def load_backend():
     aliases = {'db': 'conn', 'auto_tasks': '_auto_running', 'running': '_running',
                'session_alerted': '_session_alerted', 'cache': '_cache', 'dialog_cache': '_dialog_cache'}
     dict_fields = {'cache','dialog_cache','running','tg_state','hits_count','last_hit_ts','flock_buf',
-                    'auto_last_ts','signin_plans','poll_last','auto_tasks','ai_flock_last','ai_flock_blocked','ai_knowledge_last','ai_flock_status','ai_flock_tests','ai_flock_provider_retry_at'}
+                    'auto_last_ts','signin_plans','poll_last','auto_tasks','ai_flock_last','ai_flock_blocked','ai_knowledge_last','ai_flock_status','ai_flock_tests','ai_flock_provider_retry_at','ai_flock_frequency'}
     set_fields = {'tasks','ai_flock_busy_groups','generated_message_ids'}
     class RuntimeFixture:
         id = 'default'
@@ -129,6 +130,11 @@ def load_backend():
         skill_file = Path('/tmp/never-read-backend-fixture/skill.md')
         knowledge_file = Path('/tmp/never-read-backend-fixture/knowledge.md')
         study_file = Path('/tmp/never-read-backend-fixture/study.md')
+        @property
+        def ai_scheduler(self):
+            if self._ai_scheduler is None:
+                self._ai_scheduler = AIRequestScheduler()
+            return self._ai_scheduler
         @property
         def ai_flock_lock(self):
             if self._ai_flock_lock is None:
@@ -167,7 +173,7 @@ def load_backend():
             self.status=status
             super().__init__(message)
     runtime = RuntimeFixture()
-    names.update(get_runtime=lambda:runtime, AccountError=FixtureAccountError)
+    names.update(get_runtime=lambda:runtime, AccountError=FixtureAccountError, AIRequestScheduler=AIRequestScheduler)
     code = compile(ast.fix_missing_locations(ast.Module(body=selected, type_ignores=[])), str(SOURCE), 'exec')
     # 禁止执行器读文件或创建真实数据库，即使未来代码引入意外初始化也立刻失败。
     with patch('builtins.open', side_effect=AssertionError('测试拒绝文件I/O')), \
@@ -175,6 +181,8 @@ def load_backend():
         exec(code, names)
     names['conn'] = sqlite3.connect(':memory:')
     names['conn'].row_factory = sqlite3.Row
+    names['get_root_db'] = lambda: names['conn']
+    names['get_root_db'] = lambda: names['conn']
     names['db_init']()
     names['notify_event'], names['send_notify'] = Mock(), Mock()
     return names
