@@ -219,16 +219,52 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
         row = self.b['_ai_provider_rows']()[0]
         self.assertEqual((row['input_tokens'], row['output_tokens']), (8, 10))
 
-    async def test_referenced_provider_cannot_disable_or_delete(self):
-        provider=(await self.b['create_ai_provider'](self.body()))['provider']['id'];db=self.b['conn'];db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit()
-        job=(await self.b['create_ai_flock_job'](self.b['AIFlockJobInput'](name='引用',groups='-1',prompt='聊',provider_ids=provider)))['id']
+    async def test_delete_provider_cleans_every_reference_and_disables_only_orphaned_features(self):
+        provider=(await self.b['create_ai_provider'](self.body()))['provider']['id']
+        backup=(await self.b['create_ai_provider'](self.body(note='备用',key='two')))['provider']['id']
+        db=self.b['conn'];db.executemany("INSERT INTO watched_groups VALUES(?,?,0)",[('-1','一群'),('-2','二群')]);db.commit()
+        only=(await self.b['create_ai_flock_job'](self.b['AIFlockJobInput'](name='单线路',groups='-1',prompt='聊',provider_ids=provider)))['id']
+        mixed=(await self.b['create_ai_flock_job'](self.b['AIFlockJobInput'](name='多线路',groups='-2',prompt='聊',provider_ids=provider+','+backup)))['id']
+        reg_only=(await self.b['create_auto'](self.b['AutoIn'](type='link_register',name='注册单线路',btn_text='注册',keywords='状态',success_kw='成功',ai_flock_enabled=1,ai_flock_prompt='聊天',ai_flock_provider_ids=provider)))['id']
+        reg_mixed=(await self.b['create_auto'](self.b['AutoIn'](type='link_register',name='注册多线路',btn_text='注册',keywords='状态',success_kw='成功',ai_flock_enabled=1,ai_flock_prompt='聊天',ai_flock_provider_ids=provider+','+backup)))['id']
+        signin=(await self.b['create_auto'](self.b['AutoIn'](type='signin',name='图片签到',target='@dummy_bot',command='/sign',ai_provider_ids=provider,signin_recognition_mode='image',signin_image_prompt='识别图片')))['id']
+        db.executemany("INSERT INTO ai_flock_sessions(chat_id,source_task_id,expires_at,prompt,provider_ids) VALUES(?,?,9999999999,'x',?)",[('-10',reg_only,provider),('-11',reg_mixed,provider+','+backup)])
+        db.executemany("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[
+            ('flock_learning_provider_ids',provider),('flock_learning_enabled','1'),('flock_learning_unlimited','1'),
+            ('flock_deep_learning_enabled','1'),('flock_skill_distill_enabled','1'),
+            ('flock_owner_provider_ids',provider),('flock_summary_enabled','1')]);db.commit()
         with self.assertRaises(HTTPException) as disabled:await self.b['update_ai_provider'](provider,self.body(key='',enabled=False))
         self.assertEqual(disabled.exception.status_code,409)
-        db.execute('UPDATE ai_flock_jobs SET enabled=0 WHERE id=?',(job,));db.commit()
-        with self.assertRaises(HTTPException) as deleted:await self.b['delete_ai_provider'](provider)
-        self.assertEqual(deleted.exception.status_code,409)
-        db.execute('DELETE FROM ai_flock_jobs');db.execute("INSERT INTO settings(key,value) VALUES('flock_learning_provider_ids',?)",(provider,));db.commit()
-        with self.assertRaises(HTTPException):await self.b['delete_ai_provider'](provider)
+        deleted=await self.b['delete_ai_provider'](provider)
+        self.assertTrue(deleted['ok']);self.assertEqual(deleted['affected_references'],7);self.assertGreaterEqual(deleted['configurations_changed'],9)
+        self.assertEqual([row['id'] for row in self.b['_ai_provider_rows']()],[backup])
+        self.assertEqual(tuple(db.execute('SELECT provider_ids,enabled FROM ai_flock_jobs WHERE id=?',(only,)).fetchone()),('',0))
+        self.assertEqual(tuple(db.execute('SELECT provider_ids,enabled FROM ai_flock_jobs WHERE id=?',(mixed,)).fetchone()),(backup,1))
+        self.assertEqual(tuple(db.execute('SELECT ai_flock_provider_ids,ai_flock_enabled,enabled FROM automations WHERE id=?',(reg_only,)).fetchone()),('',0,1))
+        self.assertEqual(tuple(db.execute('SELECT ai_flock_provider_ids,ai_flock_enabled FROM automations WHERE id=?',(reg_mixed,)).fetchone()),(backup,1))
+        self.assertEqual(tuple(db.execute('SELECT ai_provider_ids,signin_recognition_mode,signin_captcha,enabled FROM automations WHERE id=?',(signin,)).fetchone()),('', 'none',0,1))
+        self.assertIsNone(db.execute("SELECT 1 FROM ai_flock_sessions WHERE chat_id='-10'").fetchone())
+        self.assertEqual(db.execute("SELECT provider_ids FROM ai_flock_sessions WHERE chat_id='-11'").fetchone()[0],backup)
+        self.assertEqual(tuple(self.b['get_setting'](key) for key in ('flock_learning_provider_ids','flock_learning_enabled','flock_learning_unlimited','flock_deep_learning_enabled','flock_skill_distill_enabled')),('','0','0','0','0'))
+        self.assertEqual((self.b['get_setting']('flock_owner_provider_ids'),self.b['get_setting']('flock_summary_enabled')),('','0'))
+
+    async def test_delete_last_provider_disables_features_that_used_all_providers(self):
+        provider=(await self.b['create_ai_provider'](self.body()))['provider']['id'];db=self.b['conn']
+        db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit()
+        job=(await self.b['create_ai_flock_job'](self.b['AIFlockJobInput'](name='全部线路',groups='-1',prompt='聊',provider_ids='')))['id']
+        registration=(await self.b['create_auto'](self.b['AutoIn'](type='link_register',name='注册全部线路',btn_text='注册',keywords='状态',success_kw='成功',ai_flock_enabled=1,ai_flock_prompt='聊天',ai_flock_provider_ids='')))['id']
+        signin=(await self.b['create_auto'](self.b['AutoIn'](type='signin',name='签到全部线路',target='@dummy_bot',command='/sign',ai_provider_ids='',signin_recognition_mode='image',signin_image_prompt='识别图片')))['id']
+        db.execute("INSERT INTO ai_flock_sessions(chat_id,source_task_id,expires_at,prompt,provider_ids) VALUES('-10',?,9999999999,'x','')",(registration,))
+        db.executemany("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[
+            ('flock_learning_provider_ids',''),('flock_learning_enabled','1'),
+            ('flock_owner_provider_ids',''),('flock_summary_enabled','1')]);db.commit()
+        deleted=await self.b['delete_ai_provider'](provider)
+        self.assertEqual(deleted['affected_references'],5)
+        self.assertEqual(db.execute('SELECT enabled FROM ai_flock_jobs WHERE id=?',(job,)).fetchone()[0],0)
+        self.assertEqual(db.execute('SELECT ai_flock_enabled FROM automations WHERE id=?',(registration,)).fetchone()[0],0)
+        self.assertEqual(tuple(db.execute('SELECT signin_recognition_mode,enabled FROM automations WHERE id=?',(signin,)).fetchone()),('none',1))
+        self.assertIsNone(db.execute("SELECT 1 FROM ai_flock_sessions WHERE chat_id='-10'").fetchone())
+        self.assertEqual((self.b['get_setting']('flock_learning_enabled'),self.b['get_setting']('flock_summary_enabled')),('0','0'))
 
     async def test_stale_provider_ids_reconcile_but_disabled_existing_survives(self):
         active=(await self.b['create_ai_provider'](self.body(note='active')))['provider']['id'];disabled=(await self.b['create_ai_provider'](self.body(note='disabled',key='two',enabled=False)))['provider']['id'];db=self.b['conn'];db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit()
@@ -238,7 +274,7 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.execute('SELECT provider_ids FROM ai_flock_jobs WHERE id=?',(job,)).fetchone()[0],disabled);self.assertEqual(db.execute('SELECT ai_flock_provider_ids FROM automations WHERE id=?',(auto,)).fetchone()[0],active);self.assertEqual(db.execute("SELECT provider_ids FROM ai_flock_sessions WHERE chat_id='-1'").fetchone()[0],disabled);self.assertEqual(self.b['get_setting']('flock_learning_provider_ids'),disabled)
         db.execute('UPDATE ai_flock_jobs SET enabled=1,provider_ids=? WHERE id=?',(stale,job));db.execute('UPDATE automations SET ai_flock_enabled=1,ai_flock_provider_ids=? WHERE id=?',(stale,auto));db.execute("UPDATE ai_flock_sessions SET provider_ids=? WHERE chat_id='-1'",(stale,));db.execute("UPDATE settings SET value=? WHERE key='flock_learning_provider_ids'",(stale,));db.executemany("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[(key,'1') for key in ('flock_learning_enabled','flock_learning_unlimited','flock_deep_learning_enabled','flock_skill_distill_enabled')]);db.commit()
         await self.b['list_ai_providers']()
-        self.assertEqual(tuple(db.execute('SELECT provider_ids,enabled FROM ai_flock_jobs WHERE id=?',(job,)).fetchone()),(stale,0));self.assertEqual(tuple(db.execute('SELECT ai_flock_provider_ids,ai_flock_enabled FROM automations WHERE id=?',(auto,)).fetchone()),(stale,0));self.assertIsNone(db.execute("SELECT 1 FROM ai_flock_sessions WHERE chat_id='-1'").fetchone());self.assertEqual(self.b['get_setting']('flock_learning_provider_ids'),stale);self.assertEqual(tuple(self.b['get_setting'](key) for key in ('flock_learning_enabled','flock_learning_unlimited','flock_deep_learning_enabled','flock_skill_distill_enabled')),('0','0','0','0'))
+        self.assertEqual(tuple(db.execute('SELECT provider_ids,enabled FROM ai_flock_jobs WHERE id=?',(job,)).fetchone()),('',0));self.assertEqual(tuple(db.execute('SELECT ai_flock_provider_ids,ai_flock_enabled FROM automations WHERE id=?',(auto,)).fetchone()),('',0));self.assertIsNone(db.execute("SELECT 1 FROM ai_flock_sessions WHERE chat_id='-1'").fetchone());self.assertEqual(self.b['get_setting']('flock_learning_provider_ids'),'');self.assertEqual(tuple(self.b['get_setting'](key) for key in ('flock_learning_enabled','flock_learning_unlimited','flock_deep_learning_enabled','flock_skill_distill_enabled')),('0','0','0','0'))
 
     async def test_model_discovery_saved_blank_key_normalizes_bounds_and_redacts(self):
         provider=(await self.b['create_ai_provider'](self.body(base='https://example.invalid/v1/chat/completions')))['provider']['id']

@@ -3354,7 +3354,7 @@ async function saveAIProvider(){
 async function mutateAIProvider(id,action){
   const p=aiProviders.find(x=>x.id===id);if(!p)return;
   if(action==='edit')return openAIProviderForm(id);
-  if(action==='delete'&&!window.confirm('删除 AI API「'+p.note+'」？'))return;
+  if(action==='delete'&&!window.confirm('删除 AI API「'+p.note+'」？\n\n程序会先从所有账号的任务、学习、总结和签到识别中移除此线路；仅依赖它的相关 AI 功能会自动停用。此操作不可恢复。'))return;
   if(action==='test'){aiTestResults[id]='正在测试「'+p.note+'」…';renderAIProviders()}
   else $('#aiTestResult').textContent='';
   try{
@@ -3363,7 +3363,10 @@ async function mutateAIProvider(id,action){
       aiTestResults[id]='「'+p.note+'」\n'+(d.ok?'连接测试成功':'连接测试失败')+'\n实际回复：'+(d.reply||'（空回复）')+'\n耗时：'+testElapsed(d.elapsed_ms)+(d.ok?'':'\n原因：'+(d.error||'未知'));
       renderAIProviders();
     }else if(action==='toggle')await api('/api/ai/providers/'+id,{method:'PUT',body:JSON.stringify({note:p.note,base:p.base,key:'',model:p.model,reasoning_effort:p.reasoning_effort||'default',client_profile:p.client_profile||'none',enabled:!p.enabled})});
-    else await api('/api/ai/providers/'+id,{method:'DELETE'});
+    else{
+      const d=await api('/api/ai/providers/'+id,{method:'DELETE'});delete aiTestResults[id];
+      $('#aiTestResult').textContent='AI API 已删除'+(d.affected_references?'，已处理 '+d.affected_references+' 处使用配置':'');
+    }
     if(action!=='test')await loadAIProviders();else await loadAIProviders();
   }catch(e){aiTestResults[id]='「'+p.note+'」\n操作失败：'+e.message;renderAIProviders();$('#aiTestResult').textContent='操作失败：'+e.message;toast(e.message,1)}
 }

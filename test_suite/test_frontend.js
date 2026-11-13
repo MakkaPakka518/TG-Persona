@@ -538,10 +538,10 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     results=run('JSON.stringify(aiTestResults)');assert(results.includes('<img>')&&results.includes('失败 <script>'));
     assert(run('aiTestResults["0123456789abcdef"].includes("主线路")'));assert(!run('aiTestResults["fedcba9876543210"]'));
   });
-  await test('被任务引用的 AI API 停用删除错误正常显示',async()=>{
-    context.providerFixture=[{id:'0123456789abcdef',note:'被引用线路',base:'https://dummy.invalid/v1',model:'dummy',enabled:true}];run('aiProviders=providerFixture');context.window.confirm=()=>true;context.api=async()=>{throw new Error('仍被任务引用，无法停用或删除（409）')};
+  await test('被引用的 AI API 可确认后级联清理并删除',async()=>{
+    context.providerFixture=[{id:'0123456789abcdef',note:'被引用线路',base:'https://dummy.invalid/v1',model:'dummy',enabled:true}];run("aiProviders=providerFixture;aiTestResults['0123456789abcdef']='旧测试结果'");let confirmText='',request,loads=0;context.window.confirm=message=>(confirmText=message,true);context.api=async(p,o)=>{request=[p,o];if(o?.method==='DELETE')return {ok:true,affected_references:4,configurations_changed:3};throw new Error('仍被任务引用，无法停用（409）')};context.loadAIProviders=async()=>{loads++};
     await run("mutateAIProvider('0123456789abcdef','toggle')");assert(element('#aiTestResult').textContent.includes('409'));assert(element('#aiTestResult').textContent.includes('仍被任务引用'));
-    await run("mutateAIProvider('0123456789abcdef','delete')");assert(element('#aiTestResult').textContent.includes('409'));assert.strictEqual(run('aiProviders.length'),1);context.window.confirm=()=>false;
+    await run("mutateAIProvider('0123456789abcdef','delete')");assert(confirmText.includes('所有账号')&&confirmText.includes('自动停用')&&confirmText.includes('不可恢复'));assert.strictEqual(request[0],'/api/ai/providers/0123456789abcdef');assert.strictEqual(request[1].method,'DELETE');assert(element('#aiTestResult').textContent.includes('已处理 4 处'));assert.strictEqual(run("aiTestResults['0123456789abcdef']"),undefined);assert.strictEqual(loads,1);context.window.confirm=()=>false;
   });
   await test('选择图片仅本地预览、清理结果且无上传',async()=>{
     let sent=0;context.api=async()=>{sent++;return {}};

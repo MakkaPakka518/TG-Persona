@@ -7626,6 +7626,14 @@ def _provider_references(provider_id, include_disabled=False):
             if provider_id in ids or (not ids and active):
                 if include_disabled or active:
                     references.append(f"{label} / 注册任务 {row['name']}")
+        signins = db.execute("SELECT name,enabled,signin_captcha,signin_recognition_mode,ai_provider_ids "
+                             "FROM automations WHERE type='signin'").fetchall()
+        for row in signins:
+            ids = _csv(row["ai_provider_ids"])
+            active = bool(row["enabled"] and _signin_recognition_mode(row) != "none")
+            if provider_id in ids or (not ids and active):
+                if include_disabled or active:
+                    references.append(f"{label} / 签到识别 {row['name']}")
         settings = {row[0]: row[1] for row in db.execute(
             "SELECT key,value FROM settings WHERE key IN ('flock_learning_provider_ids','flock_learning_enabled',"
             "'flock_learning_unlimited','flock_deep_learning_enabled','flock_skill_distill_enabled',"
@@ -7654,62 +7662,100 @@ def _reconcile_provider_ids(valid_ids=None):
     for runtime in runtimes:
         if runtime.db is None or runtime.storage_error:
             continue
-        db = runtime.db
-        for row in db.execute("SELECT rowid AS _rid,provider_ids FROM ai_flock_jobs").fetchall():
+        db, runtime_changed = runtime.db, 0
+        for row in db.execute("SELECT rowid AS _rid,provider_ids,enabled FROM ai_flock_jobs").fetchall():
             original = _csv(row["provider_ids"])
             filtered = [item for item in original if item in valid_ids]
             if original and not filtered:
-                db.execute("UPDATE ai_flock_jobs SET enabled=0 WHERE rowid=?", (row["_rid"],))
-                changed += 1
+                db.execute("UPDATE ai_flock_jobs SET provider_ids='',enabled=0 WHERE rowid=?", (row["_rid"],))
+                runtime_changed += 1
             elif filtered != original:
                 db.execute("UPDATE ai_flock_jobs SET provider_ids=? WHERE rowid=?",
                            (",".join(filtered), row["_rid"]))
-                changed += 1
-        for row in db.execute("SELECT rowid AS _rid,ai_flock_provider_ids FROM automations").fetchall():
+                runtime_changed += 1
+            elif not original and not valid_ids and row["enabled"]:
+                db.execute("UPDATE ai_flock_jobs SET enabled=0 WHERE rowid=?", (row["_rid"],))
+                runtime_changed += 1
+        for row in db.execute("SELECT rowid AS _rid,ai_flock_provider_ids,ai_flock_enabled FROM automations").fetchall():
             original = _csv(row["ai_flock_provider_ids"])
             filtered = [item for item in original if item in valid_ids]
             if original and not filtered:
-                db.execute("UPDATE automations SET ai_flock_enabled=0 WHERE rowid=?", (row["_rid"],))
-                changed += 1
+                db.execute("UPDATE automations SET ai_flock_provider_ids='',ai_flock_enabled=0 WHERE rowid=?",
+                           (row["_rid"],))
+                runtime_changed += 1
             elif filtered != original:
                 db.execute("UPDATE automations SET ai_flock_provider_ids=? WHERE rowid=?",
                            (",".join(filtered), row["_rid"]))
-                changed += 1
+                runtime_changed += 1
+            elif not original and not valid_ids and row["ai_flock_enabled"]:
+                db.execute("UPDATE automations SET ai_flock_enabled=0 WHERE rowid=?", (row["_rid"],))
+                runtime_changed += 1
+        for row in db.execute("SELECT rowid AS _rid,ai_provider_ids,signin_recognition_mode,signin_captcha "
+                              "FROM automations WHERE type='signin'").fetchall():
+            original = _csv(row["ai_provider_ids"])
+            filtered = [item for item in original if item in valid_ids]
+            if original and not filtered:
+                db.execute("UPDATE automations SET ai_provider_ids='',signin_recognition_mode='none',signin_captcha=0 "
+                           "WHERE rowid=?", (row["_rid"],))
+                runtime_changed += 1
+            elif filtered != original:
+                db.execute("UPDATE automations SET ai_provider_ids=? WHERE rowid=?",
+                           (",".join(filtered), row["_rid"]))
+                runtime_changed += 1
+            elif not original and not valid_ids and _signin_recognition_mode(row) != "none":
+                db.execute("UPDATE automations SET signin_recognition_mode='none',signin_captcha=0 WHERE rowid=?",
+                           (row["_rid"],))
+                runtime_changed += 1
         for row in db.execute("SELECT rowid AS _rid,provider_ids FROM ai_flock_sessions").fetchall():
             original = _csv(row["provider_ids"])
             filtered = [item for item in original if item in valid_ids]
             if original and not filtered:
                 db.execute("DELETE FROM ai_flock_sessions WHERE rowid=?", (row["_rid"],))
-                changed += 1
+                runtime_changed += 1
             elif filtered != original:
                 db.execute("UPDATE ai_flock_sessions SET provider_ids=? WHERE rowid=?",
                            (",".join(filtered), row["_rid"]))
-                changed += 1
+                runtime_changed += 1
+            elif not original and not valid_ids:
+                db.execute("DELETE FROM ai_flock_sessions WHERE rowid=?", (row["_rid"],))
+                runtime_changed += 1
         setting = db.execute("SELECT value FROM settings WHERE key='flock_learning_provider_ids'").fetchone()
         if setting:
             original = _csv(setting[0])
             filtered = [item for item in original if item in valid_ids]
             if original and not filtered:
-                db.execute("UPDATE settings SET value='0' WHERE key IN "
-                           "('flock_learning_enabled','flock_learning_unlimited',"
-                           "'flock_deep_learning_enabled','flock_skill_distill_enabled')")
-                changed += 1
+                db.execute("UPDATE settings SET value=CASE WHEN key='flock_learning_provider_ids' THEN '' ELSE '0' END WHERE key IN "
+                           "('flock_learning_provider_ids','flock_learning_enabled','flock_learning_unlimited',"
+                            "'flock_deep_learning_enabled','flock_skill_distill_enabled')")
+                runtime_changed += 1
             elif filtered != original:
                 db.execute("UPDATE settings SET value=? WHERE key='flock_learning_provider_ids'",
                            (",".join(filtered),))
-                changed += 1
+                runtime_changed += 1
+            elif not original and not valid_ids:
+                updated = db.execute("UPDATE settings SET value='0' WHERE key IN "
+                                     "('flock_learning_enabled','flock_learning_unlimited',"
+                                     "'flock_deep_learning_enabled','flock_skill_distill_enabled') AND value!='0'")
+                if updated.rowcount:
+                    runtime_changed += 1
         owner_setting = db.execute("SELECT value FROM settings WHERE key='flock_owner_provider_ids'").fetchone()
         if owner_setting:
             owner_ids = _csv(owner_setting[0])
             filtered_owner = [item for item in owner_ids if item in valid_ids]
             if owner_ids and not filtered_owner:
-                db.execute("UPDATE settings SET value='0' WHERE key='flock_summary_enabled'")
-                changed += 1
+                db.execute("UPDATE settings SET value=CASE WHEN key='flock_owner_provider_ids' THEN '' ELSE '0' END "
+                           "WHERE key IN ('flock_owner_provider_ids','flock_summary_enabled')")
+                runtime_changed += 1
             elif filtered_owner != owner_ids:
                 db.execute("UPDATE settings SET value=? WHERE key='flock_owner_provider_ids'", (",".join(filtered_owner),))
-                changed += 1
-        if changed:
+                runtime_changed += 1
+            elif not owner_ids and not valid_ids:
+                updated = db.execute("UPDATE settings SET value='0' WHERE key='flock_summary_enabled' AND value!='0'")
+                if updated.rowcount:
+                    runtime_changed += 1
+        if runtime_changed:
             db.commit()
+            changed += runtime_changed
     return changed
 
 
@@ -7757,9 +7803,15 @@ async def delete_ai_provider(provider_id: str):
     kept = [row for row in rows if row["id"] != provider_id]
     if len(kept) == len(rows):
         raise HTTPException(404, "AI API 不存在")
-    _reject_provider_references(provider_id, include_disabled=True)
+    references = _provider_references(provider_id, include_disabled=True)
+    configurations_changed = _reconcile_provider_ids({row["id"] for row in kept})
     _save_ai_providers(kept)
-    return {"ok": True}
+    registry = globals().get("account_registry")
+    if registry is not None:
+        for runtime in registry.accounts.values():
+            runtime.ai_flock_provider_retry_at.pop(provider_id, None)
+    return {"ok": True, "affected_references": len(references),
+            "configurations_changed": configurations_changed}
 
 
 class AIModelsInput(BaseModel):

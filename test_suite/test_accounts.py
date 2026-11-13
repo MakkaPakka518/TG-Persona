@@ -306,6 +306,24 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.http.cookies.clear()
         self.assertEqual((await self.req('POST', route, 'default', json={'chat_id': '-1001', 'text': '打招呼'})).status_code, 401)
 
+    async def test_delete_shared_ai_provider_cleans_references_in_every_account(self):
+        aid = await self.create()
+        provider = await self.req('POST', '/api/ai/providers', 'default', json={
+            'note': '待删除', 'base': 'https://example.invalid/v1', 'key': 'offline-test-key', 'model': 'm'})
+        provider_id = provider.json()['provider']['id']
+        for owner, group in [('default', '-1001'), (aid, '-1002')]:
+            await self.req('POST', '/api/groups', owner, json={'chat_id': group, 'name': '测试群'})
+            created = await self.req('POST', '/api/ai/flock/jobs', owner, json={
+                'name': '引用任务', 'enabled': 1, 'groups': group, 'prompt': '聊天', 'provider_ids': provider_id})
+            self.assertEqual(created.status_code, 200, created.text)
+        deleted = await self.req('DELETE', '/api/ai/providers/' + provider_id, aid)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()['affected_references'], 2)
+        for owner in ('default', aid):
+            row = self.rt(owner).db.execute('SELECT provider_ids,enabled FROM ai_flock_jobs').fetchone()
+            self.assertEqual(tuple(row), ('', 0))
+        self.assertEqual((await self.req('GET', '/api/ai/providers', 'default')).json()['providers'], [])
+
     async def test_parallel_clients_login_codes_and_two_factor(self):
         aid = await self.create()
         await asyncio.gather(self.login('default', 123, '00000000001', '00001'),
