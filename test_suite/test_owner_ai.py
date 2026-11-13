@@ -239,6 +239,39 @@ class OwnerAITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.tasks, [])
         self.b['_collect_deep_incoming'].assert_not_awaited()
 
+    def test_skill_reference_follows_topic_instead_of_created_time(self):
+        blocks = ""
+        for index in range(12):
+            body = ("- 电影话题规则 %s：聊片单" % index) if index < 6 else ("- 网络话题规则 %s：聊反代" % index)
+            blocks = self.b['_append_skill_memory'](blocks, body, created_at=1000 + index, stage='detail')
+        self.b['_write_skill'](blocks)
+        movie = self.b['_skill_reference'](60, '-1', '今晚看什么电影，片单推荐')
+        network = self.b['_skill_reference'](60, '-1', 'Cloudflare 反代怎么配置')
+        self.assertIn('电影话题规则', movie)
+        self.assertNotIn('网络话题规则', movie)
+        self.assertIn('网络话题规则', network)
+        self.assertNotIn('电影话题规则', network)
+
+    def test_skill_reference_takes_whole_entries_and_prefers_unused(self):
+        self.b['_write_skill']('')
+        content = self.b['_append_skill_memory']('', '- 固定人格：简短自然', created_at=100, stage='detail')
+        for index in range(20):
+            content = self.b['_append_skill_memory'](content, '- 闲聊风格 %s 号' % index,
+                                                     created_at=200 + index, stage='detail')
+        self.b['_write_skill'](content)
+        used = []
+        reference = self.b['_skill_reference'](120, '-1', '闲聊', used_sink=used)
+        self.assertTrue(used)
+        self.assertNotIn('\n\n\n', reference)
+        for body in reference.split('\n\n'):
+            self.assertTrue(body.startswith('-'), body)
+        self.b['_record_memory_usage']('skill', used)
+        usage = self.b['_memory_usage']('skill')
+        self.assertTrue(all(usage.get(item) == 1 for item in used if item))
+        second = []
+        self.b['_skill_reference'](120, '-1', '闲聊', used_sink=second)
+        self.assertNotEqual(set(second), set(used))
+
     def test_group_memory_isolation_and_topic_ranking(self):
         content = self.b['_append_study']('', '- 本群聊电影', chat_id='-1')
         content = self.b['_append_study'](content, '- 另一群秘密话题', chat_id='-2')
