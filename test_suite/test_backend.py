@@ -92,7 +92,7 @@ def load_backend():
                           'MEMORY_ENTRY_MAX_CHARS', 'MEMORY_HARD_CAP_CHARS', 'MEMORY_POOL_MAX', 'SKILL_PINNED_BONUS',
                           'SKILL_FIXED_RATIO', 'SKILL_RECENT_MAX', 'SKILL_DETAIL_MAX', 'SKILL_SUMMARY_MAX',
                           'SKILL_FADING_MAX_COUNT', 'SKILL_FADING_IDLE_DAYS', 'STUDY_PER_GROUP_MAX', 'STUDY_TOTAL_MAX',
-                          'TOPIC_STOP_TERMS', '_MEMORY_ID_PREFIX', '_MEMORY_STAGE_WEIGHT'}
+                          'TOPIC_STOP_TERMS', '_MEMORY_ID_PREFIX', '_MEMORY_STAGE_WEIGHT', '_button_ai_result'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -735,6 +735,7 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         selected = await self.b['_select_btn_mode'](buttons, '不存在', mode='ai', hint='签到任务')
         self.assertIs(selected, wanted)
         self.b['_call_ai_any'].assert_awaited_once()
+        self.assertEqual(self.b['_call_ai_any'].await_args.kwargs['max_tokens'], 1800)
         self.b['_call_ai_any'].reset_mock()
         selected = await self.b['_select_btn_mode'](buttons, '签到', mode='fallback')
         self.assertIs(selected, wanted)
@@ -747,6 +748,9 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         await self.b['_select_btn_mode'](buttons, '不存在', mode='ai', ai_cache=cache)
         await self.b['_select_btn_mode'](buttons, '不存在', mode='ai', ai_cache=cache)
         self.b['_call_ai_any'].assert_awaited_once()
+        self.b['_call_ai_any'] = AsyncMock(side_effect=RuntimeError('只有思考没有正文'))
+        self.assertIsNone(await self.b['_select_btn_mode'](buttons, '不存在', mode='ai'))
+        self.assertIn('只有思考没有正文', self.b['_button_ai_result'].get())
 
     async def test_replay_is_read_only_and_reports_ai_fallback(self):
         await self.b['create_ai_provider'](self.b['AIProviderInput'](
@@ -792,6 +796,8 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.assertIn('signin_image_prompt', a.keys())
         self.assertIn('signin_image_action', a.keys())
         self.assertIn('button_mode', a.keys())
+        self.assertIn('popup_success_kw', a.keys())
+        self.assertIn('popup_fail_kw', a.keys())
 
 
 if __name__ == '__main__':

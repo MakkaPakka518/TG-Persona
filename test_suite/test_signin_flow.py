@@ -18,7 +18,7 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.b=load_backend()
         self.b['now_local']=lambda: datetime(2026,10,30,9,0,tzinfo=timezone.utc)
-        self.events=[];self.phase='before';self.fetch_count=0;self.answer_result='签到成功';self.deliver=True;self.image_mode=False;self.image_click=False
+        self.events=[];self.phase='before';self.fetch_count=0;self.answer_result='签到成功';self.deliver=True;self.image_mode=False;self.image_click=False;self.button_popup=''
         outer=self
         async def send(ent,text):
             outer.events.append(('send',text))
@@ -31,6 +31,7 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
                 index=outer.fetch_count
                 async def click():
                     outer.events.append(('click',index));outer.phase='clicked'
+                    return SimpleNamespace(message=outer.button_popup) if outer.button_popup else None
                 button=SimpleNamespace(text='签到',click=AsyncMock(side_effect=click))
                 return [photo_message(101,'欢迎使用测试机器人，请选择功能',1,buttons=[[button]])]
             if outer.phase=='prompt':
@@ -87,6 +88,24 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.run_flow(aid)
         self.assertEqual([s for kind,s in self.events if kind=='sleep'][:2],[0.0,0.0])
         self.assertEqual(self.row(aid)['last_status'],'success')
+
+    async def test_already_signed_popup_is_success_without_new_reply(self):
+        self.button_popup='今日已签到，请勿重复签到'
+        self.deliver=False
+        aid=await self.create(signin_captcha=0,signin_recognition_mode='none')
+        await self.run_flow(aid)
+        self.assertEqual(self.row(aid)['last_status'],'success')
+        self.assertEqual(self.b['client'].send_message.await_count,1)
+        detail=self.b['conn'].execute('SELECT detail FROM hits ORDER BY id DESC').fetchone()[0]
+        self.assertIn('今日已签到',detail);self.assertIn('按钮弹窗已确认签到结果',detail)
+
+    async def test_custom_popup_success_keyword(self):
+        self.button_popup='本日打卡済み：茶香已领取'
+        self.deliver=False
+        aid=await self.create(signin_captcha=0,signin_recognition_mode='none',popup_success_kw='本日打卡済み')
+        await self.run_flow(aid)
+        self.assertEqual(self.row(aid)['last_status'],'success')
+        self.assertEqual(self.row(aid)['popup_success_kw'],'本日打卡済み')
 
     async def test_selected_ai_providers_reach_captcha_recognition(self):
         selected='0123456789abcdef,fedcba9876543210'
