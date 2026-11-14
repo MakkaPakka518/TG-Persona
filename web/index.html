@@ -959,7 +959,7 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="waterAiJobName">任务名称</label><input type="text" id="waterAiJobName" maxlength="80" placeholder="如：晚间闲聊">
           <label class="check"><input type="checkbox" id="waterAiJobEnabled"> 启用任务</label>
           <label>生效群</label><div id="waterAiJobGroups" class="grp-pick"></div>
-          <div class="water-ai-time"><div><label for="waterAiJobStart">开始</label><input type="text" id="waterAiJobStart" value="09:00" readonly onclick="openTimePicker('waterAiJobStart')"</div><div><label for="waterAiJobEnd">结束</label><input type="text" id="waterAiJobEnd" value="22:00" readonly onclick="openTimePicker('waterAiJobEnd')"<label class="button-reply-toggle"><input type="checkbox" id="waterAiJobEndNextDay"> 次日结束</label></div></div>
+          <div class="water-ai-time"><div><label for="waterAiJobStart">开始</label><input type="text" id="waterAiJobStart" value="09:00" readonly onclick="openTimePicker('waterAiJobStart')"></div><div><label for="waterAiJobEnd">结束</label><input type="text" id="waterAiJobEnd" value="22:00" readonly onclick="openTimePicker('waterAiJobEnd')"><label class="button-reply-toggle"><input type="checkbox" id="waterAiJobEndNextDay"> 次日结束</label></div></div>
           <div class="water-ai-limits">
             <div><label for="waterAiJobContextMessages">上下文消息数</label><input id="waterAiJobContextMessages" type="number" value="15" min="1" max="50" step="1" inputmode="numeric"></div>
             <div><label for="waterAiJobMessageChars">单条消息字数</label><input id="waterAiJobMessageChars" type="number" value="400" min="40" max="2000" step="1" inputmode="numeric"></div>
@@ -1436,7 +1436,7 @@ section.act,.fold.open .fold-b{animation:none}
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M4 19c5-1 8-4 9-9 3 1 5 3 7 6M5 5h6v6H5zM15 4v4M13 6h4"/></svg>AI 学习</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b" id="waterAiSkillSection">
         <label class="check"><input type="checkbox" id="waterAiSkillEnabled"> 每日普通学习</label>
-        <div class="water-ai-time"><div><label for="waterAiSkillStart">普通学习开始（北京时间）</label><input type="text" id="waterAiSkillStart" value="09:00" readonly onclick="openTimePicker('waterAiSkillStart')"</div><div><label for="waterAiSkillEnd">普通学习结束（北京时间）</label><input type="text" id="waterAiSkillEnd" value="22:00" readonly onclick="openTimePicker('waterAiSkillEnd')"</div></div>
+        <div class="water-ai-time"><div><label for="waterAiSkillStart">普通学习开始（北京时间）</label><input type="text" id="waterAiSkillStart" value="09:00" readonly onclick="openTimePicker('waterAiSkillStart')"></div><div><label for="waterAiSkillEnd">普通学习结束（北京时间）</label><input type="text" id="waterAiSkillEnd" value="22:00" readonly onclick="openTimePicker('waterAiSkillEnd')"></div></div>
         <label>学习群</label><div id="waterAiSkillGroups" class="grp-pick"></div>
         <label>学习使用的 AI API（可多选）</label><div id="waterAiSkillProviders" class="grp-pick"></div>
         <div class="hint">普通、鲸鱼和深度学习都会采集主人与群友消息；主人风格写入 skill.md，群内知识、话题与氛围写入 study.md。程序自动发送的消息不会进入样本。</div>
