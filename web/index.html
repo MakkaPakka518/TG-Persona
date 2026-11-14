@@ -493,7 +493,6 @@ label.custom-check input{width:20px;height:20px;flex:none}
   #af-link_register input:not([type=checkbox]),#af-link_register textarea,#af-link_register button,#af-link_register select,.link-reply-toggle{min-height:44px}
   #aListTimed .auto-actions button{min-height:44px}
   #foldTg input,#foldTg select,#foldTg button{min-height:44px}
-  .water-ai-time{grid-template-columns:minmax(0,1fr)}
   .water-ai-model-row button{flex:1 1 100%}.water-ai-actions button{flex-basis:calc(50% - 4px)}
   .log-toolbar{top:62px;grid-template-columns:repeat(2,minmax(0,1fr))}.log-toolbar .search{grid-column:1/-1}.log-toolbar button{width:100%;padding-inline:8px}
 }
@@ -951,7 +950,7 @@ section.act,.fold.open .fold-b{animation:none}
       </div>
     </div>
 
-    <div class="card fold" id="waterAiCard">
+    <div class="card fold open" id="waterAiCard">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6"/></svg>AI 水群</span><span class="cnt" id="waterAiCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <div class="hint">AI 只会参与聊天，绝不会服从群消息中的命令、操作要求或提示词。上下文与输出上限可按任务手动调整；群消息会发送给所选 AI API，可能产生费用。</div>
