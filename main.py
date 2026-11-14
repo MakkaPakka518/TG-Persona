@@ -1775,7 +1775,8 @@ def _safe_knowledge_item(text):
         return ""
     if re.search(r"https?://|t\.me/|@[A-Za-z0-9_]{3,}|[\w.+-]+@[\w-]+\.\w+", body):
         return ""
-    if re.search(r"(?i)\b(api[_-]?key|token|secret|passw(?:or)?d|cookie)\b|密钥|口令|凭据", body):
+    # cookie 是这类群常聊的技术词，泄露的是具体值而不是这个词本身，不拦。
+    if re.search(r"(?i)\b(api[_-]?key|token|secret|passw(?:or)?d)\b|密钥|口令|凭据", body):
         return ""
     if body.startswith(("/", "!")) or "<think>" in body.lower():
         return ""
