@@ -87,7 +87,7 @@ class ManualFlockTests(unittest.IsolatedAsyncioTestCase):
             await self.run_test()
         self.assertEqual(caught.exception.status_code, 502)
         self.assertEqual(self.runtime.ai_flock_busy_groups, set())
-        for reply in ('NO_REPLY', '', 'https://invalid.example/path', '/start', '长' * 81):
+        for reply in ('NO_REPLY', '', 'https://invalid.example/path', '/start', '长' * 801):
             self.runtime.ai_flock_last.clear()
             self.b['_call_ai_any'] = AsyncMock(return_value=reply)
             result = await self.run_test()

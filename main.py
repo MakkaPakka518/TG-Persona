@@ -1718,13 +1718,23 @@ def _flock_rhythm_hint(source):
 
 
 def _knowledge_auto_path():
-    runtime = get_runtime()
-    path = getattr(runtime, "knowledge_auto_file", None)
-    if path:
-        return path
-    # 兼容只提供 knowledge_file 的运行环境：自动知识放同目录。
-    base = getattr(runtime, "knowledge_file", None)
-    return Path(base).with_name("knowledge-auto.md") if base else None
+    try:
+        runtime = get_runtime()
+        path = getattr(runtime, "knowledge_auto_file", None)
+        if path:
+            return path
+        # 兼容只提供 knowledge_file 的运行环境：自动知识放同目录。
+        # 用 base 的类型重新构造，避免依赖模块级 Path（裁剪后的模块里没有这个名）。
+        base = getattr(runtime, "knowledge_file", None)
+        if not base:
+            return None
+        base_text = str(base)
+        for sep in ("/", "\\"):
+            if sep in base_text:
+                return type(base)(base_text.rsplit(sep, 1)[0] + sep + "knowledge-auto.md")
+        return None
+    except Exception:
+        return None
 
 
 def _read_knowledge_auto():
@@ -2645,6 +2655,15 @@ async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False, *, test_job
                 owns_ai_slot = False
         finally:
             runtime.ai_flock_waiting -= 1
+        try:
+            reply = _flock_reply(reply, registration)
+        except ValueError as error:
+            _flock_stage(progress, "skipped", str(error))
+            add_hit("ai_flock", False, chat_id=key, content=trigger[:120],
+                    detail={"source": source["kind"], "error": str(error), **call_trace})
+            if testing:
+                return {"ok": True, "sent": False, "reason": str(error)}
+            return
         kind, next_minutes, reply_text = _flock_split(reply)
         if kind == "skip":
             if source.get("inactive_mode") and source.get("job_id") and not testing:
