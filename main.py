@@ -57,7 +57,7 @@ except ImportError:
 from telethon import TelegramClient, errors, events
 from telethon.extensions import markdown as telethon_markdown
 from telethon.tl.functions.messages import SendReactionRequest
-from telethon.tl.types import ReactionEmoji
+from telethon.tl.types import DocumentAttributeFilename, ReactionEmoji
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -6583,12 +6583,14 @@ async def lifespan(app):
         data_migration.finish_startup_restore(BASE)
         _cleanup_migration_stages(startup=True)
         backup_task = asyncio.create_task(auto_backup_loop())
+        knowledge_task = asyncio.create_task(knowledge_upload_loop())
         yield
     finally:
-        try:
-            backup_task.cancel()
-        except NameError:
-            pass
+        for task in (locals().get("backup_task"), locals().get("knowledge_task")):
+            try:
+                task.cancel()
+            except AttributeError:
+                pass
         await account_registry.shutdown()
 
 
@@ -9761,6 +9763,138 @@ async def auto_backup_loop():
         except Exception as error:
             log.warning("自动备份失败：%s", _safe_ai_error(error))
         await asyncio.sleep(60)
+
+
+KNOWLEDGE_UPLOAD_PREFIX = "tg-persona-knowledge-"
+
+
+def _knowledge_upload_name_matches(name):
+    return bool(name) and str(name).startswith(KNOWLEDGE_UPLOAD_PREFIX) and str(name).endswith(".md")
+
+
+async def _prune_knowledge_uploads(runtime, keep=3):
+    """收藏夹里只留最近几份自动上传，避免把收藏刷满。"""
+    try:
+        messages = await runtime.client.get_messages("me", limit=100)
+    except Exception as error:
+        raise ValueError("读取收藏夹失败：" + _safe_ai_error(error)) from None
+    ours = []
+    for message in messages or []:
+        document = getattr(message, "document", None)
+        filename = ""
+        for attribute in getattr(document, "attributes", None) or []:
+            candidate = getattr(attribute, "file_name", None)
+            if candidate:
+                filename = candidate
+                break
+        if _knowledge_upload_name_matches(filename):
+            ours.append(message)
+    for message in ours[keep:]:
+        try:
+            await message.delete()
+        except Exception as error:
+            log.warning("清理旧知识上传失败: %s", type(error).__name__)
+    return max(0, len(ours) - keep)
+
+
+async def _run_knowledge_auto_upload(trigger="manual"):
+    """把 knowledge-auto.md 传到指定账号的收藏夹（Saved Messages）。"""
+    if get_setting("knowledge_upload_enabled", "0") != "1" and trigger != "manual":
+        return {"ok": False, "skipped": True, "reason": "定时上传未启用"}
+    content = _read_knowledge_auto()
+    if not content.strip():
+        if trigger == "manual":
+            raise ValueError("自动知识还是空的，没有可上传的内容")
+        return {"ok": False, "skipped": True, "reason": "自动知识为空"}
+    account_id = str(get_setting("knowledge_upload_account", "default") or "default")
+    runtime = account_registry.accounts.get(account_id)
+    if runtime is None or runtime.storage_error:
+        raise ValueError("上传账号不存在或数据不可用")
+    # 函数内导入：模块级 import 在部分测试环境会被裁掉，这里不依赖模块命名空间。
+    import tempfile as _tempfile
+    from telethon.tl.types import DocumentAttributeFilename as _DocName
+    stamp = _beijing_now()
+    filename = KNOWLEDGE_UPLOAD_PREFIX + stamp.strftime("%Y%m%d-%H%M") + ".md"
+    temp = _tempfile.NamedTemporaryFile("w", suffix=".md", prefix="knowledge-auto-",
+                                        delete=False, encoding="utf-8")
+    work = temp.name
+    try:
+        temp.write(content)
+        temp.close()
+        async with runtime.lifecycle():
+            if runtime.client is None or runtime.tg_state.get("phase") != "ready":
+                raise ValueError("上传账号未登录，无法写入收藏夹")
+            caption = "TG-Persona 自动知识 " + stamp.strftime("%Y-%m-%d %H:%M") + \
+                      "\n共 %d 条，%d 字节" % (len(_knowledge_auto_entries(content)), len(content.encode("utf-8")))
+            await runtime.client.send_file("me", work, force_document=True,
+                                           caption=caption, attributes=[_DocName(filename)])
+            removed = await _prune_knowledge_uploads(runtime)
+        set_setting("knowledge_upload_last_run", stamp.strftime("%Y-%m-%d %H:%M"))
+        set_setting("knowledge_upload_last_file", filename)
+        set_setting("knowledge_upload_last_error", "")
+        log.info("自动知识已上传收藏夹：%s，清理旧文件 %s 份", filename, removed)
+        return {"ok": True, "file": filename, "removed": removed}
+    except Exception as error:
+        set_setting("knowledge_upload_last_error", _safe_ai_error(error)[:300])
+        set_setting("knowledge_upload_last_run", stamp.strftime("%Y-%m-%d %H:%M"))
+        raise
+    finally:
+        try:
+            os.unlink(work)
+        except OSError:
+            pass
+
+
+async def knowledge_upload_loop():
+    """每分钟检查一次，到点当天只传一份。"""
+    while True:
+        try:
+            if get_setting("knowledge_upload_enabled", "0") == "1":
+                now = now_local()
+                target = str(get_setting("knowledge_upload_time", "23:50") or "23:50")
+                today = now.strftime("%Y-%m-%d")
+                if (now.strftime("%H:%M") == target
+                        and not str(get_setting("knowledge_upload_last_run", "") or "").startswith(today)):
+                    await _run_knowledge_auto_upload("schedule")
+        except Exception as error:
+            log.warning("自动知识上传失败：%s", _safe_ai_error(error))
+        await asyncio.sleep(60)
+
+
+@app.get("/api/ai/flock/knowledge/auto/upload")
+async def get_knowledge_auto_upload():
+    return {"enabled": get_setting("knowledge_upload_enabled", "0") == "1",
+            "time": get_setting("knowledge_upload_time", "23:50"),
+            "account": get_setting("knowledge_upload_account", "default"),
+            "last_run": get_setting("knowledge_upload_last_run", ""),
+            "last_file": get_setting("knowledge_upload_last_file", ""),
+            "last_error": get_setting("knowledge_upload_last_error", "")}
+
+
+class KnowledgeUploadInput(BaseModel):
+    enabled: int = Field(0, ge=0, le=1)
+    time: str = Field("23:50", max_length=5)
+    account: str = Field("default", max_length=64)
+
+
+@app.put("/api/ai/flock/knowledge/auto/upload")
+async def update_knowledge_auto_upload(body: KnowledgeUploadInput):
+    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", body.time or ""):
+        raise HTTPException(400, "上传时间要写成 24 小时制的 HH:MM")
+    if body.account not in account_registry.accounts:
+        raise HTTPException(400, "上传账号不存在")
+    set_setting("knowledge_upload_enabled", str(int(body.enabled)))
+    set_setting("knowledge_upload_time", body.time)
+    set_setting("knowledge_upload_account", body.account)
+    return {"ok": True}
+
+
+@app.post("/api/ai/flock/knowledge/auto/upload")
+async def run_knowledge_auto_upload():
+    try:
+        return await _run_knowledge_auto_upload("manual")
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from None
 
 
 @app.get("/api/migration/auto-backup")
