@@ -1055,6 +1055,9 @@ section.act,.fold.open .fold-b{animation:none}
             <input type="text" id="sBtnText" placeholder="如: 签到,确认">
             <label for="sButtonMode">按钮处理模式</label><select id="sButtonMode"><option value="script">脚本模式（默认）</option><option value="ai">AI 模式</option><option value="fallback">AI 兜底</option></select>
             <div class="hint">脚本模式只按文字/表情匹配；AI 模式直接由 AI 选择；AI 兜底仅在脚本找不到时调用 AI。</div>
+            <label for="sPopupSuccess">成功 / 已签到弹窗关键词（逗号分隔）</label><input type="text" id="sPopupSuccess" maxlength="1000" placeholder="留空使用内置关键词，如：今日已签到,请勿重复签到">
+            <label for="sPopupFail">失败弹窗关键词（逗号分隔）</label><input type="text" id="sPopupFail" maxlength="1000" placeholder="留空使用内置关键词，如：操作失败,稍后再试">
+            <div class="hint">按钮只弹窗、不发新消息时，命中成功词会直接记为成功；命中失败词会立即失败；均未命中才继续等待机器人回复。</div>
             <div class="flex">
               <div><label>连点次数(有的 bot 要点多次才生效)</label><input type="number" id="sClicks" value="1" min="1" max="20"></div>
               <div><label>连点间隔(毫秒)</label><input type="number" id="sClickGap" value="300" min="50" max="3000" step="50"></div>
