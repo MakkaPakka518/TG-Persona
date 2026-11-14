@@ -1395,6 +1395,176 @@ section.act,.fold.open .fold-b{animation:none}
   <section id="tab-settings">
     <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</h2>
     <div class="sub">触发行为与面板安全</div>
+    <div class="card fold" id="sysHubCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>系统设置</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>系统更新</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <div class="hint" id="updInfo">版本信息加载中…</div>
+          <div class="flex" style="margin-top:10px">
+            <button class="btn" id="updCheck" style="flex:1" onclick="checkUpdate()">检查更新</button>
+            <button class="btn" id="updBtn" style="flex:1" onclick="doUpdate()">立即更新</button>
+          </div>
+          <pre id="updLog" class="hint" style="white-space:pre-wrap;display:none;margin-top:12px;max-height:260px;overflow:auto"></pre>
+          <div class="hint">更新会自动备份当前文件到 data/backup-时间戳,再拉取仓库最新文件并重启服务;data 数据和 venv 不受影响。</div>
+          <h4 style="margin:16px 0 8px">备份管理</h4>
+          <div class="hint" id="backupsInfo" aria-live="polite">尚未加载备份列表</div>
+          <div class="hint" id="backupsReason">请先查看备份；清理只删除备份，不删除数据库、会话或 venv。</div>
+          <div class="flex" style="margin-top:10px;flex-wrap:wrap">
+            <button class="ghost" type="button" id="backupsLoadBtn" onclick="loadBackups()">查看备份</button>
+            <button class="btn" type="button" id="backupsKeepBtn" onclick="cleanupBackups('keep_latest')" disabled>保留最新一份，清理其余（推荐）</button>
+            <button class="danger" type="button" id="backupsAllBtn" onclick="cleanupBackups('all')" disabled>删除全部备份</button>
+          </div>
+          <div id="backupsList" style="margin-top:10px;max-height:260px;overflow:auto"></div>
+          <div class="hint" id="backupsResult" aria-live="polite" style="margin-top:8px"></div>
+        </div>
+      </div>
+      <div class="fold sub-fold" id="migrationCard">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14M4 3h16v4"/></svg>整机迁移</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <div class="hint">迁移包包含全部账号数据库、Telegram Session、任务、规则、设置、凭据、头像和图标库配置；不包含代码、venv、历史更新备份或系统 nginx 配置。</div>
+          <label for="migrationPanelPassword">当前面板密码</label><input type="password" id="migrationPanelPassword" autocomplete="current-password">
+          <label for="migrationBackupPassword">迁移包密码（至少 8 位，丢失无法恢复）</label><input type="password" id="migrationBackupPassword" autocomplete="new-password">
+          <label for="migrationBackupPasswordConfirm">再次输入迁移包密码（仅导出时需要）</label><input type="password" id="migrationBackupPasswordConfirm" autocomplete="new-password">
+          <div class="flex" style="margin-top:12px"><button class="btn" type="button" id="migrationExport" onclick="exportMachineBackup()">导出加密迁移包</button></div>
+          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
+          <label for="migrationFile">导入迁移包（.tgp，最大 512MB）</label><input type="file" id="migrationFile" accept=".tgp,application/octet-stream">
+          <div class="flex" style="margin-top:12px"><button class="ghost" type="button" id="migrationPreview" onclick="previewMachineBackup()">上传并校验</button><button class="danger" type="button" id="migrationApply" disabled onclick="applyMachineBackup()">覆盖现机并重启</button></div>
+          <div class="hint" id="migrationResult" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
+          <div class="hint">导入会完整替换现机数据。请先停止旧 VPS，避免同一 Telegram Session 同时在线导致失效。</div>
+          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
+          <h4 style="margin:0 0 8px">每日自动备份到收藏夹</h4>
+          <label class="check"><input type="checkbox" id="autoBackupEnabled" onchange="syncAutoBackupForm()"> 启用每日自动整机备份</label>
+          <div id="autoBackupFields">
+            <div class="water-ai-time"><div><label for="autoBackupTime">每天执行时间（北京时间）</label><input type="time" id="autoBackupTime" value="04:30"></div><div><label for="autoBackupAccount">上传到哪个账号的收藏夹</label><select id="autoBackupAccount"></select></div></div>
+            <label for="autoBackupPassword">自动备份密码（至少 8 位，留空沿用已保存）</label><input type="password" id="autoBackupPassword" autocomplete="new-password" placeholder="留空不修改">
+            <label class="check"><input type="checkbox" id="autoBackupCaptionPassword"> 在收藏夹消息中附带密码文字</label>
+            <div class="hint">每次生成完整迁移包后上传到所选账号收藏夹，本地临时文件立即删除；收藏夹只保留最近 3 份自动备份，超出时删除更旧的。附带密码会把密码以明文保存在 Telegram 收藏夹。</div>
+            <div class="flex" style="margin-top:10px"><button class="btn" type="button" id="autoBackupSave" onclick="saveAutoBackup()">保存自动备份</button><button class="ghost" type="button" id="autoBackupNow" onclick="runAutoBackupNow()">立即备份</button></div>
+            <div class="hint" id="autoBackupStatus" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>面板安全</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+        <label>修改面板访问密码(至少 8 位)</label>
+        <div class="flex">
+          <div><input type="password" id="sOldPw" placeholder="原密码(必填)" autocomplete="current-password"></div>
+          <div><input type="password" id="sNewPw" placeholder="新面板密码" autocomplete="new-password"></div>
+        </div>
+        <button class="btn" style="margin-top:12px" onclick="changePw()">修改密码</button>
+        <div class="hint">密码已改为 scrypt 哈希存储,明文文件不存在;改完其它设备会被强制下线</div>
+        <div class="hint" style="margin-top:14px" id="sessInfo">登录设备:-</div>
+        <button class="ghost" style="margin-top:8px" onclick="logoutAll()">退出所有设备</button>
+        <div class="hint">面板对外暴露时建议只监听 127.0.0.1 并用反向代理 + HTTPS</div>
+        </div>
+      </div>
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>通知推送</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <label>Bark 推送(Bark Key 或完整 URL,如 https://api.day.app/xxxx)</label>
+          <input type="text" id="sBark" placeholder="xxxx 或 https://api.day.app/xxxx">
+          <div class="flex">
+            <div><label>Telegram Bot Token</label><input type="text" id="sBt" placeholder="123456:ABC..."></div>
+            <div><label>接收 Chat ID</label><input type="text" id="sBc" placeholder="123456789"></div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="sNok" style="width:auto"> 成功时推送</label>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="checkbox" id="sNof" style="width:auto"> 失败时推送</label>
+          <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+          <div class="hint">配置任一(Bark 或 TG Bot)即可;签到成功/失败、抢注命中、自定义任务结束时按开关推送</div>
+        </div>
+      </div>
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>时区 / 服务器时间</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <label>时区</label>
+          <select id="sTz"></select>
+          <div class="hint" id="tzNow" style="margin-top:8px">服务器时间加载中...</div>
+          <button class="btn" style="margin-top:12px" onclick="saveTz()">保存时区</button>
+          <div class="hint">签到任务的「时间窗口」和「今天已签」都按这个时区计算;VPS 系统是 UTC 时也只需在这里选对</div>
+        </div>
+      </div>
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m5 17 4-4 3 3 2-2 5 3"/></svg>共享图标库</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <div class="hint">图标库配置跨账号、跨设备共享。默认 TFEL：https://emby-icon.vercel.app/TFEL-Emby.json。内置库可禁用，不可删除。仅点击按钮时加载或刷新，不定时拉取。</div>
+          <div class="flex" style="gap:8px;flex-wrap:wrap;margin-top:10px"><button class="ghost" type="button" id="iconLibrariesLoad" onclick="loadIconLibraries()">加载图标库</button><button class="ghost" type="button" id="iconLibrariesRefresh" onclick="refreshIcons()">刷新全部图标</button></div>
+          <div id="iconLibrariesList"></div>
+          <label for="iconLibraryName">外部图标库名称（可空）</label><input id="iconLibraryName" maxlength="80" placeholder="如：我的图标库">
+          <label for="iconLibraryUrl">图标库 JSON URL</label><input type="url" id="iconLibraryUrl" placeholder="https://example.com/icons.json">
+          <button class="btn" type="button" id="iconLibraryAdd" style="margin-top:10px" onclick="addIconLibrary()">保存共享图标库</button>
+          <div id="iconLibrariesResult" class="hint" role="status" aria-live="polite"></div><pre id="iconLibraryErrors" class="hint" style="white-space:pre-wrap"></pre>
+        </div>
+      </div>
+      </div>
+    </div>
+    <div class="card fold" id="acctHubCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>账号与行为</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>自动水群(从众)</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sFl" style="width:auto"> 开启从众模式(默认关闭)</label>
+          <div class="flex" style="margin-top:10px">
+            <div><label>同文本出现 N 条后跟风</label><input type="number" id="sFlCnt" min="2" max="30" value="5"></div>
+            <div><label>统计窗口(分钟)</label><input type="number" id="sFlMin" min="1" max="60" value="5"></div>
+          </div>
+          <label>跟风话术池(逗号分隔,随机选一条)</label>
+          <input type="text" id="sFlPool" placeholder="哈哈,确实,同意,+1,蹲一个">
+          <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+          <div class="hint">监听群内同一句话短时间出现多人的,你也跟一条,像真人一样融入群聊;命令类消息不会跟</div>
+        </div>
+      </div>
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>触发行为</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+        <div class="flex">
+          <div><label>同群同规则冷却(秒)</label><input type="number" id="sCooldown" min="0"></div>
+          <div><label>命中后随机延迟(秒,最小 最大)</label><input type="text" id="sDelay" placeholder="1.0 3.0"></div>
+          <div><label style="display:flex;align-items:center;gap:8px;margin-top:14px"><input type="checkbox" id="sIgnore" style="width:auto"> 忽略机器人消息</label></div>
+        </div>
+        <label for="sTaskConcurrency">每账号任务并发上限</label>
+        <select id="sTaskConcurrency">
+          <option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+        </select>
+        <div class="hint">按任务列表顺序，每批两个；整轮结束再排失败重试</div>
+        <label>日志保留天数(0 = 永久保留)</label>
+        <input type="number" id="sLogKeep" min="0" max="3650" value="30">
+        <div class="hint">每小时检查一次,超过天数的记录自动删除并压缩数据库</div>
+        <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+        </div>
+      </div>
+      <div class="fold sub-fold" id="foldTg">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>TG账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <h4 style="margin:0 0 8px">共用 Telegram API</h4>
+          <div class="flex">
+            <div><label for="tgApiId">API_ID</label><input type="text" id="tgApiId" placeholder="12345678" inputmode="numeric"></div>
+            <div><label for="tgApiHash">API_HASH</label><input type="text" id="tgApiHash" placeholder="在 my.telegram.org 获取"></div>
+          </div>
+          <button class="ghost" id="tgApiSave" style="margin-top:10px" onclick="saveTgApi()">保存共用 API</button>
+          <div class="hint">所有 Telegram 账号共用这一套 API，只需配置一次。</div>
+          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
+          <label for="accountSettings">当前账号</label>
+          <select id="accountSettings" onchange="switchAccount(this.value)"><option value="default">默认账号</option></select>
+          <div id="accountStatus" class="hint" role="status" aria-live="polite">默认账号</div>
+          <label for="accountLabel">账号备注</label><input id="accountLabel" maxlength="80" placeholder="如：工作号、小号">
+          <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:12px">
+            <button class="btn" id="accountCreate" onclick="manageAccount('create')">添加账号并登录</button>
+            <button class="ghost" id="accountRename" onclick="manageAccount('rename')">修改当前备注</button>
+            <button class="ghost" id="accountReload" onclick="loadAccounts()">刷新</button>
+            <button class="danger" id="accountDelete" disabled onclick="manageAccount('delete')">删除当前</button>
+          </div>
+          <div id="accountResult" class="hint" role="status" aria-live="polite"></div>
+          <div class="hint">默认账号不能删除；其他账号删除时会同时移除对应配置和登录会话。</div>
+          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
+          <div id="tgCard"><div class="empty">加载中...</div></div>
+        </div>
+      </div>
+      </div>
+    </div>
     <div class="card fold" id="apiHubCard">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3a4 4 0 0 0-4 4v1a4 4 0 0 0-3 6v1a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4v-1a4 4 0 0 0-3-6V7a4 4 0 0 0-4-4zM9 12h6M12 9v6"/></svg>API 与用量</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
@@ -1555,176 +1725,6 @@ section.act,.fold.open .fold-b{animation:none}
           <div class="hint" id="ownerAIStatus" role="status" aria-live="polite"></div>
         </div>
       </div>
-      </div>
-    </div>
-    <div class="card fold" id="sysHubCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>系统设置</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-      <div class="fold sub-fold">
-        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>系统更新</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-        <div class="fold-b">
-          <div class="hint" id="updInfo">版本信息加载中…</div>
-          <div class="flex" style="margin-top:10px">
-            <button class="btn" id="updCheck" style="flex:1" onclick="checkUpdate()">检查更新</button>
-            <button class="btn" id="updBtn" style="flex:1" onclick="doUpdate()">立即更新</button>
-          </div>
-          <pre id="updLog" class="hint" style="white-space:pre-wrap;display:none;margin-top:12px;max-height:260px;overflow:auto"></pre>
-          <div class="hint">更新会自动备份当前文件到 data/backup-时间戳,再拉取仓库最新文件并重启服务;data 数据和 venv 不受影响。</div>
-          <h4 style="margin:16px 0 8px">备份管理</h4>
-          <div class="hint" id="backupsInfo" aria-live="polite">尚未加载备份列表</div>
-          <div class="hint" id="backupsReason">请先查看备份；清理只删除备份，不删除数据库、会话或 venv。</div>
-          <div class="flex" style="margin-top:10px;flex-wrap:wrap">
-            <button class="ghost" type="button" id="backupsLoadBtn" onclick="loadBackups()">查看备份</button>
-            <button class="btn" type="button" id="backupsKeepBtn" onclick="cleanupBackups('keep_latest')" disabled>保留最新一份，清理其余（推荐）</button>
-            <button class="danger" type="button" id="backupsAllBtn" onclick="cleanupBackups('all')" disabled>删除全部备份</button>
-          </div>
-          <div id="backupsList" style="margin-top:10px;max-height:260px;overflow:auto"></div>
-          <div class="hint" id="backupsResult" aria-live="polite" style="margin-top:8px"></div>
-        </div>
-      </div>
-      <div class="fold sub-fold" id="migrationCard">
-        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14M4 3h16v4"/></svg>整机迁移</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-        <div class="fold-b">
-          <div class="hint">迁移包包含全部账号数据库、Telegram Session、任务、规则、设置、凭据、头像和图标库配置；不包含代码、venv、历史更新备份或系统 nginx 配置。</div>
-          <label for="migrationPanelPassword">当前面板密码</label><input type="password" id="migrationPanelPassword" autocomplete="current-password">
-          <label for="migrationBackupPassword">迁移包密码（至少 8 位，丢失无法恢复）</label><input type="password" id="migrationBackupPassword" autocomplete="new-password">
-          <label for="migrationBackupPasswordConfirm">再次输入迁移包密码（仅导出时需要）</label><input type="password" id="migrationBackupPasswordConfirm" autocomplete="new-password">
-          <div class="flex" style="margin-top:12px"><button class="btn" type="button" id="migrationExport" onclick="exportMachineBackup()">导出加密迁移包</button></div>
-          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
-          <label for="migrationFile">导入迁移包（.tgp，最大 512MB）</label><input type="file" id="migrationFile" accept=".tgp,application/octet-stream">
-          <div class="flex" style="margin-top:12px"><button class="ghost" type="button" id="migrationPreview" onclick="previewMachineBackup()">上传并校验</button><button class="danger" type="button" id="migrationApply" disabled onclick="applyMachineBackup()">覆盖现机并重启</button></div>
-          <div class="hint" id="migrationResult" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
-          <div class="hint">导入会完整替换现机数据。请先停止旧 VPS，避免同一 Telegram Session 同时在线导致失效。</div>
-          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
-          <h4 style="margin:0 0 8px">每日自动备份到收藏夹</h4>
-          <label class="check"><input type="checkbox" id="autoBackupEnabled" onchange="syncAutoBackupForm()"> 启用每日自动整机备份</label>
-          <div id="autoBackupFields">
-            <div class="water-ai-time"><div><label for="autoBackupTime">每天执行时间（北京时间）</label><input type="time" id="autoBackupTime" value="04:30"></div><div><label for="autoBackupAccount">上传到哪个账号的收藏夹</label><select id="autoBackupAccount"></select></div></div>
-            <label for="autoBackupPassword">自动备份密码（至少 8 位，留空沿用已保存）</label><input type="password" id="autoBackupPassword" autocomplete="new-password" placeholder="留空不修改">
-            <label class="check"><input type="checkbox" id="autoBackupCaptionPassword"> 在收藏夹消息中附带密码文字</label>
-            <div class="hint">每次生成完整迁移包后上传到所选账号收藏夹，本地临时文件立即删除；收藏夹只保留最近 3 份自动备份，超出时删除更旧的。附带密码会把密码以明文保存在 Telegram 收藏夹。</div>
-            <div class="flex" style="margin-top:10px"><button class="btn" type="button" id="autoBackupSave" onclick="saveAutoBackup()">保存自动备份</button><button class="ghost" type="button" id="autoBackupNow" onclick="runAutoBackupNow()">立即备份</button></div>
-            <div class="hint" id="autoBackupStatus" role="status" aria-live="polite"></div>
-          </div>
-        </div>
-      </div>
-      <div class="fold sub-fold">
-        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>面板安全</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-        <div class="fold-b">
-        <label>修改面板访问密码(至少 8 位)</label>
-        <div class="flex">
-          <div><input type="password" id="sOldPw" placeholder="原密码(必填)" autocomplete="current-password"></div>
-          <div><input type="password" id="sNewPw" placeholder="新面板密码" autocomplete="new-password"></div>
-        </div>
-        <button class="btn" style="margin-top:12px" onclick="changePw()">修改密码</button>
-        <div class="hint">密码已改为 scrypt 哈希存储,明文文件不存在;改完其它设备会被强制下线</div>
-        <div class="hint" style="margin-top:14px" id="sessInfo">登录设备:-</div>
-        <button class="ghost" style="margin-top:8px" onclick="logoutAll()">退出所有设备</button>
-        <div class="hint">面板对外暴露时建议只监听 127.0.0.1 并用反向代理 + HTTPS</div>
-        </div>
-      </div>
-      <div class="fold sub-fold">
-        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>通知推送</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-        <div class="fold-b">
-          <label>Bark 推送(Bark Key 或完整 URL,如 https://api.day.app/xxxx)</label>
-          <input type="text" id="sBark" placeholder="xxxx 或 https://api.day.app/xxxx">
-          <div class="flex">
-            <div><label>Telegram Bot Token</label><input type="text" id="sBt" placeholder="123456:ABC..."></div>
-            <div><label>接收 Chat ID</label><input type="text" id="sBc" placeholder="123456789"></div>
-          </div>
-          <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="sNok" style="width:auto"> 成功时推送</label>
-          <label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="checkbox" id="sNof" style="width:auto"> 失败时推送</label>
-          <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
-          <div class="hint">配置任一(Bark 或 TG Bot)即可;签到成功/失败、抢注命中、自定义任务结束时按开关推送</div>
-        </div>
-      </div>
-      <div class="fold sub-fold">
-        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>时区 / 服务器时间</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-        <div class="fold-b">
-          <label>时区</label>
-          <select id="sTz"></select>
-          <div class="hint" id="tzNow" style="margin-top:8px">服务器时间加载中...</div>
-          <button class="btn" style="margin-top:12px" onclick="saveTz()">保存时区</button>
-          <div class="hint">签到任务的「时间窗口」和「今天已签」都按这个时区计算;VPS 系统是 UTC 时也只需在这里选对</div>
-        </div>
-      </div>
-      </div>
-    </div>
-    <div class="card fold" id="acctHubCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>账号与行为</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-      <div class="fold sub-fold">
-        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>自动水群(从众)</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-        <div class="fold-b">
-          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sFl" style="width:auto"> 开启从众模式(默认关闭)</label>
-          <div class="flex" style="margin-top:10px">
-            <div><label>同文本出现 N 条后跟风</label><input type="number" id="sFlCnt" min="2" max="30" value="5"></div>
-            <div><label>统计窗口(分钟)</label><input type="number" id="sFlMin" min="1" max="60" value="5"></div>
-          </div>
-          <label>跟风话术池(逗号分隔,随机选一条)</label>
-          <input type="text" id="sFlPool" placeholder="哈哈,确实,同意,+1,蹲一个">
-          <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
-          <div class="hint">监听群内同一句话短时间出现多人的,你也跟一条,像真人一样融入群聊;命令类消息不会跟</div>
-        </div>
-      </div>
-      <div class="fold sub-fold">
-        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>触发行为</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-        <div class="fold-b">
-        <div class="flex">
-          <div><label>同群同规则冷却(秒)</label><input type="number" id="sCooldown" min="0"></div>
-          <div><label>命中后随机延迟(秒,最小 最大)</label><input type="text" id="sDelay" placeholder="1.0 3.0"></div>
-          <div><label style="display:flex;align-items:center;gap:8px;margin-top:14px"><input type="checkbox" id="sIgnore" style="width:auto"> 忽略机器人消息</label></div>
-        </div>
-        <label for="sTaskConcurrency">每账号任务并发上限</label>
-        <select id="sTaskConcurrency">
-          <option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
-        </select>
-        <div class="hint">按任务列表顺序，每批两个；整轮结束再排失败重试</div>
-        <label>日志保留天数(0 = 永久保留)</label>
-        <input type="number" id="sLogKeep" min="0" max="3650" value="30">
-        <div class="hint">每小时检查一次,超过天数的记录自动删除并压缩数据库</div>
-        <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
-        </div>
-      </div>
-      <div class="fold sub-fold" id="foldTg">
-        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>TG账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-        <div class="fold-b">
-          <h4 style="margin:0 0 8px">共用 Telegram API</h4>
-          <div class="flex">
-            <div><label for="tgApiId">API_ID</label><input type="text" id="tgApiId" placeholder="12345678" inputmode="numeric"></div>
-            <div><label for="tgApiHash">API_HASH</label><input type="text" id="tgApiHash" placeholder="在 my.telegram.org 获取"></div>
-          </div>
-          <button class="ghost" id="tgApiSave" style="margin-top:10px" onclick="saveTgApi()">保存共用 API</button>
-          <div class="hint">所有 Telegram 账号共用这一套 API，只需配置一次。</div>
-          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
-          <label for="accountSettings">当前账号</label>
-          <select id="accountSettings" onchange="switchAccount(this.value)"><option value="default">默认账号</option></select>
-          <div id="accountStatus" class="hint" role="status" aria-live="polite">默认账号</div>
-          <label for="accountLabel">账号备注</label><input id="accountLabel" maxlength="80" placeholder="如：工作号、小号">
-          <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:12px">
-            <button class="btn" id="accountCreate" onclick="manageAccount('create')">添加账号并登录</button>
-            <button class="ghost" id="accountRename" onclick="manageAccount('rename')">修改当前备注</button>
-            <button class="ghost" id="accountReload" onclick="loadAccounts()">刷新</button>
-            <button class="danger" id="accountDelete" disabled onclick="manageAccount('delete')">删除当前</button>
-          </div>
-          <div id="accountResult" class="hint" role="status" aria-live="polite"></div>
-          <div class="hint">默认账号不能删除；其他账号删除时会同时移除对应配置和登录会话。</div>
-          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
-          <div id="tgCard"><div class="empty">加载中...</div></div>
-        </div>
-      </div>
-      </div>
-    </div>
-    <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m5 17 4-4 3 3 2-2 5 3"/></svg>共享图标库</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <div class="hint">图标库配置跨账号、跨设备共享。默认 TFEL：https://emby-icon.vercel.app/TFEL-Emby.json。内置库可禁用，不可删除。仅点击按钮时加载或刷新，不定时拉取。</div>
-        <div class="flex" style="gap:8px;flex-wrap:wrap;margin-top:10px"><button class="ghost" type="button" id="iconLibrariesLoad" onclick="loadIconLibraries()">加载图标库</button><button class="ghost" type="button" id="iconLibrariesRefresh" onclick="refreshIcons()">刷新全部图标</button></div>
-        <div id="iconLibrariesList"></div>
-        <label for="iconLibraryName">外部图标库名称（可空）</label><input id="iconLibraryName" maxlength="80" placeholder="如：我的图标库">
-        <label for="iconLibraryUrl">图标库 JSON URL</label><input type="url" id="iconLibraryUrl" placeholder="https://example.com/icons.json">
-        <button class="btn" type="button" id="iconLibraryAdd" style="margin-top:10px" onclick="addIconLibrary()">保存共享图标库</button>
-        <div id="iconLibrariesResult" class="hint" role="status" aria-live="polite"></div><pre id="iconLibraryErrors" class="hint" style="white-space:pre-wrap"></pre>
       </div>
     </div>
   </section>
