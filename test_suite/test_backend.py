@@ -94,7 +94,9 @@ def load_backend():
                           'SKILL_FIXED_RATIO', 'SKILL_RECENT_MAX', 'SKILL_DETAIL_MAX', 'SKILL_SUMMARY_MAX',
                           'SKILL_FADING_MAX_COUNT', 'SKILL_FADING_IDLE_DAYS', 'STUDY_PER_GROUP_MAX', 'STUDY_TOTAL_MAX',
                           'TOPIC_STOP_TERMS', '_MEMORY_ID_PREFIX', '_MEMORY_STAGE_WEIGHT', '_button_ai_result',
-                        '_CODE_USED_NOTICE_RE', 'KNOWLEDGE_AUTO_MAX_BYTES', 'KNOWLEDGE_MAX_BYTES', 'SKILL_MAX_BYTES'}
+                        '_CODE_USED_NOTICE_RE', 'KNOWLEDGE_AUTO_MAX_BYTES', 'KNOWLEDGE_MAX_BYTES', 'SKILL_MAX_BYTES',
+                        'MEMORY_STALE_DAYS', 'SENT_DEDUPE_SECONDS', 'BUBBLE_SPLIT_RATIO',
+                        'BUBBLE_SPLIT_RATIO_AFTER_GRAB', 'BUBBLE_MAX_PARTS'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):

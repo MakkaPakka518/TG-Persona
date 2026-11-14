@@ -814,6 +814,11 @@ SKILL_FADING_MAX_COUNT = 3
 SKILL_FADING_IDLE_DAYS = 90
 STUDY_PER_GROUP_MAX = 12
 STUDY_TOTAL_MAX = 500
+MEMORY_STALE_DAYS = 45
+SENT_DEDUPE_SECONDS = 60
+BUBBLE_SPLIT_RATIO = 0.35
+BUBBLE_SPLIT_RATIO_AFTER_GRAB = 0.8
+BUBBLE_MAX_PARTS = 3
 TOPIC_STOP_TERMS = frozenset("""
 怎么 什么 可以 就是 真的 这个 那个 哈哈 我们 你们 他们 她们 自己 现在 今天 明天
 时候 一个 没有 不是 知道 觉得 应该 可能 但是 而且 因为 所以 如果 还有 然后
@@ -1469,9 +1474,16 @@ def _study_evict(base, chat_id=None):
         victims.extend(blocks[:len(blocks) - STUDY_TOTAL_MAX])
     victims = list({id(block): block for block in victims}.values())
     if not victims:
-        # 条数未超限但整体超字节时，按引用热度淘汰最冷的一条。
-        ordered = sorted(blocks, key=lambda b: (int(usage.get(_memory_entry_id("study", b), 0)),
-                                                b["meta"].get("created_at", 0)))
+        # 条数未超限但整体超字节时，按"被引用次数 + 最后引用时间 + 创建时间"淘汰最冷的一条。
+        last_used = _memory_last_used("study")
+
+        def cold_rank(block):
+            block_id = _memory_entry_id("study", block)
+            return (int(usage.get(block_id, 0)), int(last_used.get(block_id, 0)),
+                    block["meta"].get("created_at", 0))
+
+        ordered = sorted(blocks, key=cold_rank)
+        victims = ordered[:1]
         victims = ordered[:1]
     return _replace_study_blocks(base, {block["start"]: "" for block in victims})
 
@@ -1522,6 +1534,17 @@ def _memory_usage(file):
     try:
         rows = get_account_db().execute(
             "SELECT block_id, used FROM memory_refs WHERE file=? LIMIT ?",
+            (str(file), MEMORY_POOL_MAX * 4)).fetchall()
+        return {str(row[0]): int(row[1] or 0) for row in rows}
+    except Exception:
+        return {}
+
+
+def _memory_last_used(file):
+    """每条记忆最后一次被引用的时间，用来做“最冷条目先淘汰”。"""
+    try:
+        rows = get_account_db().execute(
+            "SELECT block_id, last_used FROM memory_refs WHERE file=? LIMIT ?",
             (str(file), MEMORY_POOL_MAX * 4)).fetchall()
         return {str(row[0]): int(row[1] or 0) for row in rows}
     except Exception:
@@ -1597,8 +1620,12 @@ def _memory_score(entry, terms, chat_id, now, usage):
     freshness = 1.0 / (1.0 + age_days / 60.0)
     used = int((usage or {}).get(entry.get("id"), 0))
     scarcity = 1.0 / (1.0 + used)
+    # Zep 式时间维度：长期未验证的旧条目自动下沉，不再和高分条目抢引用预算。
+    stale = 0.0
+    if not meta.get("verified") and not meta.get("pinned") and age_days > MEMORY_STALE_DAYS:
+        stale = -0.9
     return (2.5 * topic + 1.5 * same_group + 1.0 * generic
-            + 1.2 * stage + pinned + 0.6 * freshness + 1.5 * scarcity)
+            + 1.2 * stage + pinned + 0.6 * freshness + 1.5 * scarcity + stale)
 
 
 def _rank_memory(entries, chat_id="", text="", usage=None, now=None):
@@ -1863,15 +1890,18 @@ def _knowledge_auto_entries(content, terms=()):
         if not body:
             continue
         meta = meta if isinstance(meta, dict) else {}
+        created = int(meta.get("created_at") or 0)
+        verified = 1 if meta.get("verified") else 0
+        stale = 1 if (created and not verified
+                      and int(time.time()) - created > MEMORY_STALE_DAYS * 86400) else 0
         entries.append({
             "body": body,
-            "meta": {"pinned": False,
-                     "verified": 1 if meta.get("verified") else 0,
-                     "created_at": int(meta.get("created_at") or 0)},
+            "meta": {"pinned": False, "verified": verified, "created_at": created, "stale": stale},
             "id": "k" + hashlib.sha1(body[:120].encode("utf-8")).hexdigest()[:9],
         })
     if terms:
         entries.sort(key=lambda entry: (
+            1 - entry["meta"].get("stale", 0),
             entry["meta"]["verified"],
             sum(1 for term, _ in terms if term in entry["body"].casefold()),
             entry["meta"]["created_at"]), reverse=True)
@@ -1896,35 +1926,98 @@ def _trim_knowledge_auto(content):
     _write_knowledge_auto("\n\n".join(reversed(ordered)) + "\n")
 
 
+def _knowledge_sentences(text):
+    return [part.strip() for part in re.split(r"(?<=[。！？!?；;])", str(text or "")) if part.strip()]
+
+
+def _merge_knowledge_text(old, new):
+    """用字符级 diff 把新条目里真正的补充片段接到旧条目后面；没有新内容时返回 None。"""
+    old_text = str(old or "").strip()
+    new_text = str(new or "").strip().rstrip("。！？")
+    if not old_text or not new_text:
+        return None
+    extra = []
+    for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(None, old_text, new_text).get_opcodes():
+        # 只留成句的补充，零碎的两三个字（"相关""时"）并进去只会让句子更啰嗦。
+        if tag in ("insert", "replace") and (j2 - j1) >= 6:
+            fragment = new_text[j1:j2].strip("，。；,.;、 ")
+            if fragment:
+                extra.append(fragment)
+    if not extra:
+        return None
+    return (old_text.rstrip("。！？") + "；" + "；".join(extra) + "。")[:300]
+
+
+def _replace_knowledge_auto_body(content, old_body, new_body):
+    """把某条自动知识的正文换成合并后的版本，meta 与其它条目原样保留。"""
+    pattern = re.compile(
+        r"<!--\s*tg-persona-auto:(\{.*?\})\s*-->(.*?)<!--\s*/tg-persona-auto\s*-->", re.S)
+    replaced = []
+
+    def replace(match):
+        if match.group(2).strip() != str(old_body).strip():
+            return match.group(0)
+        try:
+            meta = json.loads(match.group(1))
+        except ValueError:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        meta["updated_at"] = int(time.time())
+        replaced.append(True)
+        return "<!-- tg-persona-auto:%s -->\n%s\n<!-- /tg-persona-auto -->" % (
+            json.dumps(meta, ensure_ascii=False), str(new_body).strip())
+
+    return pattern.sub(replace, content), bool(replaced)
+
+
 def _append_knowledge_auto(items, chat_id, msg_ids=(), samples=()):
-    """候选知识过三道闸再写盘：敏感/长度、近似重复、是否在抄原话。"""
+    """候选知识过闸后写盘：完全重复丢掉，近似重复合并进旧条目（Mem0 的 NOOP/UPDATE 两态）。"""
     content = _read_knowledge_auto()
     existing = [entry["body"] for entry in _knowledge_auto_entries(content)]
     now = int(time.time())
-    blocks = []
+    blocks, merged = [], 0
     for item in items:
         body = _safe_knowledge_item(item)
         if not body:
             continue
-        if any(_overlap(body, old, 3) > 0.55 or _text_similarity(body, old) >= 0.80
-               for old in existing):
-            continue
         if any(_overlap(body, sample, 4) > 0.6 for sample in samples if sample):
             continue
+        best, best_sim = "", 0.0
+        for old in existing:
+            similarity = _text_similarity(body, old)
+            if similarity > best_sim:
+                best, best_sim = old, similarity
+        if best:
+            if best_sim >= 0.95:
+                continue
+            # 新条目把旧条目大半内容包住时，也算同一条：补充细节而不是另开一条。
+            covered = _overlap(best, body, 2)
+            if best_sim >= 0.80 or covered >= 0.70 or _overlap(body, best, 3) > 0.55:
+                update = _merge_knowledge_text(best, body)
+                if not update:
+                    continue
+                content, changed = _replace_knowledge_auto_body(content, best, update)
+                if changed:
+                    existing[existing.index(best)] = update
+                    merged += 1
+                continue
         meta = {"created_at": now, "chat_id": chat_id, "verified": 0,
                 "source_msg_ids": [int(value) for value in list(msg_ids)[:5]]}
         blocks.append("<!-- tg-persona-auto:%s -->\n%s\n<!-- /tg-persona-auto -->"
                       % (json.dumps(meta, ensure_ascii=False), body))
         existing.append(body)
-    if not blocks:
+    if not blocks and not merged:
         return 0
-    base = content.rstrip()
+    full = content.rstrip()
+    if blocks:
+        full = (full + "\n\n" if full else "") + "\n\n".join(blocks)
     try:
-        _trim_knowledge_auto((base + "\n\n" if base else "") + "\n\n".join(blocks) + "\n")
+        _trim_knowledge_auto(full + "\n")
     except (ValueError, OSError):
         # 自动知识写盘失败不能连累群记忆落盘。
         return 0
-    return len(blocks)
+    return len(blocks) + merged
 
 
 def _promote_knowledge_auto(item_id, every=False):
@@ -2436,7 +2529,8 @@ async def _redpacket_after_success(a, chat_id, popup=""):
             delay = max(0, min(int(a["success_reply_delay"] or 0), 600))
             if delay:
                 await asyncio.sleep(delay)
-            await _send_generated_message(chat_id, a["success_reply_text"], parse_mode=None)
+            await _send_bubbled_reply(chat_id, chat_id, a["success_reply_text"], "redpacket",
+                                      BUBBLE_SPLIT_RATIO_AFTER_GRAB)
         except Exception:
             log.exception("红包回群失败")
 
@@ -2824,8 +2918,15 @@ async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False, *, test_job
             _flock_stage(progress, "skipped", "最近一小时发言已达上限")
             return
         _flock_stage(progress, "sending", "正在发送到 Telegram")
-        sent = await asyncio.wait_for(_send_generated_message(chat_id, reply, parse_mode=None, generated_kind="ai_flock"), timeout=20)
-        sent_result = {"ok": True, "sent": True, "reply": reply, "chat_id": key,
+        split_ratio = BUBBLE_SPLIT_RATIO_AFTER_GRAB if registration else BUBBLE_SPLIT_RATIO
+        sent, bubbles = await asyncio.wait_for(
+            _send_bubbled_reply(chat_id, key, reply, "ai_flock", split_ratio), timeout=30)
+        if sent is None:
+            _flock_stage(progress, "skipped", "内容与最近发送重复，已跳过")
+            add_hit("ai_flock", False, chat_id=key, content=trigger[:120],
+                    detail={"source": source["kind"], "reason": progress["reason"], **call_trace})
+            return
+        sent_result = {"ok": True, "sent": True, "reply": reply, "chat_id": key, "bubbles": bubbles,
                        "message_id": getattr(sent, "id", None)}
         if source.get("job_id"):
             db = get_account_db()
@@ -3052,12 +3153,100 @@ async def _send_generated_message(entity, text, **kwargs):
     return _track_generated_message(sent, entity, text, kind)
 
 
+def _sent_recently(chat_id, text, seconds=SENT_DEDUPE_SECONDS):
+    """和最近发过的内容重复就跳过（Telegram-Agent-MCP 的 60s 去重窗口）。"""
+    hashed = hashlib.sha256(str(text or "").encode("utf-8")).hexdigest()
+    if not hashed:
+        return False
+    try:
+        row = get_account_db().execute(
+            "SELECT 1 FROM generated_messages WHERE chat_id IN (?, '*') AND text=? AND ts>=? LIMIT 1",
+            (str(chat_id), hashed, int(time.time()) - max(1, int(seconds)))).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
+def _bubble_parts(text, ratio=BUBBLE_SPLIT_RATIO, rng=None):
+    """按句末标点把回复切成 1-3 泡；ratio 决定这次要不要切，短句一律不切。"""
+    body = str(text or "").strip()
+    if not body:
+        return []
+    if len(body) < 12:
+        return [body]
+    if (rng or random.random)() >= ratio:
+        return [body]
+    chunks = [part.strip() for part in re.split(r"(?<=[。！？!?；;…])", body) if part.strip()]
+    if len(chunks) < 2:
+        return [body]
+    merged = []
+    for chunk in chunks:
+        # 太短的句子并进上一泡，避免“嗯。”“是啊。”这种碎气泡。
+        if merged and len(merged[-1]) < 8:
+            merged[-1] += chunk
+        else:
+            merged.append(chunk)
+    if len(merged) < 2:
+        return [body]
+    if len(merged) > BUBBLE_MAX_PARTS:
+        merged = merged[:BUBBLE_MAX_PARTS - 1] + ["".join(merged[BUBBLE_MAX_PARTS - 1:])]
+    return [part for part in merged if part.strip()]
+
+
+async def _bubble_pause(entity, text):
+    """按字数算“正在输入”的时长，上限压到 5 秒，群里别让人等太久。"""
+    seconds = min(1.0 + len(str(text or "")) * 0.05, 5.0)
+    runtime = get_runtime()
+    client = getattr(runtime, "client", None)
+    typed = False
+    if client is not None:
+        try:
+            async with client.action(entity, "typing"):
+                await asyncio.sleep(seconds)
+            typed = True
+        except Exception:
+            typed = False
+    if not typed:
+        await asyncio.sleep(seconds)
+
+
+async def _send_bubbled_reply(entity, chat_id, text, kind="automation", ratio=BUBBLE_SPLIT_RATIO, rng=None):
+    """先过去重，再按分泡规则逐条发送；返回 (最后一条消息, 气泡数)，去重命中时 (None, 0)。"""
+    if _sent_recently(chat_id, text):
+        log.info("发送去重命中，跳过重复内容 群=%s", chat_id)
+        return None, 0
+    parts = _bubble_parts(text, ratio, rng)
+    if not parts:
+        return None, 0
+    sent = None
+    for index, part in enumerate(parts):
+        if index:
+            await _bubble_pause(entity, part)
+        sent = await _send_generated_message(entity, part, parse_mode=None, generated_kind=kind)
+    return sent, len(parts)
+
+
 async def _event_generated_message(event, method, text, **kwargs):
     chat_id = getattr(event, "chat_id", "")
     kind = kwargs.pop("generated_kind", "automation")
     _track_generated_intent(chat_id, text, kwargs.get("parse_mode", ()))
     sent = await getattr(event, method)(text, **kwargs)
     return _track_generated_message(sent, chat_id, text, kind)
+
+
+async def _event_bubbled_reply(event, method, chat_id, text, kind="automation",
+                               ratio=BUBBLE_SPLIT_RATIO, rng=None):
+    """event.reply / event.respond 版本的分泡发送，返回实际发出的气泡数。"""
+    if _sent_recently(chat_id, text):
+        log.info("发送去重命中，跳过重复内容 群=%s", chat_id)
+        return 0
+    count = 0
+    for index, part in enumerate(_bubble_parts(text, ratio, rng)):
+        if index:
+            await _bubble_pause(chat_id, part)
+        await _event_generated_message(event, method, part, parse_mode=None, generated_kind=kind)
+        count += 1
+    return count
 
 
 def _learning_metric(role, collected=0, learned=0):
@@ -4559,10 +4748,8 @@ async def on_auto_event(event):
                 rt = str(a["reply_text"] or "").replace("{code}", code)
                 if not rt:
                     continue
-                if a["action"] == "send":
-                    await _event_generated_message(event, "respond", rt)
-                else:
-                    await _event_generated_message(event, "reply", rt)
+                await _event_bubbled_reply(event, "respond" if a["action"] == "send" else "reply",
+                                           chat, rt, "grabcodes", BUBBLE_SPLIT_RATIO_AFTER_GRAB)
                 get_runtime().auto_last_ts[key] = now
                 reply_desc = rt
                 notify_event("success", a["name"], f"群内命中邀请码并注册: {rt[:120]}")
@@ -5586,7 +5773,8 @@ async def _finish_group_registration(a, ent, found, credential, source_chat, tes
         try:
             if a["success_reply_delay"]:
                 await asyncio.sleep(a["success_reply_delay"])
-            await _send_generated_message(source_chat, a["success_reply_text"], parse_mode=None)
+            await _send_bubbled_reply(source_chat, str(source_chat), a["success_reply_text"], "registration",
+                                      BUBBLE_SPLIT_RATIO_AFTER_GRAB)
             detail["group_reply"] = a["success_reply_text"]
         except Exception as error:
             detail["group_reply_error"] = redact(error)[:160]

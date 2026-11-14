@@ -189,6 +189,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
             name='多线路自动水群', groups='-1', start_time='09:00', end_time='11:00',
             prompt='简短自然', provider_ids=','.join(providers)))
         calls, cancelled = [], []
+        answer = {'text': '确实挺热的'}
         class Client:
             def __init__(self, **_kwargs): pass
             async def __aenter__(self): return self
@@ -201,7 +202,8 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
                         await asyncio.Event().wait()
                     finally:
                         cancelled.append(model)
-                content = {'empty': '  ', 'thinking': None, 'truncated': '一半的', 'bigmodel': '确实挺热的'}[model]
+                content = {'empty': '  ', 'thinking': None, 'truncated': '一半的',
+                           'bigmodel': answer['text']}[model]
                 return SimpleNamespace(status_code=200, json=lambda: {
                     'choices': [{'message': {'content': content, 'reasoning_content': '还在思考' if model == 'thinking' else ''},
                                  'finish_reason': 'length' if model == 'truncated' else 'stop'}],
@@ -220,6 +222,8 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tuple(db.execute('SELECT input_tokens,output_tokens FROM ai_usage WHERE provider_id=?',
                                           (providers[0],)).fetchone()), (15, 0))
         runtime.ai_flock_last.clear()
+        # 60 秒内容去重会拦下一字不差的复读，第二次换一句来验证"冷却后还能再发"。
+        answer['text'] = '是挺热的'
         with patch('asyncio.sleep', new=AsyncMock()):
             await self.b['_run_ai_flock'](-1, '确实热')
         self.assertEqual(calls, models + ['bigmodel'])
