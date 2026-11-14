@@ -1891,8 +1891,8 @@ def _append_knowledge_auto(items, chat_id, msg_ids=(), samples=()):
     return len(blocks)
 
 
-def _promote_knowledge_auto(item_id):
-    """号主确认某条自动知识，才把它标成已验证；没找到就返回 False。"""
+def _promote_knowledge_auto(item_id, every=False):
+    """号主确认某条自动知识才标成已验证；every=True 时一次标全部。返回改动条数。"""
     content = _read_knowledge_auto()
     pattern = re.compile(
         r"<!--\s*tg-persona-auto:(\{.*?\})\s*-->(.*?)<!--\s*/tg-persona-auto\s*-->", re.S)
@@ -1901,7 +1901,7 @@ def _promote_knowledge_auto(item_id):
     def replace(match):
         body = match.group(2).strip()
         target = "k" + hashlib.sha1(body[:120].encode("utf-8")).hexdigest()[:9]
-        if target != item_id:
+        if not every and target != item_id:
             return match.group(0)
         try:
             meta = json.loads(match.group(1))
@@ -1909,6 +1909,8 @@ def _promote_knowledge_auto(item_id):
             meta = {}
         if not isinstance(meta, dict):
             meta = {}
+        if meta.get("verified"):
+            return match.group(0)
         meta["verified"] = 1
         found.append(True)
         return "<!-- tg-persona-auto:%s -->%s<!-- /tg-persona-auto -->" % (
@@ -1916,9 +1918,9 @@ def _promote_knowledge_auto(item_id):
 
     updated = pattern.sub(replace, content)
     if not found:
-        return False
+        return 0
     _write_knowledge_auto(updated)
-    return True
+    return len(found)
 
 
 def _split_study_knowledge(text):
@@ -8702,7 +8704,8 @@ class KnowledgeAutoInput(BaseModel):
 
 
 class KnowledgeAutoPromote(BaseModel):
-    id: str = Field(..., min_length=1, max_length=32)
+    id: str = Field("", max_length=32)
+    all: int = Field(0, ge=0, le=1)
 
 
 @app.get("/api/ai/flock/knowledge/auto")
@@ -8716,7 +8719,11 @@ async def get_flock_knowledge_auto():
     return {"content": content, "bytes": len(content.encode("utf-8")),
             "enabled": 1 if _knowledge_auto_enabled() else 0,
             "items": len(entries),
-            "verified": sum(1 for entry in entries if entry["meta"]["verified"])}
+            "verified": sum(1 for entry in entries if entry["meta"]["verified"]),
+            "entries": [{"id": entry["id"], "verified": entry["meta"]["verified"],
+                         "created_at": entry["meta"]["created_at"],
+                         "body": entry["body"][:200], "truncated": len(entry["body"]) > 200}
+                        for entry in entries]}
 
 
 @app.put("/api/ai/flock/knowledge/auto")
@@ -8746,9 +8753,16 @@ async def clear_flock_knowledge_auto():
 async def promote_flock_knowledge_auto(body: KnowledgeAutoPromote):
     try:
         async with get_runtime().knowledge_lock:
+            if body.all:
+                promoted = _promote_knowledge_auto("", every=True)
+                if not promoted:
+                    raise HTTPException(404, "没有待验证的自动知识")
+                return {"ok": True, "promoted": promoted}
+            if not body.id:
+                raise HTTPException(422, "缺少条目 id")
             if not _promote_knowledge_auto(body.id):
                 raise HTTPException(404, "没有这条自动知识")
-        return {"ok": True}
+        return {"ok": True, "promoted": 1}
     except (ValueError, OSError) as error:
         raise HTTPException(400, str(error)) from None
 

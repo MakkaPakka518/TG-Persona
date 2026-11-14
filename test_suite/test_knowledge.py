@@ -33,6 +33,24 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         return (await self.b['create_ai_provider'](self.b['AIProviderInput'](
             note='测试', base='https://example.invalid/v1', key='fixture-key', model='test')))['provider']['id']
 
+    async def test_auto_knowledge_promote_one_and_all(self):
+        """面板没有入口时这条链路等于不存在：单条确认、批量确认、计数都要能跑通。"""
+        type(self.runtime).knowledge_lock = asyncio.Lock()
+        text = ('<!-- tg-persona-auto:{"created_at":1,"chat_id":"-1","verified":0} -->\n'
+                '甲群常聊把源码丢给我改\n<!-- /tg-persona-auto -->\n'
+                '<!-- tg-persona-auto:{"created_at":2,"chat_id":"-1","verified":0} -->\n'
+                '乙群常聊拿现成插件问能不能装\n<!-- /tg-persona-auto -->')
+        self.b['_write_knowledge_auto'](text)
+        listing = await self.b['get_flock_knowledge_auto']()
+        self.assertEqual(listing['items'], 2)
+        self.assertEqual(listing['verified'], 0)
+        self.assertEqual(len(listing['entries']), 2)
+        self.assertEqual(self.b['_promote_knowledge_auto'](listing['entries'][0]['id']), 1)
+        self.assertEqual(self.b['_promote_knowledge_auto']('', every=True), 1)
+        again = await self.b['get_flock_knowledge_auto']()
+        self.assertEqual(again['verified'], 2)
+        self.assertEqual(self.b['_promote_knowledge_auto']('', every=True), 0)
+
     def test_shipped_knowledge_has_all_topics_and_fits_document_limit(self):
         content = (Path(__file__).resolve().parents[1] / 'knowledge.md').read_text(encoding='utf-8')
         self.assertLessEqual(len(content.encode()), self.b['KNOWLEDGE_MAX_BYTES'])

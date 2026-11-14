@@ -1536,8 +1536,10 @@ section.act,.fold.open .fold-b{animation:none}
         </div>
         <div class="water-ai-subsection">
           <label class="button-reply-toggle"><input type="checkbox" id="knowledgeAutoEnabled" onchange="saveKnowledgeAutoToggle()"> AI 自动积累知识（knowledge-auto.md）</label>
-          <div class="hint">学习时它会把能长期复用的知识单独写进 knowledge-auto.md，需要你确认后才升级成「已验证」。和上面手写的 knowledge.md 分开存，不会覆盖你的内容；关闭后不再写入，也不再引用。</div>
+          <div class="hint">学习时它会把能长期复用的知识单独写进 knowledge-auto.md，需要你确认后才升级成「已验证」，已验证的条目在挑选引用时排前面，未确认的仍会被引用但排在后面。和上面手写的 knowledge.md 分开存，不会覆盖你的内容；关闭后不再写入，也不再引用。</div>
           <div class="hint" id="knowledgeAutoMeta">自动知识尚未载入</div>
+          <div class="water-ai-toolbar" id="knowledgeAutoVerifyBar" style="display:none"><button class="ghost" id="knowledgeAutoPromoteAll" type="button" onclick="promoteAllKnowledgeAuto()">全部标为已验证</button><span class="hint" id="knowledgeAutoVerifyHint"></span></div>
+          <div id="knowledgeAutoList"></div>
           <div class="water-ai-toolbar"><button class="ghost" id="knowledgeAutoReload" type="button" onclick="reloadKnowledgeAuto()">重新载入</button><button class="ghost" id="knowledgeAutoExport" type="button" onclick="exportKnowledgeAuto()">导出 knowledge-auto.md</button><button class="danger" id="knowledgeAutoClear" type="button" onclick="clearKnowledgeAuto()">清空自动知识</button></div>
           <textarea id="knowledgeAutoEditor" rows="6" placeholder="自动积累的条目会出现在这里，也可以直接改"></textarea>
           <button class="btn" id="knowledgeAutoSave" type="button" style="margin-top:10px" onclick="saveKnowledgeAuto()">保存自动知识</button>
@@ -3658,12 +3660,45 @@ async function importKnowledge(){const draft=knowledgeDraft;if(knowledgeBusy||!d
 async function exportKnowledge(){if(knowledgeBusy||!knowledgeLoaded)return;if(knowledgeDirty)return toast('请先保存新知识再导出',1);const c=accountContext();knowledgeBusy=true;syncKnowledgeButtons();try{const r=await fetch('/api/ai/flock/knowledge/export',{headers:{'X-Account-ID':c.id||'default'}});if(!isCurrentAccount(c))return;if(r.status===401){showLoginGate();throw new Error('未登录面板')}if(!r.ok)throw new Error(apiErrorMessage(await r.json().catch(()=>({})),r.status));const blob=await r.blob();if(!isCurrentAccount(c))return;const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='knowledge.md';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);$('#knowledgeStatus').textContent='knowledge.md 已导出'}catch(e){if(isCurrentAccount(c))$('#knowledgeStatus').textContent='导出失败：'+e.message}finally{if(isCurrentAccount(c)){knowledgeBusy=false;syncKnowledgeButtons()}}}
 async function uploadKnowledge(){if(knowledgeBusy||!knowledgeLoaded)return;if(knowledgeDirty)return toast('请先保存新知识再上传',1);const c=accountContext();knowledgeBusy=true;syncKnowledgeButtons();$('#knowledgeStatus').textContent='正在上传知识…';try{const d=await api('/api/ai/flock/knowledge/upload-now',{method:'POST',_account:c});if(!isCurrentAccount(c))return;knowledgeLastUpload=String(d.date||'');renderKnowledgeMeta(new Blob([$('#knowledgeEditor').value]).size);$('#knowledgeStatus').textContent='知识已上传 TG 收藏夹'}catch(e){if(isCurrentAccount(c))$('#knowledgeStatus').textContent='上传失败：'+e.message}finally{if(isCurrentAccount(c)){knowledgeBusy=false;syncKnowledgeButtons()}}}
 async function previewKnowledge(){const c=accountContext(),button=$('#knowledgePreviewBtn'),result=$('#knowledgePreviewResult');button.disabled=true;result.textContent='正在生成预览…';try{const chars=Number($('#knowledgePreviewChars').value),data=await api('/api/ai/flock/knowledge/preview',{method:'POST',body:JSON.stringify({text:$('#knowledgePreviewText').value,knowledge_chars:Number.isInteger(chars)?chars:2000,knowledge_on_demand:$('#knowledgePreviewOnDemand').value==='1'?1:0}),_account:c});if(!isCurrentAccount(c))return;const body=String(data.preview||'');result.textContent=(data.reason||'不会引用知识')+(body?'\n\n'+body.slice(0,1500)+(body.length>1500?'\n…（仅预览前 1500 字）':''):'')}catch(e){if(isCurrentAccount(c))result.textContent='预览失败：'+e.message}finally{if(isCurrentAccount(c))button.disabled=false}}
-let knowledgeAutoBusy=false;
-async function loadKnowledgeAuto(){if(knowledgeAutoBusy)return;const c=accountContext();knowledgeAutoBusy=true;try{const d=await api('/api/ai/flock/knowledge/auto',{_account:c});if(!isCurrentAccount(c))return;$('#knowledgeAutoEditor').value=String(d.content??'');$('#knowledgeAutoEnabled').checked=!!d.enabled;$('#knowledgeAutoMeta').textContent='自动知识：'+(d.items??0)+' 条　已验证 '+(d.verified??0)+' 条　'+formatFileSize(d.bytes??0)}catch(e){if(isCurrentAccount(c))$('#knowledgeAutoMeta').textContent='自动知识加载失败：'+e.message}finally{knowledgeAutoBusy=false}loadKnowledgeUpload()}
+let knowledgeAutoBusy=false;let knowledgeAutoEntries=[];
+async function loadKnowledgeAuto(){if(knowledgeAutoBusy)return;const c=accountContext();knowledgeAutoBusy=true;try{const d=await api('/api/ai/flock/knowledge/auto',{_account:c});if(!isCurrentAccount(c))return;knowledgeAutoEntries=Array.isArray(d.entries)?d.entries:[];renderKnowledgeAutoEntries();$('#knowledgeAutoEditor').value=String(d.content??'');$('#knowledgeAutoEnabled').checked=!!d.enabled;$('#knowledgeAutoMeta').textContent='自动知识：'+(d.items??0)+' 条　已验证 '+(d.verified??0)+' 条　'+formatFileSize(d.bytes??0)}catch(e){if(isCurrentAccount(c))$('#knowledgeAutoMeta').textContent='自动知识加载失败：'+e.message}finally{knowledgeAutoBusy=false}loadKnowledgeUpload()}
 async function loadKnowledgeUpload(){try{const d=await api('/api/ai/flock/knowledge/auto/upload');$('#knowledgeUploadEnabled').checked=!!d.enabled;$('#knowledgeUploadTime').value=d.time||'23:50';const sel=$('#knowledgeUploadAccount');sel.replaceChildren(...(accounts||[]).map(a=>{const o=document.createElement('option');o.value=a.id;o.textContent=a.label||a.id;return o}));if(!sel.options.length){const o=document.createElement('option');o.value=selectedAccount||'default';o.textContent='当前账号';sel.appendChild(o)}sel.value=d.account||selectedAccount||'default';if(!sel.value&&sel.options.length)sel.selectedIndex=0;$('#knowledgeUploadMeta').textContent=d.last_error?'上次上传报错：'+d.last_error:d.last_run?'上次上传 '+d.last_run+(d.last_file?' · '+d.last_file:''):'还没上传过'}catch(e){$('#knowledgeUploadMeta').textContent='上传配置载入失败：'+e.message}}
 async function saveKnowledgeUpload(){const body={enabled:$('#knowledgeUploadEnabled').checked?1:0,time:$('#knowledgeUploadTime').value||'23:50',account:$('#knowledgeUploadAccount').value||'default'};try{await api('/api/ai/flock/knowledge/auto/upload',{method:'PUT',body:JSON.stringify(body)});toast(body.enabled?'已开启定时上传到收藏':'已关闭定时上传')}catch(e){toast('保存失败：'+e.message,1);loadKnowledgeUpload()}}
 async function runKnowledgeUploadNow(){const c=accountContext();try{const d=await api('/api/ai/flock/knowledge/auto/upload',{method:'POST',_account:c});toast(d.skipped?'没有可上传的内容':('已上传到收藏：'+d.file));loadKnowledgeUpload()}catch(e){toast('上传失败：'+e.message,1)}}
 function reloadKnowledgeAuto(){loadKnowledgeAuto()}
+function renderKnowledgeAutoEntries(){
+  const box=$('#knowledgeAutoList');box.replaceChildren();
+  const bar=$('#knowledgeAutoVerifyBar'),hint=$('#knowledgeAutoVerifyHint'),all=$('#knowledgeAutoPromoteAll');
+  const list=Array.isArray(knowledgeAutoEntries)?knowledgeAutoEntries:[];
+  if(!list.length){bar.style.display='none';return}
+  const pending=list.filter(e=>!e.verified).length;
+  bar.style.display='flex';
+  all.style.display=pending?'':'none';
+  hint.textContent=pending?('还有 '+pending+' 条没确认，确认后才会优先被引用'):'全部条目都已确认';
+  for(const e of list){
+    const row=document.createElement('div');
+    row.style.cssText='display:flex;gap:10px;align-items:flex-start;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:9px;margin-top:7px';
+    const text=document.createElement('div');
+    text.style.cssText='flex:1;min-width:0;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word;opacity:.92';
+    text.textContent=(e.body||'')+(e.truncated?'…':'');
+    row.appendChild(text);
+    if(e.verified){
+      const tag=document.createElement('span');
+      tag.style.cssText='flex:0 0 auto;color:#a8e05f;font-size:12px;padding-top:2px';
+      tag.textContent='✔ 已验证';
+      row.appendChild(tag);
+    }else{
+      const btn=document.createElement('button');
+      btn.type='button';btn.className='ghost';btn.style.cssText='flex:0 0 auto';
+      btn.textContent='标为已验证';
+      btn.onclick=()=>promoteKnowledgeAuto(e.id,btn);
+      row.appendChild(btn);
+    }
+    box.appendChild(row);
+  }
+}
+async function promoteKnowledgeAuto(id,btn){const c=accountContext();if(btn){btn.disabled=true;btn.textContent='确认中…'}try{await api('/api/ai/flock/knowledge/auto/promote',{method:'POST',body:JSON.stringify({id}),_account:c});toast('已标为已验证');loadKnowledgeAuto()}catch(e){if(btn){btn.disabled=false;btn.textContent='标为已验证'}toast('确认失败：'+e.message,1)}}
+async function promoteAllKnowledgeAuto(){const c=accountContext();const pending=(knowledgeAutoEntries||[]).filter(e=>!e.verified).length;if(!pending){toast('没有待确认的条目');return}try{const d=await api('/api/ai/flock/knowledge/auto/promote',{method:'POST',body:JSON.stringify({all:1}),_account:c});toast('已确认 '+((d&&d.promoted)||pending)+' 条');loadKnowledgeAuto()}catch(e){toast('确认失败：'+e.message,1)}}
 async function saveKnowledgeAutoToggle(){const c=accountContext(),enabled=$('#knowledgeAutoEnabled').checked?1:0;try{await api('/api/ai/flock/knowledge/auto',{method:'PUT',body:JSON.stringify({content:'',enabled}),_account:c});toast(enabled?'已开启 AI 自动积累知识':'已关闭 AI 自动积累知识，已有内容保留但不再引用')}catch(e){$('#knowledgeAutoEnabled').checked=!enabled;toast('保存失败：'+e.message,1)}}
 async function saveKnowledgeAuto(){const c=accountContext(),content=$('#knowledgeAutoEditor').value;try{await api('/api/ai/flock/knowledge/auto',{method:'PUT',body:JSON.stringify({content,enabled:-1}),_account:c});toast('自动知识已保存');loadKnowledgeAuto()}catch(e){toast('保存失败：'+e.message,1)}}
 async function clearKnowledgeAuto(){const c=accountContext();if(!window.confirm('清空全部自动积累的知识？这个操作不可撤销。'))return;try{await api('/api/ai/flock/knowledge/auto/clear',{method:'POST',_account:c});$('#knowledgeAutoEditor').value='';toast('已清空自动知识');loadKnowledgeAuto()}catch(e){toast('清空失败：'+e.message,1)}}
