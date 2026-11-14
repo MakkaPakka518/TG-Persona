@@ -3668,44 +3668,66 @@ async function loadKnowledgeUpload(){try{const d=await api('/api/ai/flock/knowle
 async function saveKnowledgeUpload(){const body={enabled:$('#knowledgeUploadEnabled').checked?1:0,time:$('#knowledgeUploadTime').value||'23:50',account:$('#knowledgeUploadAccount').value||'default'};try{await api('/api/ai/flock/knowledge/auto/upload',{method:'PUT',body:JSON.stringify(body)});toast(body.enabled?'已开启定时上传到收藏':'已关闭定时上传')}catch(e){toast('保存失败：'+e.message,1);loadKnowledgeUpload()}}
 async function runKnowledgeUploadNow(){const c=accountContext();try{const d=await api('/api/ai/flock/knowledge/auto/upload',{method:'POST',_account:c});toast(d.skipped?'没有可上传的内容':('已上传到收藏：'+d.file));loadKnowledgeUpload()}catch(e){toast('上传失败：'+e.message,1)}}
 function reloadKnowledgeAuto(){loadKnowledgeAuto()}
+let knowledgeAutoOpen={pending:false,verified:false};
+function knowledgeAutoRow(e){
+  const row=document.createElement('div');
+  row.style.cssText='display:flex;gap:10px;align-items:flex-start;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:9px;margin-top:7px';
+  const text=document.createElement('div');
+  text.style.cssText='flex:1;min-width:0;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word;opacity:.92';
+  text.textContent=(e.body||'')+(e.truncated?'…':'');
+  row.appendChild(text);
+  const actions=document.createElement('div');
+  actions.style.cssText='flex:0 0 auto;display:flex;flex-direction:column;gap:6px;align-items:stretch';
+  if(e.verified){
+    const tag=document.createElement('span');
+    tag.style.cssText='color:#a8e05f;font-size:12px;text-align:center';
+    tag.textContent='✔ 已验证';
+    actions.appendChild(tag);
+  }else{
+    const btn=document.createElement('button');
+    btn.type='button';btn.className='ghost';
+    btn.textContent='标为已验证';
+    btn.onclick=()=>promoteKnowledgeAuto(e.id,btn);
+    actions.appendChild(btn);
+  }
+  const del=document.createElement('button');
+  del.type='button';del.className='ghost';del.style.cssText='color:#ffb4a2';
+  del.textContent='删除';
+  del.onclick=()=>deleteKnowledgeAuto(e.id,del);
+  actions.appendChild(del);
+  row.appendChild(actions);
+  return row;
+}
+function knowledgeAutoGroup(key,title,items){
+  if(!items.length)return null;
+  const open=!!knowledgeAutoOpen[key];
+  const wrap=document.createElement('div');
+  wrap.style.cssText='margin-top:8px;border:1px solid rgba(255,255,255,.14);border-radius:10px;overflow:hidden';
+  const head=document.createElement('button');
+  head.type='button';
+  head.style.cssText='width:100%;text-align:left;background:none;border:0;color:inherit;padding:11px 12px;font-size:13px;cursor:pointer';
+  head.textContent=(open?'▾ ':'▸ ')+title+'（'+items.length+'）';
+  head.onclick=()=>{knowledgeAutoOpen[key]=!knowledgeAutoOpen[key];renderKnowledgeAutoEntries()};
+  wrap.appendChild(head);
+  if(open){
+    const body=document.createElement('div');
+    body.style.cssText='padding:0 10px 10px';
+    for(const e of items)body.appendChild(knowledgeAutoRow(e));
+    wrap.appendChild(body);
+  }
+  return wrap;
+}
 function renderKnowledgeAutoEntries(){
   const box=$('#knowledgeAutoList');box.replaceChildren();
   const bar=$('#knowledgeAutoVerifyBar'),hint=$('#knowledgeAutoVerifyHint'),all=$('#knowledgeAutoPromoteAll');
   const list=Array.isArray(knowledgeAutoEntries)?knowledgeAutoEntries:[];
   if(!list.length){bar.style.display='none';return}
-  const pending=list.filter(e=>!e.verified).length;
+  const pending=list.filter(e=>!e.verified),verified=list.filter(e=>e.verified);
   bar.style.display='flex';
-  all.style.display=pending?'':'none';
-  hint.textContent=pending?('还有 '+pending+' 条没确认，确认后才会优先被引用'):'全部条目都已确认';
-  for(const e of list){
-    const row=document.createElement('div');
-    row.style.cssText='display:flex;gap:10px;align-items:flex-start;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:9px;margin-top:7px';
-    const text=document.createElement('div');
-    text.style.cssText='flex:1;min-width:0;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word;opacity:.92';
-    text.textContent=(e.body||'')+(e.truncated?'…':'');
-    row.appendChild(text);
-    const actions=document.createElement('div');
-    actions.style.cssText='flex:0 0 auto;display:flex;flex-direction:column;gap:6px;align-items:stretch';
-    if(e.verified){
-      const tag=document.createElement('span');
-      tag.style.cssText='color:#a8e05f;font-size:12px;text-align:center';
-      tag.textContent='✔ 已验证';
-      actions.appendChild(tag);
-    }else{
-      const btn=document.createElement('button');
-      btn.type='button';btn.className='ghost';
-      btn.textContent='标为已验证';
-      btn.onclick=()=>promoteKnowledgeAuto(e.id,btn);
-      actions.appendChild(btn);
-    }
-    const del=document.createElement('button');
-    del.type='button';del.className='ghost';del.style.cssText='color:#ffb4a2';
-    del.textContent='删除';
-    del.onclick=()=>deleteKnowledgeAuto(e.id,del);
-    actions.appendChild(del);
-    row.appendChild(actions);
-    box.appendChild(row);
-  }
+  all.style.display=pending.length?'':'none';
+  hint.textContent=pending.length?('还有 '+pending.length+' 条没确认，确认后才会优先被引用'):'全部条目都已确认';
+  for(const group of [knowledgeAutoGroup('pending','待确认',pending),
+                      knowledgeAutoGroup('verified','已验证',verified)])if(group)box.appendChild(group);
 }
 async function promoteKnowledgeAuto(id,btn){const c=accountContext();if(btn){btn.disabled=true;btn.textContent='确认中…'}try{await api('/api/ai/flock/knowledge/auto/promote',{method:'POST',body:JSON.stringify({id}),_account:c});toast('已标为已验证');loadKnowledgeAuto()}catch(e){if(btn){btn.disabled=false;btn.textContent='标为已验证'}toast('确认失败：'+e.message,1)}}
 async function deleteKnowledgeAuto(id,btn){const c=accountContext();if(btn){btn.disabled=true;btn.textContent='删除中…'}try{await api('/api/ai/flock/knowledge/auto/delete',{method:'POST',body:JSON.stringify({id}),_account:c});toast('已删除这条自动知识');loadKnowledgeAuto()}catch(e){if(btn){btn.disabled=false;btn.textContent='删除'}toast('删除失败：'+e.message,1)}}
