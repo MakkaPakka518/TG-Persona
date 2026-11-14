@@ -3,6 +3,7 @@
 运行：python3 -m unittest discover -s test_suite -p 'test_backend.py' -v
 """
 import ast
+import difflib
 import asyncio
 import base64
 from collections import OrderedDict
@@ -93,7 +94,7 @@ def load_backend():
                           'SKILL_FIXED_RATIO', 'SKILL_RECENT_MAX', 'SKILL_DETAIL_MAX', 'SKILL_SUMMARY_MAX',
                           'SKILL_FADING_MAX_COUNT', 'SKILL_FADING_IDLE_DAYS', 'STUDY_PER_GROUP_MAX', 'STUDY_TOTAL_MAX',
                           'TOPIC_STOP_TERMS', '_MEMORY_ID_PREFIX', '_MEMORY_STAGE_WEIGHT', '_button_ai_result',
-                        '_CODE_USED_NOTICE_RE'}
+                        '_CODE_USED_NOTICE_RE', 'KNOWLEDGE_AUTO_MAX_BYTES', 'KNOWLEDGE_MAX_BYTES', 'SKILL_MAX_BYTES'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -103,7 +104,7 @@ def load_backend():
             selected.append(node)
     names = {name: globals()[name] for name in ('ast', 'asyncio', 'base64', 'OrderedDict', 'datetime',
              'timezone', 'timedelta', 'hashlib', 'hmac', 'ipaddress', 'json', 'math', 'random', 're',
-              'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'ContextVar', 'uuid', 'shutil', 'telethon_markdown')}
+              'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'difflib', 'ContextVar', 'uuid', 'shutil', 'telethon_markdown')}
     names.update(BaseModel=Model, Optional=Optional, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
                   HTTPException=HTTPException, JSONResponse=Response, Response=Response, os=os, io=io,
                   log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=Exception,

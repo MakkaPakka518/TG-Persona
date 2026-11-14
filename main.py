@@ -36,6 +36,7 @@ import os
 import hashlib
 import hmac
 import csv
+import difflib
 import io
 import shutil
 import subprocess
@@ -1811,6 +1812,19 @@ def _overlap(text, other, n):
     return len(left & _ngrams(other, n)) / float(len(left))
 
 
+def _text_similarity(left, right):
+    """归一化后的双向相似度：bigram Jaccard 与序列相似取较大值，挡同义改写。"""
+    a = re.sub(r"[\s\W_]+", "", str(left or "").casefold())
+    b = re.sub(r"[\s\W_]+", "", str(right or "").casefold())
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    ga, gb = _ngrams(a, 2), _ngrams(b, 2)
+    jaccard = len(ga & gb) / float(len(ga | gb)) if ga and gb else 0.0
+    return max(jaccard, difflib.SequenceMatcher(None, a, b).ratio())
+
+
 def _safe_knowledge_item(text):
     """自动知识的第一道闸：长度、中文占比、链接/账号/密钥/可执行内容。"""
     body = " ".join(str(text or "").split()).strip("-—·* ")
@@ -1892,7 +1906,8 @@ def _append_knowledge_auto(items, chat_id, msg_ids=(), samples=()):
         body = _safe_knowledge_item(item)
         if not body:
             continue
-        if any(_overlap(body, old, 3) > 0.55 for old in existing):
+        if any(_overlap(body, old, 3) > 0.55 or _text_similarity(body, old) >= 0.80
+               for old in existing):
             continue
         if any(_overlap(body, sample, 4) > 0.6 for sample in samples if sample):
             continue

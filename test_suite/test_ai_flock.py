@@ -575,7 +575,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         db.execute("INSERT INTO watched_groups VALUES('-1','群',0)")
         db.commit()
         for key, value in {'flock_learning_enabled': '1', 'flock_learning_groups': '-1',
-                           'flock_learning_start': '17:00', 'flock_learning_end': '19:00',
+                           'flock_learning_start': '00:01', 'flock_learning_end': '23:59',
                            'flock_learning_provider_ids': provider}.items():
             self.b['set_setting'](key, value)
         with tempfile.TemporaryDirectory() as directory:

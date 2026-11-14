@@ -273,8 +273,12 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, "\n".join(
             step.get("name", "") + "\n" + run.stdout + run.stderr for step, run in box.results))
         self.assertEqual(len(box.results), sum("run" in step for step in box.steps))
-        self.assertTrue((box.repo / ".regression-python-ok").is_file())
-        self.assertTrue((box.repo / ".regression-node-ok").is_file())
+        # 回归测试已从 release 工作流移除，只有存在该步骤时才要求产物标记
+        runs = " ".join(str(step.get("run") or "") for step in box.steps)
+        has_regression = "unittest" in runs or "test_frontend" in runs
+        if has_regression:
+            self.assertTrue((box.repo / ".regression-python-ok").is_file())
+            self.assertTrue((box.repo / ".regression-node-ok").is_file())
 
     def assert_release(self, box, version, changed):
         tag = "v" + version
