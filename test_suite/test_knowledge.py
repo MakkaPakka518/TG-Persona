@@ -227,17 +227,17 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         original = self.b['KNOWLEDGE_MAX_BYTES']
         self.b['KNOWLEDGE_MAX_BYTES'] = 430
         try:
-            content = self.b['_append_study']('', 'OLDEST-' + 'A' * 80)
-            content = self.b['_append_study'](content, 'MIDDLE-' + 'B' * 80)
-            content = self.b['_append_study'](content, 'NEWEST-' + 'C' * 80)
+            content = self.b['_append_study']('', 'OLDEST 旧 ' + '甲乙丙丁' * 5)
+            content = self.b['_append_study'](content, 'MIDDLE 中 ' + '戊己庚辛' * 5)
+            content = self.b['_append_study'](content, 'NEWEST 新 ' + '壬癸子丑' * 5)
         finally:
             self.b['KNOWLEDGE_MAX_BYTES'] = original
-        self.assertNotIn('OLDEST-', content)
-        self.assertIn('NEWEST-', content)
+        self.assertNotIn('OLDEST', content)
+        self.assertIn('NEWEST', content)
         self.b['KNOWLEDGE_MAX_BYTES'] = 200
         try:
             with self.assertRaisesRegex(ValueError, 'study.md 容量不足'):
-                self.b['_append_study']('F' * 110, 'NEWEST')
+                self.b['_append_study']('记' * 110, '新记')
         finally:
             self.b['KNOWLEDGE_MAX_BYTES'] = original
 

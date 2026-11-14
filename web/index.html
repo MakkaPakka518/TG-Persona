@@ -964,12 +964,12 @@ section.act,.fold.open .fold-b{animation:none}
           <div class="water-ai-limits water-ai-frequency">
             <div><label for="waterAiJobMinMessages" id="waterAiJobMinMessagesLabel">最少间隔消息</label><input id="waterAiJobMinMessages" type="number" value="6" min="1" max="100" step="1" inputmode="numeric"></div>
             <div><label for="waterAiJobMaxMessages" id="waterAiJobMaxMessagesLabel">最多间隔消息</label><input id="waterAiJobMaxMessages" type="number" value="8" min="1" max="100" step="1" inputmode="numeric"></div>
-            <div><label for="waterAiJobHourlyLimit">每小时最多发言</label><input id="waterAiJobHourlyLimit" type="number" value="12" min="1" max="60" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="waterAiJobHourlyUnlimited" onchange="syncHourlyLimit()"> 不限制每小时发言</label></div>
+            <div><label for="waterAiJobHourlyLimit" id="waterAiJobHourlyLimitLabel">每小时最多发言</label><input id="waterAiJobHourlyLimit" type="number" value="12" min="1" max="60" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="waterAiJobHourlyUnlimited" onchange="syncHourlyLimit()"> 不限制每小时发言</label></div>
             <div><label for="waterAiJobActiveMinutes">被回复后活跃分钟</label><input id="waterAiJobActiveMinutes" type="number" value="5" min="0" max="30" step="1" inputmode="numeric"></div>
             <div><label for="waterAiJobBudgetMessages">活跃额度（条/小时，0 不启用）</label><input id="waterAiJobBudgetMessages" type="number" value="0" min="0" max="60" step="1" inputmode="numeric"><label class="hint">到额度就安静下来，不提示、不解释</label></div>
             <div><label class="button-reply-toggle"><input type="checkbox" id="waterAiJobInactiveMode" onchange="syncInactiveMode()"> 不干预模式（自己决定说不说）</label><label class="hint">它可以选择这轮不开口，只输出 SKIP 和下次再来的分钟</label></div>
           </div>
-          <div class="hint" id="waterAiJobInactiveHint">开启不干预模式后，上面两个间隔字段改作兜底唤醒分钟：模型说的数字会被夹在这个区间里，仍受每小时上限与活跃额度约束。</div>
+          <div class="hint" id="waterAiJobInactiveHint">开启不干预模式后，说得说多由它自己决定：上面两个间隔字段改作兜底唤醒分钟（模型给的数字夹在这个区间内），每小时上限不再生效，只保留活跃额度这一条闸门。</div>
           <div class="water-budget-banner" role="status" aria-live="polite"><div id="waterAiJobBudgetText">当前水群预算：任务预设 15条/400字/skill 8000字/600 Token；鲸鱼模式仅影响学习，不影响水群回复预算</div><span class="tag pending hidden" id="waterAiJobWhaleBadge">学习中心：鲸鱼模式生效中，水群仍使用本任务预设</span></div>
           <div class="hint">可按模型能力、上下文需要和费用手动调整，仅影响当前任务。</div>
           <label>使用的 AI API（可多选）</label><div id="waterAiJobProviders" class="grp-pick"></div>
@@ -3487,8 +3487,8 @@ function renderWaterAIProviderPicks(){
   for(const [id,sel] of [['waterAiJobProviders',waterAIJobProviderSel],['waterAiSkillProviders',waterAISkillProviderSel]]){const box=$('#'+id);if(!box)continue;box.innerHTML=providerPickMarkup(sel,'water-provider')}
   renderOwnerAIProviderPicks();
 }
-function syncHourlyLimit(){const limited=$('#waterAiJobHourlyUnlimited').checked;$('#waterAiJobHourlyLimit').disabled=limited;if(limited)$('#waterAiJobHourlyLimit').value='12'}
-function syncInactiveMode(){const on=$('#waterAiJobInactiveMode').checked;$('#waterAiJobMinMessagesLabel').textContent=on?'兜底最少分钟':'最少间隔消息';$('#waterAiJobMaxMessagesLabel').textContent=on?'兜底最多分钟':'最多间隔消息';$('#waterAiJobInactiveHint').classList.toggle('hidden',!on)}
+function syncHourlyLimit(){const inactive=$('#waterAiJobInactiveMode').checked,limited=$('#waterAiJobHourlyUnlimited').checked;$('#waterAiJobHourlyLimit').disabled=limited||inactive;$('#waterAiJobHourlyUnlimited').disabled=inactive;$('#waterAiJobHourlyLimitLabel').textContent=inactive?'每小时最多发言（不干预模式下不生效）':'每小时最多发言';if(limited)$('#waterAiJobHourlyLimit').value='12'}
+function syncInactiveMode(){const on=$('#waterAiJobInactiveMode').checked;$('#waterAiJobMinMessagesLabel').textContent=on?'兜底最少分钟':'最少间隔消息';$('#waterAiJobMaxMessagesLabel').textContent=on?'兜底最多分钟':'最多间隔消息';$('#waterAiJobInactiveHint').classList.toggle('hidden',!on);syncHourlyLimit()}
 function waterAIJobPayload(job){const hourly=job.hourly_limit===undefined||job.hourly_limit===null?12:Number(job.hourly_limit);return {name:String(job.name||'').trim(),enabled:job.enabled?1:0,groups:watchedGroupCsv(job.groups),start_time:String(job.start_time||'09:00'),end_time:String(job.end_time||'22:00'),prompt:String(job.prompt||'').trim(),provider_ids:enabledProviderCsv(job.provider_ids),reaction:String(job.reaction||'').trim(),context_messages:Number(job.context_messages??15),message_chars:Number(job.message_chars??400),skill_chars:Number(job.skill_chars??8000),max_tokens:Number(job.max_tokens??600),knowledge_chars:Number(job.knowledge_chars??2000),knowledge_on_demand:Number(job.knowledge_on_demand??0),end_next_day:Number(job.end_next_day??0),min_messages:Number(job.min_messages??6),max_messages:Number(job.max_messages??8),hourly_limit:hourly<0?-1:Number(job.hourly_limit??12),active_minutes:Number(job.active_minutes??5),inactive_mode:job.inactive_mode?1:0,budget_messages:Number(job.budget_messages??0)}}
 function renderWaterAIJobs(){
   $('#waterAiCount').textContent=waterAIJobs.length;const box=$('#waterAiJobsList'),c=accountContext();

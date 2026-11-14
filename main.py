@@ -807,7 +807,7 @@ SKILL_DETAIL_MAX = 200
 SKILL_SUMMARY_MAX = 300
 SKILL_FADING_MAX_COUNT = 3
 SKILL_FADING_IDLE_DAYS = 90
-STUDY_PER_GROUP_MAX = 80
+STUDY_PER_GROUP_MAX = 12
 STUDY_TOTAL_MAX = 500
 TOPIC_STOP_TERMS = frozenset("""
 怎么 什么 可以 就是 真的 这个 那个 哈哈 我们 你们 他们 她们 自己 现在 今天 明天
@@ -1322,9 +1322,21 @@ def _study_reference(content):
     return "".join(output).strip()
 
 
+def _study_noise_line(line):
+    """模型在"汇报工作"而不是"记内容"，这类行进记忆只会把人设带成戏精。"""
+    tokens = ("本批", "既有笔记", "维持不变", "未引入", "无需重复", "速览",
+              "暂不单独列条", "不单独列条", "供后续批", "无新增", "未观察到")
+    text = str(line or "")
+    return any(token in text for token in tokens)
+
+
 def _append_study(content, body, chat_id="", source="learning", pinned=False, message_id=0):
     body = str(body or "").strip()
     if source == "learning":
+        cjk = len(re.findall(r"[\u4e00-\u9fff]", body))
+        latin = len(re.findall(r"[A-Za-z]", body))
+        if body and ((cjk < 10 and latin >= 20) or latin > cjk * 2):
+            raise ValueError("AI 没返回中文群记忆，请重试")
         existing_entries = [entry for entry in _memory_entries(str(content or ""), "study")
                             if entry["meta"].get("source") in ("learning", "correction")
                             and (not chat_id or not entry["meta"].get("chat_id")
@@ -1340,12 +1352,21 @@ def _append_study(content, body, chat_id="", source="learning", pinned=False, me
                 if line:
                     known.setdefault(_study_line_key(line), []).append(line)
         additions = []
+        # 逐字去重挡不住"群友/群内/这群"这种改写，这里再加一层 3-gram 近似去重。
+        known_grams = [(grams, item) for values in known.values() for item in values
+                       for grams in [_ngrams(item, 3)] if grams]
         for line in body.splitlines():
             line = line.strip()
-            if not line or any(_study_line_key(line) == _study_line_key(item) for item in corrections):
+            if not line or _study_noise_line(line):
+                continue
+            if any(_study_line_key(line) == _study_line_key(item) for item in corrections):
                 continue
             key = _study_line_key(line)
             if key in known:
+                continue
+            grams_new = _ngrams(line, 3)
+            if grams_new and any(len(grams_new & grams) / len(grams_new) >= 0.85
+                                 for grams, _ in known_grams):
                 continue
             subject, fact = _study_fact(line)
             conflicts = [item for item in known.get("subject:" + subject, []) if fact and fact != _study_fact(item)[1]]
@@ -1353,6 +1374,8 @@ def _append_study(content, body, chat_id="", source="learning", pinned=False, me
                 line = "- ⚠ 待核实：" + line.lstrip("-*• ") + "（已有记忆：" + conflicts[0].lstrip("-*• ") + "）"
             additions.append(line)
             known.setdefault(key, []).append(line)
+            if grams_new:
+                known_grams.append((grams_new, line))
             if subject:
                 known.setdefault("subject:" + subject, []).append(line)
         body = "\n".join(additions).strip()
@@ -1380,8 +1403,7 @@ def _study_block(body, chat_id="", source="learning", stage="detail", fade_count
     now = int(time.time() if created_at is None else created_at)
     meta = {"created_at": now, "chat_id": str(chat_id), "source": source, "pinned": bool(pinned),
             "message_id": int(message_id), "stage": stage, "fade_count": max(0, int(fade_count))}
-    return ("<!-- tg-persona-study:" + json.dumps(meta, separators=(",", ":")) + " -->\n## "
-            + _beijing_now().strftime("%Y-%m-%d") + "\n"
+    return ("<!-- tg-persona-study:" + json.dumps(meta, separators=(",", ":")) + " -->\n"
             + str(body or "").strip() + "\n<!-- /tg-persona-study -->")
 
 
@@ -1639,7 +1661,7 @@ def _flock_hb_load(job_id, chat_id):
 
 
 def _flock_hb_save(job_id, chat_id, data):
-    data["recent"] = [float(item) for item in data.get("recent", [])][-20:]
+    data["recent"] = [float(item) for item in data.get("recent", [])][-60:]
     set_setting(_flock_hb_key(job_id, chat_id), json.dumps(data, ensure_ascii=False))
 
 
@@ -1905,6 +1927,8 @@ def _split_study_knowledge(text):
     for line in str(text or "").splitlines():
         raw = line.strip()
         if not raw.startswith(("-", "*")):
+            continue
+        if _study_noise_line(raw):
             continue
         body = raw.lstrip("-* ").strip()
         # 只有 `- 群 ` / `- 群：` 这种带分隔符的才算标记，“群里常聊”不能把“群”剥掉。
@@ -2400,7 +2424,9 @@ def _flock_frequency_ready(chat_id, direct_to_self=False):
         return False
     active = now < state["active_until"]
     reason = ""
-    if source["hourly_limit"] > 0 and _flock_hourly_count(source, key) >= source["hourly_limit"]:
+    # 不干预模式下每小时条数由活跃额度接管，这里不再重复拦截。
+    if (not source.get("inactive_mode") and source["hourly_limit"] > 0
+            and _flock_hourly_count(source, key) >= source["hourly_limit"]):
         reason = "最近一小时已达 %s 条发言上限" % source["hourly_limit"]
     elif now - runtime.ai_flock_last.get(key, -1e9) < (20 if active else 60):
         reason = "接话冷却中" if active else "同群发言冷却中"
@@ -2475,7 +2501,8 @@ async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False, *, test_job
     source = _ai_flock_test_source(test_job_id, key) if testing else _ai_flock_source(key)
     if not source or not _has_ai_providers(source["provider_ids"]):
         return
-    if source["hourly_limit"] > 0 and _flock_hourly_count(source, key) >= source["hourly_limit"]:
+    if (not source.get("inactive_mode") and source["hourly_limit"] > 0
+            and _flock_hourly_count(source, key) >= source["hourly_limit"]):
         if testing:
             raise HTTPException(409, "最近一小时已达此任务的发言上限")
         return
@@ -3412,8 +3439,8 @@ async def _learn_ai_flock_locked(force=False):
                       if str(b["meta"].get("chat_id", "")) == group_key
                       and str(b["meta"].get("source", "")) != "correction"]
             if len(blocks) > STUDY_PER_GROUP_MAX:
-                # 合并成 1 条，所以要多取 1 条才能保证合并后不超过上限。
-                excess = blocks[:len(blocks) - STUDY_PER_GROUP_MAX + 1]
+                # 整组合并成 1 条：只压超出部分的话，块数永远降不到上限以下。
+                excess = blocks
                 try:
                     replacement = await _distill_study_group(excess, "summary", 0, group_key)
                     study = _replace_study_blocks(study, {excess[0]["start"]: replacement,
