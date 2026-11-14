@@ -1,6 +1,6 @@
 """消息时序/延迟回归，只用假消息与假识别器，不读取真实验证码或连接 TG。"""
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -308,6 +308,8 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((text,status),('签到成功','success'))
 
     async def test_unconfirmed_stops_same_day_scheduler_even_retries_change(self):
+        # 固定“今天”，否则这个用例会跟着真实时钟漂移，UTC 环境下跨零点就会翻车
+        self.b['_beijing_now']=lambda: datetime(2026,10,30,17,0,tzinfo=timezone(timedelta(hours=8)))
         aid=await self.create(retries=1)
         db=self.b['conn'];db.execute("UPDATE automations SET retry_day='2026-10-30',retry_count=1,last_status='unconfirmed',next_run_at=0 WHERE id=?",(aid,));db.commit()
         self.b['_signin_tick']();self.assertNotIn(aid,self.b['_auto_running'])
