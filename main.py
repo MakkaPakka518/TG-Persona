@@ -4270,6 +4270,19 @@ def extract_code(text):
     return m.group(0) if m else ""
 
 
+# 群里的"某人使用了兑换码"播报，里面的码通常被马赛克遮挡、且是别人已用掉的，
+# 抢注任务不该拿去注册。
+_CODE_USED_NOTICE_RE = re.compile(
+    r"(注册码|兑换码|邀请码|激活码|卡密|license|register)[^\n]{0,10}"
+    r"(使用|已用|已兑换|已激活|已被|领取)|"
+    r"使用了|已被使用|已被兑换|已被领取|已激活|兑换成功",
+    re.I)
+
+
+def _is_code_used_notice(text):
+    return bool(_CODE_USED_NOTICE_RE.search(str(text or "")))
+
+
 _LINK_URL_RE = re.compile(r"(?:https?://)?(?:t\.me|telegram\.me)/[^\s<>\"'）)]+|tg://resolve\?[^\s<>\"'）)]+", re.I)
 
 
@@ -4501,15 +4514,18 @@ async def on_auto_event(event):
         # 红包只看按钮特征:纯图片消息没有文本,触发关键词已废弃
         if a["type"] == "grabcodes" and not match_keywords(a["keywords"], text):
             continue
+        if a["type"] == "grabcodes" and _is_code_used_notice(text):
+            log.info("抢注 跳过他人兑换码使用播报 群=%s 内容=%s", chat, text[:60])
+            continue
 
         key = (chat, a["id"])
         cd = 0 if ("cooldown_unlimited" in a.keys() and a["cooldown_unlimited"]) else max(
             0, int(a["cooldown"] if a["cooldown"] is not None else 30))
         if now - get_runtime().auto_last_ts.get(key, -1e9) < cd:
             continue
-        get_runtime().auto_last_ts[key] = now
 
         try:
+            outcome = "success"
             grp_name = ""
             try:
                 g = get_account_db().execute("SELECT name FROM watched_groups WHERE chat_id=?", (str(chat),)).fetchone()
@@ -4526,6 +4542,7 @@ async def on_auto_event(event):
                     await _event_generated_message(event, "respond", rt)
                 else:
                     await _event_generated_message(event, "reply", rt)
+                get_runtime().auto_last_ts[key] = now
                 reply_desc = rt
                 notify_event("success", a["name"], f"群内命中邀请码并注册: {rt[:120]}")
             else:
@@ -4533,18 +4550,21 @@ async def on_auto_event(event):
                 buttons = await event.get_buttons()
                 target_btn = _red_envelope_button(_callback_buttons(buttons))
                 popup = ""
-                if target_btn:
-                    btn_label = (str(getattr(target_btn, "text", "") or "").strip() or "无文字")[:24]
-                    answer = await target_btn.click()
-                    popup = str(getattr(answer, "message", answer if isinstance(answer, str) else "") or "")
-                    outcome = _redpacket_result(popup)
-                    reply_desc = "点击按钮「%s」→ %s" % (btn_label, outcome)
-                    log.info("抢红包 群=%s 任务=%s 按钮=%s 结果=%s", chat, a["name"], btn_label, outcome)
-                    if outcome == "success":
-                        await _redpacket_after_success(a, event.chat_id, popup)
-                else:
+                if not target_btn:
+                    # 普通群消息没有红包按钮，不是红包事件：不占冷却、不写日志。
                     log.info("抢红包 未识别到红包按钮,已跳过 群=%s 任务=%s", chat, a["name"])
-            add_hit(a["type"], True, chat_id=chat, rule_id=-a["id"], msg_id=event.id,
+                    continue
+                get_runtime().auto_last_ts[key] = now
+                btn_label = (str(getattr(target_btn, "text", "") or "").strip() or "无文字")[:24]
+                answer = await target_btn.click()
+                popup = str(getattr(answer, "message", answer if isinstance(answer, str) else "") or "")
+                outcome = _redpacket_result(popup)
+                reply_desc = "点击按钮「%s」→ %s" % (btn_label, outcome)
+                log.info("抢红包 群=%s 任务=%s 按钮=%s 结果=%s", chat, a["name"], btn_label, outcome)
+                if outcome == "success":
+                    await _redpacket_after_success(a, event.chat_id, popup)
+            add_hit(a["type"], a["type"] != "redpacket" or outcome == "success",
+                    chat_id=chat, rule_id=-a["id"], msg_id=event.id,
                     content=text, reply=reply_desc, grp_name=grp_name, sender=sender_name,
                     detail={"kind": a["type"], "task": a["name"], "group": grp_name or str(chat),
                             "sender": sender_name, "message": text, "reply": reply_desc,

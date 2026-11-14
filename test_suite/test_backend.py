@@ -92,7 +92,8 @@ def load_backend():
                           'MEMORY_ENTRY_MAX_CHARS', 'MEMORY_HARD_CAP_CHARS', 'MEMORY_POOL_MAX', 'SKILL_PINNED_BONUS',
                           'SKILL_FIXED_RATIO', 'SKILL_RECENT_MAX', 'SKILL_DETAIL_MAX', 'SKILL_SUMMARY_MAX',
                           'SKILL_FADING_MAX_COUNT', 'SKILL_FADING_IDLE_DAYS', 'STUDY_PER_GROUP_MAX', 'STUDY_TOTAL_MAX',
-                          'TOPIC_STOP_TERMS', '_MEMORY_ID_PREFIX', '_MEMORY_STAGE_WEIGHT', '_button_ai_result'}
+                          'TOPIC_STOP_TERMS', '_MEMORY_ID_PREFIX', '_MEMORY_STAGE_WEIGHT', '_button_ai_result',
+                        '_CODE_USED_NOTICE_RE'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -615,6 +616,32 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.b['client'].get_messages.side_effect = [[], [reply], [reply]]
         self.assertTrue(await self.b['run_custom'](self.row(aid)))
         button.click.assert_awaited_once()
+
+    async def test_grabcodes_skips_someone_used_code_notice(self):
+        self.b['_running']['paused'] = False
+        await self.create(type='grabcodes', target='@RegBot', groups='-100666', keywords='注册码',
+                          reply_text='/start {code}', name='抢注')
+        text = '· 🎟️ 注册码使用 - Amazon [1388314968] 使用了 臻影Ultra hd movie server-30-Register-PRO_Y8s░░░░'
+        msg = message(88, text)
+        event = SimpleNamespace(message=msg, raw_text=text, id=88, chat_id=-100666, is_group=True,
+                                out=False,
+                                sender=SimpleNamespace(id=2, username='bot1', first_name='臻影', last_name=''))
+        self.b['client'].send_message.reset_mock()
+        await self.b['on_auto_event'](event)
+        self.b['client'].send_message.assert_not_called()
+
+    async def test_redpacket_skips_plain_messages_without_hit_log(self):
+        self.b['_running']['paused'] = False
+        await self.create(type='redpacket', target='', groups='-100555', name='红包')
+        msg = message(77, '普通聊天，没有红包按钮')
+        event = SimpleNamespace(message=msg, raw_text=msg.raw_text, id=77, chat_id=-100555,
+                                is_group=True, out=False,
+                                sender=SimpleNamespace(id=1, username='u1', first_name='群友', last_name=''))
+        before = self.b['conn'].execute("SELECT COUNT(*) FROM hits WHERE action='redpacket'").fetchone()[0]
+        await self.b['on_auto_event'](event)
+        after = self.b['conn'].execute("SELECT COUNT(*) FROM hits WHERE action='redpacket'").fetchone()[0]
+        self.assertEqual(after, before)
+        self.assertEqual(self.b['get_runtime']().auto_last_ts, {})
 
     async def test_custom_group_trigger_queues_button_and_start_context(self):
         self.b['_running']['paused'] = False
