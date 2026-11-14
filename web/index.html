@@ -653,40 +653,6 @@ section.act,.fold.open .fold-b{animation:none}
         </div>
       </div>
     </div>
-    <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">批量操作与配置备份</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="autoSelectAll" style="width:auto" onchange="selectAllAutos(this.checked)"> 全选 / 取消全选 <span id="autoSelectedCount">已选 0 项</span></label>
-      <label for="batchKind">批量操作</label>
-      <select id="batchKind" onchange="invalidateBatchPreview();renderBatchFields()">
-        <option value="window">修改签到窗口（仅签到）</option><option value="interval">修改保号 / 轮询间隔</option>
-        <option value="enable">启用</option><option value="disable">停用</option><option value="delete">删除</option>
-      </select>
-      <div id="batchWindow" class="flex">
-        <div><label for="batchStart">开始</label><input type="text" id="batchStart" value="08:00" readonly onclick="openTimePicker('batchStart')" onchange="invalidateBatchPreview()"></div>
-        <div><label for="batchEnd">结束</label><input type="text" id="batchEnd" value="12:00" readonly onclick="openTimePicker('batchEnd')" onchange="invalidateBatchPreview()"></div>
-      </div>
-      <div id="batchInterval" class="flex hidden">
-        <div><label for="batchEvery">间隔（轮询 0 = 关闭，保号最少 1 分钟）</label><input type="number" min="0" step="any" id="batchEvery" value="1" oninput="invalidateBatchPreview()"></div>
-        <div><label for="batchUnit">单位</label><select id="batchUnit" onchange="invalidateBatchPreview()"><option value="60">分钟</option><option value="3600">小时</option><option value="86400">天</option></select></div>
-      </div>
-      <div class="hint" id="batchTz">签到窗口使用当前设置的时区；不适用的任务将跳过。</div>
-      <div class="flex" style="gap:8px;margin-top:12px;flex-wrap:wrap">
-        <button class="ghost" id="batchPreviewBtn" onclick="previewBatch()">预览修改</button>
-        <button class="btn" id="batchApplyBtn" disabled onclick="applyBatch()">确认提交</button>
-        <button class="danger" id="autoStopAll" disabled onclick="stopAllAutos()">停止本账号全部任务</button>
-      </div>
-      <pre id="batchResult" class="hint" style="white-space:pre-wrap" role="status" aria-live="polite"></pre>
-      <hr style="border:0;border-top:1px solid var(--hair)">
-      <div class="flex" style="gap:8px"><button class="ghost" id="configExportAll" onclick="exportConfig(false)">导出当前账号全部配置</button><button class="ghost" id="configExportSelected" onclick="exportConfig(true)">导出选中任务</button></div>
-      <div class="hint">JSON 标准 tg-persona-config：仅任务、规则、监听群，不含系统登录密钥、手机号、会话或历史状态。备份只下载到本机。任务消息或规则文本可能包含你自行填写的敏感内容，请妥善保存备份文件，勿公开分享。</div>
-      <label for="configFile">导入配置（JSON，最大 2MB）</label><input type="file" id="configFile" accept=".json,application/json" onchange="readConfigFile()">
-      <label for="configMode">导入方式</label><select id="configMode" onchange="invalidateImportPreview()"><option value="merge">追加（默认，保留现配置）</option><option value="replace">覆盖当前账号配置（不可恢复）</option></select>
-      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="configActivate" style="width:auto" onchange="invalidateImportPreview()"> 恢复备份中的启用状态（可能立即执行，确认前请复核）</label>
-      <div class="hint">默认导入的任务和规则禁用，复核后再手动启用。导入仅配置，不含密钥、手机号、会话或历史状态。</div>
-      <div class="flex" style="gap:8px;margin-top:12px"><button class="ghost" id="configPreviewBtn" disabled onclick="previewImport()">预览导入</button><button class="btn" id="configApplyBtn" disabled onclick="applyImport()">确认导入</button><button class="ghost" onclick="cancelConfigImport()">取消</button></div>
-      <pre id="configResult" class="hint" style="white-space:pre-wrap" role="status" aria-live="polite"></pre>      </div>
-    </div>
 
     <div class="card fold" id="registerHubCard">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>抢注</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
@@ -1164,6 +1130,40 @@ section.act,.fold.open .fold-b{animation:none}
             <button class="ghost" type="button" onclick="cancelAutoEdit('signin')" id="sCancel" style="display:none">取消编辑</button>
           </div>
         </form></div></div>
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">批量操作与配置备份</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="autoSelectAll" style="width:auto" onchange="selectAllAutos(this.checked)"> 全选签到任务 / 取消全选 <span id="autoSelectedCount">已选 0 项</span></label>
+        <label for="batchKind">批量操作</label>
+        <select id="batchKind" onchange="invalidateBatchPreview();renderBatchFields()">
+          <option value="window">修改签到窗口（仅签到）</option><option value="interval">修改保号 / 轮询间隔</option>
+          <option value="enable">启用</option><option value="disable">停用</option><option value="delete">删除</option>
+        </select>
+        <div id="batchWindow" class="flex">
+          <div><label for="batchStart">开始</label><input type="text" id="batchStart" value="08:00" readonly onclick="openTimePicker('batchStart')" onchange="invalidateBatchPreview()"></div>
+          <div><label for="batchEnd">结束</label><input type="text" id="batchEnd" value="12:00" readonly onclick="openTimePicker('batchEnd')" onchange="invalidateBatchPreview()"></div>
+        </div>
+        <div id="batchInterval" class="flex hidden">
+          <div><label for="batchEvery">间隔（轮询 0 = 关闭，保号最少 1 分钟）</label><input type="number" min="0" step="any" id="batchEvery" value="1" oninput="invalidateBatchPreview()"></div>
+          <div><label for="batchUnit">单位</label><select id="batchUnit" onchange="invalidateBatchPreview()"><option value="60">分钟</option><option value="3600">小时</option><option value="86400">天</option></select></div>
+        </div>
+        <div class="hint" id="batchTz">批量操作只作用于签到任务，抢注、水群、保号等任务不受影响。签到窗口使用当前设置的时区。</div>
+        <div class="flex" style="gap:8px;margin-top:12px;flex-wrap:wrap">
+          <button class="ghost" id="batchPreviewBtn" onclick="previewBatch()">预览修改</button>
+          <button class="btn" id="batchApplyBtn" disabled onclick="applyBatch()">确认提交</button>
+          <button class="danger" id="autoStopAll" disabled onclick="stopAllAutos()">停止本账号全部签到任务</button>
+        </div>
+        <pre id="batchResult" class="hint" style="white-space:pre-wrap" role="status" aria-live="polite"></pre>
+        <hr style="border:0;border-top:1px solid var(--hair)">
+        <div class="flex" style="gap:8px"><button class="ghost" id="configExportAll" onclick="exportConfig(false)">导出当前账号全部配置</button><button class="ghost" id="configExportSelected" onclick="exportConfig(true)">导出选中任务</button></div>
+        <div class="hint">JSON 标准 tg-persona-config：仅任务、规则、监听群，不含系统登录密钥、手机号、会话或历史状态。备份只下载到本机。任务消息或规则文本可能包含你自行填写的敏感内容，请妥善保存备份文件，勿公开分享。</div>
+        <label for="configFile">导入配置（JSON，最大 2MB）</label><input type="file" id="configFile" accept=".json,application/json" onchange="readConfigFile()">
+        <label for="configMode">导入方式</label><select id="configMode" onchange="invalidateImportPreview()"><option value="merge">追加（默认，保留现配置）</option><option value="replace">覆盖当前账号配置（不可恢复）</option></select>
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="configActivate" style="width:auto" onchange="invalidateImportPreview()"> 恢复备份中的启用状态（可能立即执行，确认前请复核）</label>
+        <div class="hint">默认导入的任务和规则禁用，复核后再手动启用。导入仅配置，不含密钥、手机号、会话或历史状态。</div>
+        <div class="flex" style="gap:8px;margin-top:12px"><button class="ghost" id="configPreviewBtn" disabled onclick="previewImport()">预览导入</button><button class="btn" id="configApplyBtn" disabled onclick="applyImport()">确认导入</button><button class="ghost" onclick="cancelConfigImport()">取消</button></div>
+        <pre id="configResult" class="hint" style="white-space:pre-wrap" role="status" aria-live="polite"></pre>      </div>
+      </div>
       </div>
     </div>
 
@@ -2224,11 +2224,11 @@ function persistAutoExpanded(){try{sessionStorage.setItem('tgp_open_autos',JSON.
 function toggleAutoExpanded(id){if(!autos.some(a=>a.id===id))return;openedAutoIds.has(id)?openedAutoIds.delete(id):openedAutoIds.add(id);persistAutoExpanded();const a=autos.find(x=>x.id===id);renderAutoList(a.type)}
 let autos=[], editAuto=null, editAutoAccount=null;
 let autoStopBusy=new Set(), autoTestBusy=new Set(), autoReplayBusy=new Set(), autoReplayResults=new Map(), autoStopAllBusy=false;
-function hasActiveAutos(){return autos.some(a=>a.running===true||a.queued===true)}
+function hasActiveAutos(){return autos.some(a=>a.type==='signin'&&(a.running===true||a.queued===true))}
 function syncStopAllButton(){const btn=$('#autoStopAll');if(btn)btn.disabled=autoStopAllBusy||!hasActiveAutos()}
 let selectedAutoIds=new Set(), batchPreview=null, batchSeq=0, batchBusy=false;
 function syncAutoSelection(){
-  const ids=autos.map(a=>Number(a.id));
+  const ids=autos.filter(a=>a.type==='signin').map(a=>Number(a.id));
   for(const id of selectedAutoIds)if(!ids.includes(id))selectedAutoIds.delete(id);
   $('#autoSelectedCount').textContent='已选 '+selectedAutoIds.size+' 项';
   $('#autoSelectAll').checked=ids.length>0&&ids.every(id=>selectedAutoIds.has(id));
@@ -2236,11 +2236,11 @@ function syncAutoSelection(){
   $('#configExportSelected').disabled=selectedAutoIds.size===0;
 }
 function toggleAutoSelection(id,checked){checked?selectedAutoIds.add(Number(id)):selectedAutoIds.delete(Number(id));syncAutoSelection();invalidateBatchPreview()}
-function selectAllAutos(checked){selectedAutoIds=checked?new Set(autos.map(a=>Number(a.id))):new Set();syncAutoSelection();invalidateBatchPreview();Object.keys(AUTO_TYPE).forEach(renderAutoList)}
+function selectAllAutos(checked){const scoped=autos.filter(a=>a.type==='signin');selectedAutoIds=checked?new Set(scoped.map(a=>Number(a.id))):new Set();syncAutoSelection();invalidateBatchPreview();Object.keys(AUTO_TYPE).forEach(renderAutoList)}
 function invalidateBatchPreview(){batchSeq++;batchPreview=null;$('#batchApplyBtn').disabled=true;$('#batchResult').textContent='';$('#batchPreviewBtn').disabled=batchBusy}
 function renderBatchFields(){const k=$('#batchKind').value;$('#batchWindow').classList.toggle('hidden',k!=='window');$('#batchInterval').classList.toggle('hidden',k!=='interval')}
 function buildBatchRequest(){
-  const ids=[...selectedAutoIds].filter(Number.isSafeInteger);if(!ids.length)throw new Error('请先勾选需要操作的任务');
+  const ids=[...selectedAutoIds].filter(Number.isSafeInteger).filter(id=>autos.some(a=>a.id===id&&a.type==='signin'));if(!ids.length)throw new Error('请先勾选需要操作的任务');
   const kind=$('#batchKind').value, patch={};let action=kind;
   if(kind==='window'){
     const start=$('#batchStart').value,end=$('#batchEnd').value;
@@ -2310,10 +2310,11 @@ function renderAutoList(type){
   $('#aCnt'+suffix).textContent=list.length;$('#aEmpty'+suffix).style.display=list.length?'none':'block';
   const label=accounts.find(a=>a.id===c.id)?.label||c.id;
   box.innerHTML=list.map(a=>{
+    const selBox=a.type==='signin'?`<input type="checkbox" style="width:auto;flex:none" aria-label="选择任务 ${esc(a.name)}" data-auto-action="select" data-auto-id="${a.id}" ${selectedAutoIds.has(a.id)?'checked':''}>`:'';
     const open=openedAutoIds.has(a.id),active=a.running===true||a.queued===true,stopBusy=autoStopBusy.has(a.id),action=(name,text,extra='')=>`<button type="button" class="${name==='delete'||(name==='stop'&&a.running===true)?'danger':name==='expand'?'ghost auto-chevron':'ghost'}" data-auto-action="${name}" data-auto-id="${a.id}" ${extra}>${text}</button>`;
     return `<div class="card auto-card" data-auto-card="${a.id}">
       <div class="auto-top">
-        <input type="checkbox" style="width:auto;flex:none" aria-label="选择任务 ${esc(a.name)}" data-auto-action="select" data-auto-id="${a.id}" ${selectedAutoIds.has(a.id)?'checked':''}>
+        ${selBox}
         <span data-task-icon="${a.id}"></span>
         <div class="grow"><div class="auto-title" title="${esc(a.name)}">${esc(a.name||'未命名任务')}</div>${['signin','scheduled_register'].includes(a.type)?`<div class="s" style="font-size:10px">${esc(autoWindow(a))}</div>`:''}${a.running===true?'<span class="tag pending" role="status">运行中</span>':a.queued===true?'<span class="tag pending" role="status">排队中</span>':''}${autoUnconfirmed(a)?'<span class="tag pending" role="status">待确认</span>':''}</div>
         <div class="auto-tail">
@@ -2958,10 +2959,10 @@ async function stopAuto(id,c=accountContext()){
 }
 async function stopAllAutos(){
   const c=accountContext();if(autoStopAllBusy||!hasActiveAutos())return;
-  if(!window.confirm('停止本账号全部正在运行或排队的任务？正在运行的任务会中止当前步骤，排队任务会被取消。')||!isCurrentAccount(c))return;
+  if(!window.confirm('停止本账号全部正在运行或排队的签到任务？正在运行的任务会中止当前步骤，排队任务会被取消。')||!isCurrentAccount(c))return;
   autoStopAllBusy=true;renderAllAutoLists();
   try{
-    const d=await api('/api/autos/stop-all',{method:'POST',_account:c});
+    const d=await api('/api/autos/stop-all?type=signin',{method:'POST',_account:c});
     if(!isCurrentAccount(c))return;
     toast('已停止 '+(Array.isArray(d.stopped)?d.stopped.length:0)+' 个任务');await loadAutos();
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}

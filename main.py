@@ -8000,9 +8000,13 @@ async def stop_auto(aid: int):
 
 
 @app.post("/api/autos/stop-all")
-async def stop_all_autos():
+async def stop_all_autos(type: str = ""):
     runtime = _auto_runtime_state()
     ids = sorted(set(runtime.auto_tasks) | set(runtime.auto_queued) | set(runtime.auto_workers), reverse=True)
+    if type:
+        _db = get_account_db()
+        _allowed = {int(r[0]) for r in _db.execute("SELECT id FROM automations WHERE type=?", (type,))}
+        ids = [aid for aid in ids if aid in _allowed]
     if not ids:
         return {"ok": True, "stopped": []}
     runtime.auto_stop_requested.update(ids)

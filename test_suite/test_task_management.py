@@ -272,20 +272,24 @@ class TaskManagementTests(unittest.TestCase):
         self.assertEqual(before, self.snapshot())
         self.assertFalse(self.resets)
 
-    def test_mixed_types_skip_ineffective_fields(self):
+    def test_batch_only_touches_signin_tasks(self):
         signin = self.add()
         custom = self.add(type="custom", custom_steps='[{"t":"send","to":"target","text":"/start","reply":false}]')
         keepalive = self.add(type="keepalive", reply_text="hello", poll_interval=120)
-        grabcodes = self.add(type="grabcodes", reply_text="{code}", poll_interval=20)
-        response = self.batch([signin, custom, keepalive, grabcodes], patch={"win_start": "09:00", "poll_interval": 300, "button_delay": 0})
+        before = {aid: self.row(aid) for aid in (custom, keepalive)}
+        response = self.batch([signin, custom, keepalive], patch={"win_start": "09:00", "poll_interval": 300})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["counts"]["updated"], 3)
-        self.assertEqual(len(response.json()["skipped"]), 4)
+        data = response.json()
+        self.assertEqual(data["counts"]["updated"], 1)
+        self.assertEqual([row["id"] for row in data["updated"]], [signin])
+        skipped_ids = {row["id"] for row in data["skipped"]}
+        self.assertIn(custom, skipped_ids)
+        self.assertIn(keepalive, skipped_ids)
+        self.assertTrue(any("只对签到任务" in str(row.get("reason", "")) for row in data["skipped"]))
+        for aid in (custom, keepalive):
+            self.assertEqual(self.row(aid)["poll_interval"], before[aid]["poll_interval"])
         self.assertEqual(self.row(custom)["win_start"], "08:00")
-        self.assertEqual(self.row(custom)["button_delay"], 2)
-        self.assertEqual(self.row(keepalive)["poll_interval"], 300)
-        self.assertEqual(self.row(grabcodes)["poll_interval"], 300)
-        self.assertNotIn(("default", custom, False), self.resets)
+        self.assertEqual(self.row(signin)["win_start"], "09:00")
 
     def test_all_inapplicable_is_noop(self):
         aid = self.add(type="custom", custom_steps='[{"t":"send","to":"target","text":"hi","reply":false}]')
@@ -597,7 +601,7 @@ class TaskManagementTests(unittest.TestCase):
             bad = self.backup([{"name": "bad", "type": "custom", "target": "@fake", "custom_steps": json.dumps(steps)}])
             self.assertEqual(self.imp(bad).status_code, 422)
 
-    def test_custom_credentials_stay_disabled_on_batch_and_import_and_are_deleted(self):
+    def test_batch_skips_custom_tasks_with_credentials(self):
         credential_steps = json.dumps([{"t":"send","to":"target","text":"{credential.secret}"}])
         aid = self.add(type="custom", enabled=0, custom_steps=credential_steps)
         self.dbs["default"].execute("INSERT INTO settings VALUES(?,?)", ("link_cred_" + str(aid), "PRIVATE"))
@@ -608,7 +612,9 @@ class TaskManagementTests(unittest.TestCase):
         self.assertEqual(self.row(aid)["enabled"], 0)
         deleted = self.batch([aid], action="delete")
         self.assertEqual(deleted.status_code, 200, deleted.text)
-        self.assertIsNone(self.dbs["default"].execute("SELECT value FROM settings WHERE key=?", ("link_cred_" + str(aid),)).fetchone())
+        self.assertEqual(deleted.json()["updated_count"], 0)
+        self.assertIsNotNone(self.dbs["default"].execute("SELECT value FROM settings WHERE key=?", ("link_cred_" + str(aid),)).fetchone())
+        self.assertIsNotNone(self.row(aid))
 
         task = {"name":"credential import","type":"custom","target":"@fake","enabled":1,
                 "custom_steps":credential_steps}

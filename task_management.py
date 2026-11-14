@@ -287,7 +287,14 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
     @router.post("/api/autos/batch")
     async def batch(body: BatchRequest):
         db, cols = get_db(), columns()
-        rows = selected(db, body.ids)
+        all_rows = selected(db, body.ids)
+        rows, skipped_by_type = [], []
+        for _row in all_rows:
+            if _row["type"] == "signin":
+                rows.append(_row)
+            else:
+                skipped_by_type.append({"id": _row["id"], "name": _row.get("name") or _row["id"],
+                                        "type": _row["type"], "reason": "批量操作只对签到任务生效，已跳过"})
         unlocked(body.ids)
         if body.action == "update":
             if not body.patch:
@@ -297,7 +304,7 @@ def build_task_router(get_db, auto_model, validate_auto, auto_values, auto_colum
             if body.patch:
                 _bad("enable/disable/delete 不接受 patch")
             patch = {}
-        updated, skipped, candidates = [], [], []
+        updated, skipped, candidates = [], list(skipped_by_type), []
         for row in rows:
             if body.action == "enable" and row["type"] == "custom":
                 try:
