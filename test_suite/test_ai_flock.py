@@ -510,6 +510,30 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
             await self.b['_run_ai_flock'](-1, '聊点什么')
         runtime.client.send_message.assert_awaited_once()
 
+    async def test_inactive_mode_builds_heartbeat_window_and_respects_budget(self):
+        provider = await self.provider()
+        db = self.b['conn']
+        db.execute("INSERT INTO watched_groups VALUES('-1','群',0)")
+        db.commit()
+        model = self.b['AIFlockJobInput']
+        created = await self.b['create_ai_flock_job'](model(name='心跳', groups='-1', start_time='00:00', end_time='23:59',
+            prompt='聊', provider_ids=provider, inactive_mode=1, budget_messages=2))
+        self.assertEqual(tuple(db.execute('SELECT inactive_mode,budget_messages FROM ai_flock_jobs WHERE id=?',
+                                          (created['id'],)).fetchone()), (1, 2))
+        runtime = self.b['get_runtime']()
+        runtime.ai_flock_frequency.clear()
+        runtime.ai_flock_last.clear()
+        runtime.ai_flock_status.clear()
+        self.assertFalse(self.b['_flock_frequency_ready']('-1', False))
+        self.assertIn('waiting_wake', runtime.ai_flock_status['-1']['stage'])
+        # 到点后放行，但活跃额度已用满时必须停在 resting。
+        self.b['_flock_hb_save'](created['id'], '-1',
+                                 {'next_wake_at': 0, 'recent': [self.b['time'].time(), self.b['time'].time()]})
+        self.assertFalse(self.b['_flock_frequency_ready']('-1', False))
+        self.assertIn('resting', runtime.ai_flock_status['-1']['stage'])
+        # 直接回复本人无视额度，避免"看见也不理"。
+        self.assertTrue(self.b['_flock_frequency_ready']('-1', True))
+
     async def test_learning_filter_allows_technical_nouns_but_blocks_command_lines(self):
         allowed = self.b['_safe_skill_markdown']("- 群里常讨论 ssh 配置和内网穿透", label="群知识")
         self.assertIn('ssh', allowed)
