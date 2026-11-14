@@ -4162,6 +4162,7 @@ function logRow(h){
     add('回复',d.reply||h.reply);
     add('按钮',d.button);
     if(d.button_mode)add('按钮模式',buttonModeLabel(d.button_mode));
+    if(d.button_source)add('按钮来源',d.button_source==='latest_history'?'最近历史菜单':'本轮新消息或编辑');
     add('AI 按钮结果',d.button_ai_result);
     add('按钮弹窗',d.popup);
     add('验证码',d.captcha);

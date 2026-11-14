@@ -136,6 +136,24 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
         detail=self.b['conn'].execute('SELECT detail FROM hits ORDER BY id DESC').fetchone()[0]
         self.assertIn('"button_mode": "ai"',detail)
 
+    async def test_fallback_mode_uses_latest_unchanged_menu_for_repeat_start(self):
+        provider = (await self.b['create_ai_provider'](self.b['AIProviderInput'](
+            note='按钮 AI', base='https://example.invalid/v1', key='fixture-key', model='m')))['provider']['id']
+        wanted = SimpleNamespace(text='🎯 签到', click=AsyncMock(return_value=SimpleNamespace(message='今日已签到，请勿重复签到')))
+        old_menu = message(90, '请选择功能', buttons=[[wanted]])
+        old_menu.edit_date=None;old_menu.photo=None;old_menu.document=None
+        self.b['client']=SimpleNamespace(
+            send_message=AsyncMock(return_value=SimpleNamespace(id=100)),
+            get_messages=AsyncMock(return_value=[old_menu]))
+        self.b['_call_ai_any']=AsyncMock(side_effect=AssertionError('fallback script match must not call AI'))
+        aid=await self.create(signin_captcha=0,signin_recognition_mode='none',button_mode='fallback',
+                              ai_provider_ids=provider,btn_text='签到',command_delay=0,button_delay=0)
+        with patch.object(asyncio,'sleep',new=AsyncMock()):
+            self.assertTrue(await self.b['run_signin'](self.row(aid)))
+        wanted.click.assert_awaited_once();self.b['_call_ai_any'].assert_not_awaited()
+        detail=self.b['conn'].execute('SELECT detail FROM hits ORDER BY id DESC').fetchone()[0]
+        self.assertIn('"button_source": "latest_history"',detail);self.assertIn('今日已签到',detail)
+
     async def test_image_mode_uses_custom_prompt_selected_apis_and_sends_object_name(self):
         self.image_mode=True;selected='0123456789abcdef';prompt='识别核心物体，只输出名称'
         aid=await self.create(signin_captcha=0,signin_recognition_mode='image',signin_image_prompt=prompt,ai_provider_ids=selected)

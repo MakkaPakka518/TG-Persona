@@ -4457,10 +4457,15 @@ async def run_signin(a):
     clicked_btn = False
     btn_text_clicked = ""
     button_popup = ""
+    button_source = "fresh"
     if a["click_btn"]:
         try:
             button_ai_cache = {}
             button_message, btns = await _find_latest_buttons(ent, min_id=min_id, baseline=captcha_baseline)
+            if not btns and a["button_mode"] in ("ai", "fallback"):
+                # 部分 Bot 重复 /start 时不发新消息也不编辑菜单，只能复用最新一张菜单卡。
+                button_message, btns = await _find_latest_buttons(ent, min_id=0)
+                button_source = "latest_history"
             b = await _select_btn_mode(btns, a["btn_text"], a["btn_emoji"], a["button_mode"],
                                        "签到任务需要点击的按钮", provider_ids=a["ai_provider_ids"],
                                        ai_cache=button_ai_cache)
@@ -4503,6 +4508,7 @@ async def run_signin(a):
                         btn_text_clicked = getattr(b, "text", "") or ""
                         detail = {"kind": "signin", "task": a["name"], "bot": target, "command": cmd,
                                   "button": btn_text_clicked, "button_mode": a["button_mode"],
+                                  "button_source": button_source,
                                   "popup": button_popup, "reply": button_popup,
                                   "clicks": i + 1, "note": "按钮弹窗已确认签到结果"}
                         add_hit("signin", True, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
@@ -4624,6 +4630,7 @@ async def run_signin(a):
             detail={"kind": "signin", "task": a["name"], "bot": target, "command": cmd,
                     "reply": reply_txt, "button": btn_text_clicked,
                     "button_mode": a["button_mode"],
+                    "button_source": button_source,
                     "clicks": (int(a["click_times"] or 1) if a["click_btn"] else 0), "captcha": cap_ans,
                     "captcha_message_id": cap_m.id if cap_m is not None else None,
                     "captcha_prompt": image_context[:160] or str(getattr(cap_m, "raw_text", "") or "")[:160],
