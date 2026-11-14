@@ -782,6 +782,20 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail['button_mode'], 'ai')
         self.assertIn('AI 未返回', detail['button_ai_result'])
 
+    async def test_signin_success_mask_allows_second_daily_window(self):
+        aid = await self.create(name='双次签到', win_start='08:00', win_end='12:00',
+                                signin_second_enabled=1, signin_second_start='13:00', signin_second_end='14:00')
+        self.b['run_signin'] = AsyncMock(return_value=True)
+        await self.b['_execute_auto'](aid)
+        first = self.row(aid)
+        self.assertEqual((first['signin_success_mask'], first['last_status']), (1, 'success'))
+        self.advance(4.5 * 3600)
+        await self.b['_execute_auto'](aid)
+        second = self.row(aid)
+        self.assertEqual(second['signin_success_mask'], 3)
+        self.assertTrue((await self.b['list_autos']())['autos'][0]['signed_today'])
+        self.assertEqual(self.b['run_signin'].await_count, 2)
+
     async def test_db_migration_adds_attempt_and_preserves_legacy_success(self):
         aid = await self.create()
         self.b['conn'].execute('UPDATE automations SET last_at=?,last_status=? WHERE id=?', ('2026-10-30', 'running', aid))
@@ -798,6 +812,12 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.assertIn('button_mode', a.keys())
         self.assertIn('popup_success_kw', a.keys())
         self.assertIn('popup_fail_kw', a.keys())
+        self.assertIn('signin_independent', a.keys())
+        self.assertIn('signin_second_enabled', a.keys())
+        self.assertIn('signin_second_start', a.keys())
+        self.assertIn('signin_second_end', a.keys())
+        self.assertIn('signin_success_mask', a.keys())
+        self.assertIn('signin_attempt_slot', a.keys())
 
 
 if __name__ == '__main__':

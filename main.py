@@ -275,6 +275,12 @@ def db_init(database=None):
         ("button_mode", "TEXT DEFAULT 'script'"),
         ("popup_success_kw", "TEXT DEFAULT ''"),
         ("popup_fail_kw", "TEXT DEFAULT ''"),
+        ("signin_independent", "INTEGER DEFAULT 0"),
+        ("signin_second_enabled", "INTEGER DEFAULT 0"),
+        ("signin_second_start", "TEXT DEFAULT '12:00'"),
+        ("signin_second_end", "TEXT DEFAULT '12:30'"),
+        ("signin_success_mask", "INTEGER DEFAULT 0"),
+        ("signin_attempt_slot", "INTEGER DEFAULT -1"),
         ("icon_url", "TEXT DEFAULT ''"),
         ("result_delay", "REAL DEFAULT 0"),
         ("result_timeout", "INTEGER DEFAULT 30"),
@@ -5454,8 +5460,10 @@ def _reset_auto_schedule(aid, clear_success=False):
         except ValueError:
             base, last = now, ""
         next_at = max(now, base + max(60, int(a["poll_interval"] or 60)))
-    db.execute("UPDATE automations SET last_at=?,last_attempt=0,retry_count=0,retry_day='',"
-               "next_run_at=?,last_status='',failure_notified='' WHERE id=?", (last,next_at,aid))
+    db.execute("UPDATE automations SET last_at=?,last_attempt=0,retry_count=0,retry_day='',signin_attempt_slot=-1,"
+               "signin_success_mask=CASE WHEN ? THEN 0 ELSE signin_success_mask END,"
+               "next_run_at=?,last_status='',failure_notified='' WHERE id=?",
+               (last, int(bool(clear_success)), next_at, aid))
     db.commit()
 
 
@@ -5467,7 +5475,52 @@ def _global_signin_window():
 
 def _effective_signin_window(a):
     window = _global_signin_window()
-    return (window["start"], window["end"]) if window["enabled"] and a["type"] == "signin" else (a["win_start"], a["win_end"])
+    follows = window["enabled"] and a["type"] == "signin" and not a["signin_independent"]
+    return (window["start"], window["end"]) if follows else (a["win_start"], a["win_end"])
+
+
+def _signin_windows(a):
+    first = _effective_signin_window(a)
+    windows = [first]
+    if a["type"] == "signin" and a["signin_second_enabled"]:
+        windows.append((a["signin_second_start"], a["signin_second_end"]))
+    return windows
+
+
+def _signin_window_spans(a):
+    spans = []
+    for start, end in _signin_windows(a):
+        begin, finish = _win_minutes(start), _win_minutes(end)
+        if begin is not None and finish is not None and begin < finish:
+            spans.append((begin, finish))
+    return spans
+
+
+def _signin_mask(a, today):
+    if a["last_at"] != today:
+        return 0
+    mask = int(a["signin_success_mask"] or 0)
+    return mask or 1  # 升级前只有 last_at；当天已有成功视为第一时间段完成。
+
+
+def _signin_required_mask(a):
+    return (1 << len(_signin_window_spans(a))) - 1
+
+
+def _signin_slot(a, current, allow_outside=False, success_mask=0):
+    minute = current.hour * 60 + current.minute
+    spans = _signin_window_spans(a)
+    matched = []
+    for index, (start, end) in enumerate(spans):
+        if start <= minute < end:
+            matched.append(index)
+            if not success_mask & (1 << index):
+                return index
+    if matched:
+        return matched[0]
+    if allow_outside and spans:
+        return 1 if len(spans) > 1 and minute >= spans[1][0] else 0
+    return None
 
 
 def _summary_names(label, names):
@@ -5488,18 +5541,23 @@ def _maybe_notify_global_signin_summary():
     if get_setting("signin_summary_day", "") == today:
         return False
     rows = get_account_db().execute(
-        "SELECT * FROM automations WHERE enabled=1 AND type='signin' ORDER BY id DESC").fetchall()
+        "SELECT * FROM automations WHERE enabled=1 AND type='signin' AND signin_independent=0 ORDER BY id DESC").fetchall()
     if not rows:
         return False
     runtime = _auto_runtime_state()
     active = set(runtime.auto_tasks) | set(runtime.auto_queued) | set(runtime.auto_workers)
     if any(row["id"] in active for row in rows):
         return False
+    current = now_local()
+    latest_end = max((end for row in rows for _, end in _signin_window_spans(row)), default=0)
     groups = {"success": [], "unconfirmed": [], "failed": [], "stopped": [], "not_run": []}
     pending = []
     for row in rows:
-        if row["last_at"] == today:
+        mask, required = _signin_mask(row, today), _signin_required_mask(row)
+        if required and mask == required:
             groups["success"].append(row["name"])
+        elif required > 1 and current.hour * 60 + current.minute < latest_end:
+            pending.append(row["name"])
         elif row["retry_day"] == today and row["last_status"] == "unconfirmed":
             groups["unconfirmed"].append(row["name"])
         elif row["retry_day"] == today and row["last_status"] == "stopped":
@@ -5509,10 +5567,7 @@ def _maybe_notify_global_signin_summary():
             groups["failed"].append(row["name"])
         else:
             pending.append(row["name"])
-    end = _win_minutes(window["end"])
-    current = now_local()
-    after_window = end is not None and current.hour * 60 + current.minute >= end
-    if pending and not after_window:
+    if pending and current.hour * 60 + current.minute < latest_end:
         return False
     groups["not_run"].extend(pending)
     # Mark first so concurrent task completions cannot duplicate the aggregate push.
@@ -5531,9 +5586,14 @@ def _maybe_notify_global_signin_summary():
     return True
 
 
-def _signin_deadline(a, current):
-    _, end_text = _effective_signin_window(a)
-    end = _win_minutes(end_text)
+def _signin_deadline(a, current, slot=None):
+    slot = _signin_slot(a, current) if slot is None else slot
+    spans = _signin_window_spans(a)
+    if slot is None and spans:
+        slot = 0
+    end = spans[slot][1] if slot is not None and slot < len(spans) else None
+    if end is None:
+        return current.timestamp()
     return current.replace(hour=end // 60, minute=end % 60, second=0, microsecond=0).timestamp()
 
 
@@ -5691,28 +5751,37 @@ async def _execute_auto(aid, manual=False, trigger_context=None):
         a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
         if a is None or (not manual and not a["enabled"]):
             return result
-        notice["aggregate"] = bool(not manual and a["type"] == "signin" and _global_signin_window()["enabled"])
+        notice["aggregate"] = bool(not manual and a["type"] == "signin"
+                                   and _global_signin_window()["enabled"] and not a["signin_independent"])
         if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
             return result
         now = int(time.time())
-        today = now_local().strftime("%Y-%m-%d")
+        current = now_local()
+        today = current.strftime("%Y-%m-%d")
+        signin_slot = (_signin_slot(a, current, allow_outside=manual, success_mask=_signin_mask(a, today))
+                       if a["type"] == "signin" else -1)
         count = int(a["retry_count"] or 0)
         if not manual:
-            if a["type"] == "signin" and (a["last_at"] == today or
-                    (a["retry_day"] == today and (a["last_status"] == "unconfirmed" or count >= _retry_limit(a))) or
-                    (a["next_run_at"] and now < a["next_run_at"])):
-                return result
+            if a["type"] == "signin":
+                if signin_slot is None or _signin_mask(a, today) & (1 << signin_slot):
+                    return result
+                same_slot = (a["retry_day"] == today
+                             and int(a["signin_attempt_slot"] if a["signin_attempt_slot"] is not None else -1) == signin_slot)
+                if (same_slot and (a["last_status"] == "unconfirmed" or count >= _retry_limit(a))
+                        or same_slot and a["next_run_at"] and now < a["next_run_at"]):
+                    return result
             if a["type"] == "keepalive" and now < int(a["next_run_at"] or 0):
                 return result
-        if a["type"] == "signin" and a["retry_day"] != today:
+        if a["type"] == "signin" and (a["retry_day"] != today
+                or int(a["signin_attempt_slot"] if a["signin_attempt_slot"] is not None else -1) != signin_slot):
             count = 0
         if a["type"] == "keepalive" and count >= _retry_limit(a):
             count = 0
         count += 1
         backoff = min(3600, RETRY_BASE * 2 ** min(count - 1, 6))
-        get_account_db().execute("UPDATE automations SET last_attempt=?,retry_count=?,retry_day=?,"
+        get_account_db().execute("UPDATE automations SET last_attempt=?,retry_count=?,retry_day=?,signin_attempt_slot=?,"
                      "last_status='running',next_run_at=? WHERE id=?",
-                     (now, count, today, now + backoff, aid))
+                     (now, count, today, signin_slot, now + backoff, aid))
         get_account_db().commit()
         a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
         ok, status = False, "failed"
@@ -5721,7 +5790,7 @@ async def _execute_auto(aid, manual=False, trigger_context=None):
                 if manual:
                     ok = bool(await run_signin(a))
                 else:
-                    remaining = _signin_deadline(a, now_local()) - time.time()
+                    remaining = _signin_deadline(a, now_local(), signin_slot) - time.time()
                     if remaining <= 0:
                         raise asyncio.TimeoutError("签到窗口已结束")
                     ok = bool(await asyncio.wait_for(run_signin(a), timeout=remaining))
@@ -5767,8 +5836,15 @@ async def _execute_auto(aid, manual=False, trigger_context=None):
             elif ok:
                 stamp = now_local().strftime("%Y-%m-%d") if a["type"] == "signin" else str(finished)
                 next_at = finished + max(60, int(a["poll_interval"] or 60)) if a["type"] == "keepalive" else 0
-                get_account_db().execute("UPDATE automations SET last_at=?,retry_count=0,next_run_at=?,"
-                             "last_status='success',failure_notified='' WHERE id=?", (stamp, next_at, aid))
+                if a["type"] == "signin":
+                    previous_mask = _signin_mask(a, today)
+                    success_mask = previous_mask | (1 << max(0, signin_slot))
+                    get_account_db().execute("UPDATE automations SET last_at=?,signin_success_mask=?,retry_count=0,next_run_at=?,"
+                                 "last_status='success',failure_notified='' WHERE id=?",
+                                 (stamp, success_mask, next_at, aid))
+                else:
+                    get_account_db().execute("UPDATE automations SET last_at=?,retry_count=0,next_run_at=?,"
+                                 "last_status='success',failure_notified='' WHERE id=?", (stamp, next_at, aid))
             else:
                 if a["type"] == "keepalive" and exhausted:
                     next_at = finished + max(backoff, max(60, int(a["poll_interval"] or 60)))
@@ -5822,22 +5898,24 @@ def _signin_tick():
         if key[1] != today:
             get_runtime().signin_plans.pop(key, None)
     for a in get_account_db().execute("SELECT * FROM automations WHERE enabled=1 AND type='signin' ORDER BY id DESC").fetchall():
-        if a["id"] in get_runtime().auto_tasks or a["last_at"] == today:
+        if a["id"] in get_runtime().auto_tasks:
             continue
-        start_text, end_text = _effective_signin_window(a)
-        w0, w1 = _win_minutes(start_text), _win_minutes(end_text)
-        # 同日半开区间 [start,end),严格不允许在 win_end 之后开始/重试。
-        if w0 is None or w1 is None or w0 >= w1 or not w0 <= nowm < w1:
+        slot = _signin_slot(a, current, success_mask=_signin_mask(a, today))
+        if slot is None or _signin_mask(a, today) & (1 << slot):
             continue
-        if a["retry_day"] == today:
+        attempt_slot = int(a["signin_attempt_slot"] if a["signin_attempt_slot"] is not None else -1)
+        if a["retry_day"] == today and attempt_slot == slot:
             if a["last_status"] == "unconfirmed" or a["retry_count"] >= _retry_limit(a) or now < a["next_run_at"]:
                 continue
-        elif a["retry_count"]:
-            get_account_db().execute("UPDATE automations SET retry_count=0,next_run_at=0 WHERE id=?", (a["id"],))
+        elif a["retry_count"] or attempt_slot != slot:
+            get_account_db().execute("UPDATE automations SET retry_count=0,next_run_at=0,signin_attempt_slot=? WHERE id=?",
+                                     (slot, a["id"]))
             get_account_db().commit()
-        key = (a["id"], today)
+        w0, w1 = _signin_window_spans(a)[slot]
+        key = (a["id"], today, slot)
         if key not in get_runtime().signin_plans:
-            get_runtime().signin_plans[key] = nowm if a["retry_day"] == today and a["retry_count"] else random.randint(w0, w1 - 1)
+            same_retry = a["retry_day"] == today and attempt_slot == slot and a["retry_count"]
+            get_runtime().signin_plans[key] = nowm if same_retry else random.randint(w0, w1 - 1)
         if nowm >= get_runtime().signin_plans[key]:
             _queue_auto(a["id"])
     _maybe_notify_global_signin_summary()
@@ -6801,6 +6879,10 @@ class AutoIn(BaseModel):
     button_mode: str = Field("script", max_length=16)       # script | ai | fallback
     popup_success_kw: str = Field("", max_length=1000)
     popup_fail_kw: str = Field("", max_length=1000)
+    signin_independent: int = Field(0, ge=0, le=1)
+    signin_second_enabled: int = Field(0, ge=0, le=1)
+    signin_second_start: str = Field("12:00", max_length=5)
+    signin_second_end: str = Field("12:30", max_length=5)
     result_delay: float = Field(0, ge=0, le=120)  # 操作后等待多久开始判定
     result_timeout: int = Field(30, ge=1, le=300) # 轮询最终结果上限（秒）
     success_kw: str = ""          # signin: 成功关键词
@@ -6888,6 +6970,11 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "按钮刷新模式只能为 0 或 1")
         if body.signin_captcha not in (0, 1):
             raise HTTPException(400, "旧版验证码开关只能为 0 或 1")
+        if body.signin_independent not in (0, 1) or body.signin_second_enabled not in (0, 1):
+            raise HTTPException(400, "独立时间和第二时间段开关只能为 0 或 1")
+        second_start, second_end = _win_minutes(body.signin_second_start), _win_minutes(body.signin_second_end)
+        if second_start is None or second_end is None or second_start >= second_end:
+            raise HTTPException(400, "第二时间段须为同日且开始早于结束")
         mode = body.signin_recognition_mode.strip()
         if mode not in ("", "none", "captcha", "image"):
             raise HTTPException(400, "图片处理模式只能为不识别、验证码识别或图片识别")
@@ -7000,7 +7087,7 @@ def _valid_auto(body: AutoIn):
 
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
-              "groups,keywords,action,reply_text,poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,button_mode,popup_success_kw,popup_fail_kw,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
+              "groups,keywords,action,reply_text,poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,button_mode,popup_success_kw,popup_fail_kw,signin_independent,signin_second_enabled,signin_second_start,signin_second_end,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
               "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars,ai_flock_knowledge_on_demand")
 
 
@@ -7016,7 +7103,8 @@ def _auto_vals(body: AutoIn, extra=None):
         body.poll_interval, canonical_steps(body.custom_steps) if body.type == "custom" else body.custom_steps.strip(),
         canonical_trigger(body.custom_trigger) if body.type == "custom" else body.custom_trigger.strip(), body.chain_retry,
         body.cooldown, body.enabled, body.command_delay, body.button_delay, body.refresh_buttons, body.button_mode,
-        body.popup_success_kw.strip(), body.popup_fail_kw.strip(), body.icon_url.strip(),
+        body.popup_success_kw.strip(), body.popup_fail_kw.strip(), body.signin_independent,
+        body.signin_second_enabled, body.signin_second_start.strip(), body.signin_second_end.strip(), body.icon_url.strip(),
         body.result_delay, body.result_timeout, body.scheduled_at.strip(), body.history_first,
         body.link_mode, body.link_limit, body.link_wait, body.existing_kw.strip(),
         body.success_reply_enabled, body.success_reply_text.strip(), body.success_reply_delay,
@@ -7051,10 +7139,14 @@ async def list_autos():
     output = []
     for row in rows:
         start, end = _effective_signin_window(row)
-        output.append(dict(row, signed_today=(row["type"] == "signin" and row["last_at"] == today),
+        mask = _signin_mask(row, today) if row["type"] == "signin" else 0
+        required = _signin_required_mask(row) if row["type"] == "signin" else 0
+        output.append(dict(row, signed_today=bool(row["type"] == "signin" and required and mask == required),
+            signin_done_slots=bin(mask).count("1"), signin_total_slots=len(_signin_window_spans(row)) if row["type"] == "signin" else 0,
+            effective_windows=_signin_windows(row) if row["type"] == "signin" else [(start, end)],
             running=(row["id"] in _auto_runtime_state().auto_workers),
             queued=(row["id"] in _auto_runtime_state().auto_queued), last_result=results.get(row["id"]),
-            uses_global_window=(row["type"] == "signin" and window["enabled"]),
+            uses_global_window=(row["type"] == "signin" and window["enabled"] and not row["signin_independent"]),
             effective_win_start=start, effective_win_end=end,
             link_credential_set=bool(get_link_credential(row["id"]).get("u"))))
     return {"autos": output}
@@ -7481,8 +7573,15 @@ async def resolve_anomaly(aid: int, body: dict):
         if row["type"] not in ("signin", "keepalive"):
             raise HTTPException(400, "仅签到或保号任务可人工确认成功")
         stamp = today if row["type"] == "signin" else str(int(time.time()))
-        db.execute("UPDATE automations SET last_at=?,retry_count=0,retry_day='',next_run_at=0,"
-                   "last_status='success',failure_notified='' WHERE id=?", (stamp, aid))
+        if row["type"] == "signin":
+            slot = _signin_slot(row, now_local(), allow_outside=True) or 0
+            mask = _signin_mask(row, today) | (1 << slot)
+            db.execute("UPDATE automations SET last_at=?,signin_success_mask=?,signin_attempt_slot=?,"
+                       "retry_count=0,retry_day='',next_run_at=0,last_status='success',failure_notified='' WHERE id=?",
+                       (stamp, mask, slot, aid))
+        else:
+            db.execute("UPDATE automations SET last_at=?,retry_count=0,retry_day='',next_run_at=0,"
+                       "last_status='success',failure_notified='' WHERE id=?", (stamp, aid))
         db.commit()
         add_hit(row["type"], True, chat_id=row["target"], rule_id=-aid,
                 grp_name=row["target"], content="人工确认成功",

@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from test_backend import load_backend, HTTPException
 
 
@@ -76,6 +76,34 @@ class GlobalWindowTests(unittest.IsolatedAsyncioTestCase):
         item=(await self.b['list_autos']())['autos'][0]
         self.assertFalse(item['uses_global_window'])
         self.assertEqual(item['effective_win_start'],'08:00')
+
+    async def test_follow_global_plus_second_window_runs_each_slot(self):
+        aid=await self.create(signin_second_enabled=1,signin_second_start='12:10',signin_second_end='12:20')
+        await self.window('00:05','00:41')
+        row=self.row(aid)
+        self.assertEqual(self.b['_signin_windows'](row),[('00:05','00:41'),('12:10','12:20')])
+        queued=[]
+        self.b['_queue_auto']=lambda task_id:queued.append(task_id) or True
+        self.now=self.now.replace(hour=0,minute=10)
+        with patch.object(self.b['random'],'randint',return_value=10):
+            self.b['_signin_tick']()
+        self.assertEqual(queued,[aid])
+        today=self.now.strftime('%Y-%m-%d')
+        self.b['conn'].execute("UPDATE automations SET last_at=?,signin_success_mask=1,retry_count=0,retry_day='',last_status='success' WHERE id=?",(today,aid));self.b['conn'].commit()
+        self.now=self.now.replace(hour=12,minute=15)
+        with patch.object(self.b['random'],'randint',return_value=735):
+            self.b['_signin_tick']()
+        self.assertEqual(queued,[aid,aid])
+
+    async def test_independent_task_never_uses_global_window(self):
+        aid=await self.create(win_start='08:00',win_end='09:00',signin_independent=1,
+                              signin_second_enabled=1,signin_second_start='13:00',signin_second_end='14:00')
+        await self.window('00:05','00:41')
+        row=self.row(aid)
+        self.assertEqual(self.b['_signin_windows'](row),[('08:00','09:00'),('13:00','14:00')])
+        listed=(await self.b['list_autos']())['autos'][0]
+        self.assertFalse(listed['uses_global_window'])
+        self.assertEqual(listed['effective_windows'],[('08:00','09:00'),('13:00','14:00')])
 
 
 if __name__=='__main__':unittest.main()

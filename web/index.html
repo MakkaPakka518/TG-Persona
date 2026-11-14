@@ -999,7 +999,7 @@ section.act,.fold.open .fold-b{animation:none}
           <div class="hint" id="signinGlobalSummary">未启用 · 默认 00:05–00:41</div>
           <div id="signinGlobalFields" class="hidden">
             <div class="flex"><div><label for="signinGlobalStart">开始（HH:MM）</label><input type="time" id="signinGlobalStart" value="00:05" onchange="markSigninGlobalDirty()"></div><div><label for="signinGlobalEnd">结束（HH:MM）</label><input type="time" id="signinGlobalEnd" value="00:41" onchange="markSigninGlobalDirty()"></div></div>
-            <div class="hint">在时间段内随机开始，按设置时区执行。默认 00:05–00:41，未启用。启用后所有账号的签到任务跟随统一窗口；各任务原窗口保留但不生效。自动签到不再逐条推送，当前账号所有任务及失败重试轮完成后只推送一条汇总；手动执行仍单独通知。保存不会强行中断正在执行的任务。</div>
+            <div class="hint">在时间段内随机开始，按设置时区执行。启用后，未勾选“独立于统一签到时间”的任务，其第一时间段跟随统一窗口；任务开启的第二时间段仍独立执行。独立任务完全排除在统一窗口和统一汇总之外。所有跟随统一的任务及失败重试轮完成后只推送一条汇总；保存不会强行中断正在执行的任务。</div>
           </div>
           <button class="btn" type="button" id="signinGlobalSave" style="margin-top:10px" onclick="saveSigninGlobal()">保存统一时间</button>
           <div class="hint" id="signinGlobalResult" role="status" aria-live="polite"></div>
@@ -1022,6 +1022,13 @@ section.act,.fold.open .fold-b{animation:none}
           <div class="flex">
             <div><label>每天时间窗口(开始)</label><input type="text" id="sWinStart" value="08:00" readonly onclick="openTimePicker('sWinStart')"></div>
             <div><label>窗口(结束)</label><input type="text" id="sWinEnd" value="12:00" readonly onclick="openTimePicker('sWinEnd')"></div>
+          </div>
+          <label class="check"><input type="checkbox" id="sIndependent" onchange="syncSigninTaskWindows()"> 独立于统一签到时间</label>
+          <div class="hint">开启后此任务永远不跟随统一时间，第一时间段使用上方任务窗口。</div>
+          <label class="check"><input type="checkbox" id="sSecondEnabled" onchange="syncSigninTaskWindows()"> 开启第二时间段</label>
+          <div id="sSecondWindow" class="flex hidden">
+            <div><label for="sSecondStart">第二时间段开始</label><input type="time" id="sSecondStart" value="12:00"></div>
+            <div><label for="sSecondEnd">第二时间段结束</label><input type="time" id="sSecondEnd" value="12:30"></div>
           </div>
           <div class="hint" id="sWindowHint">单任务窗口：在每天时间段内随机开始。</div>
           <div class="flex">
@@ -2108,9 +2115,14 @@ function renderSigninGlobal(){
   syncSigninWindow();
 }
 function syncSigninWindow(){
-  for(const id of ['sWinStart','sWinEnd'])$('#'+id).disabled=signinGlobal.enabled;
-  $('#sWindowHint').textContent=signinGlobal.enabled?'跟随统一 '+signinGlobal.start+'–'+signinGlobal.end+'；以下单任务原窗口保留但不生效。':'单任务窗口：在每天时间段内随机开始。';
+  const independent=$('#sIndependent').checked,second=$('#sSecondEnabled').checked;
+  for(const id of ['sWinStart','sWinEnd'])$('#'+id).disabled=signinGlobal.enabled&&!independent;
+  $('#sSecondWindow').classList.toggle('hidden',!second);
+  const first=signinGlobal.enabled&&!independent?'第一时间段跟随统一 '+signinGlobal.start+'–'+signinGlobal.end:'第一时间段使用任务窗口 '+$('#sWinStart').value+'–'+$('#sWinEnd').value;
+  const extra=second?'；第二时间段 '+$('#sSecondStart').value+'–'+$('#sSecondEnd').value:'';
+  $('#sWindowHint').textContent=first+extra+(independent?'；此任务已独立于统一时间':'');
 }
+function syncSigninTaskWindows(){syncSigninWindow()}
 function markSigninGlobalDirty(){signinGlobalDirty=true;invalidateBatchPreview();renderSigninGlobal()}
 function acceptSigninGlobalSettings(s){
   const next={enabled:String(s.signin_global_enabled??'0')==='1',start:validTime(s.signin_global_start)?s.signin_global_start:'00:05',end:validTime(s.signin_global_end)?s.signin_global_end:'00:41'};
@@ -2130,12 +2142,13 @@ async function saveSigninGlobal(){
   }catch(e){if(isCurrentAccount(c))$('#signinGlobalResult').textContent='保存失败：'+e.message}
   finally{if(isCurrentAccount(c)){signinGlobalBusy=false;$('#signinGlobalSave').disabled=false}}
 }
-function followsGlobalWindow(a){return a.type==='signin'&&(a.uses_global_window==null?signinGlobal.enabled:(a.uses_global_window===true||String(a.uses_global_window)==='1'))}
+function followsGlobalWindow(a){return a.type==='signin'&&(a.uses_global_window==null?signinGlobal.enabled&&!a.signin_independent:(a.uses_global_window===true||String(a.uses_global_window)==='1'))}
 function autoWindow(a){
   if(a.type==='scheduled_register')return '执行时间 '+String(a.scheduled_at||'未设置').replace('T',' ');
   if(a.type!=='signin')return '不适用签到时间窗口';
   const shared=followsGlobalWindow(a),start=a.effective_win_start??(shared?signinGlobal.start:a.win_start),end=a.effective_win_end??(shared?signinGlobal.end:a.win_end);
-  return (shared?'跟随统一 ':'单任务窗口 ')+String(start??'--')+'–'+String(end??'--');
+  const windows=Array.isArray(a.effective_windows)&&a.effective_windows.length?a.effective_windows:[[start,end]];
+  return (shared?'跟随统一 ':a.signin_independent?'独立任务窗口 ':'单任务窗口 ')+windows.map(item=>String(item[0]??'--')+'–'+String(item[1]??'--')).join(' + ');
 }
 function autoUnconfirmed(a){return a.status==='unconfirmed'||a.last_result?.status==='unconfirmed'||a.last_result?.detail?.status==='unconfirmed'}
 function autoLastResult(a){
@@ -2278,7 +2291,8 @@ function autoDesc(a){
   if(a.type==='button_register')return `群：${esc(a.groups||'全部监听群')}；开注：${esc(a.announcement_kw)}；群按钮：${esc(a.announcement_button)}；${buttonModeLabel(a.button_mode)}；指令：${esc(a.command||'/start')}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒向原群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
   if(a.type==='signin'){
     const mode=signinRecognitionMode(a),recognition=mode==='captcha'?' · 验证码识别':mode==='image'?(a.signin_image_action==='click'?' · 图片识别点选':' · 图片识别回复'):'';
-    return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+buttonModeLabel(a.button_mode)+' · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${recognition}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'')}`;
+    const daily=Number(a.signin_total_slots||1)>1?' · 今日 '+Number(a.signin_done_slots||0)+'/'+Number(a.signin_total_slots)+' 次':a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'');
+    return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+buttonModeLabel(a.button_mode)+' · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${recognition}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${daily}`;
   }
   if(a.type==='scheduled_register')return `${esc(a.target)}，${esc(a.command)}，${esc(autoWindow(a))}，按钮 ${esc(a.btn_text)}，${buttonModeLabel(a.button_mode)}${a.history_first?'，历史卡片优先':''}${Number(a.poll_interval)>0?'，关闭弹窗每 '+esc(String(a.poll_interval))+' 秒重试':''}，收到 ${esc(a.keywords)} 后回复，成功 ${esc(a.success_kw)}，每步等待 ${esc(String(a.result_timeout??30))}秒`;
   if(a.type==='link_register')return `群:${esc(a.groups||'全部监听群')} · 自动识别机器人 · 按钮 ${esc(a.btn_text)} · ${buttonModeLabel(a.button_mode)}${Number(a.link_mode)===0?' · 随机一条':' · 串行最多 '+esc(String(a.link_limit??4))+' 条'} · 失效等待 ${esc(String(a.link_wait??5))}秒 · 成功 ${esc(a.success_kw)}${a.existing_kw?' · 已有号即停止':''}${a.success_reply_enabled?' · 成功后 '+esc(String(a.success_reply_delay??5))+' 秒群内发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?' · AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}${a.link_credential_set?' · 已保存账号信息':' · 未填写账号信息'}`;
@@ -2312,6 +2326,8 @@ function editAutoItem(id){
     $('#sIconUrl').value=a.icon_url||'';renderSigninIconPreview();syncSigninWindow();
     $('#sIsChat').checked=!!a.is_chat;
     $('#sWinStart').value=a.win_start;$('#sWinEnd').value=a.win_end;
+    $('#sIndependent').checked=!!a.signin_independent;$('#sSecondEnabled').checked=!!a.signin_second_enabled;
+    $('#sSecondStart').value=a.signin_second_start||'12:00';$('#sSecondEnd').value=a.signin_second_end||'12:30';syncSigninTaskWindows();
     $('#sCommandDelay').value=a.command_delay??1.6;$('#sButtonDelay').value=a.button_delay??2;
     $('#sResultDelay').value=a.result_delay??0;$('#sResultTimeout').value=a.result_timeout??30;
     $('#sClickBtn').checked=!!a.click_btn;
@@ -2390,7 +2406,7 @@ function editAutoItem(id){
 }
 function cancelAutoEdit(t){
   editAuto=null;editAutoAccount=null;if(typeof assistantFormDraft!=='undefined')assistantFormDraft=null;
-  ({signin:()=>{$('#sName').value='';clearSigninIcon();syncSigninWindow();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sButtonMode').value='script';$('#sPopupSuccess').value='';$('#sPopupFail').value='';$('#sRecognitionMode').value='none';$('#sImageAction').value='reply';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
+    ({signin:()=>{$('#sName').value='';clearSigninIcon();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sIndependent').checked=false;$('#sSecondEnabled').checked=false;$('#sSecondStart').value='12:00';$('#sSecondEnd').value='12:30';syncSigninTaskWindows();$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sButtonMode').value='script';$('#sPopupSuccess').value='';$('#sPopupFail').value='';$('#sRecognitionMode').value='none';$('#sImageAction').value='reply';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trButtonMode').value='script';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkButtonMode').value='script';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkAiFlock').checked=false;$('#lkAiFlockMinutes').value='5';$('#lkAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('lk','','');setIntegerFields('lkAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#lkAiFlockKnowledgeOnDemand').checked=false;$('#lkAiFlockFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
@@ -2670,6 +2686,8 @@ async function saveAuto(type){
     body={type,name:$('#sName').value.trim(),target:$('#sTarget').value.trim(),command:$('#sCmd').value.trim(),icon_url:$('#sIconUrl').value.trim(),
       is_chat:$('#sIsChat').checked?1:0,
       win_start:$('#sWinStart').value.trim(),win_end:$('#sWinEnd').value.trim(),click_btn:$('#sClickBtn').checked?1:0,
+      signin_independent:$('#sIndependent').checked?1:0,signin_second_enabled:$('#sSecondEnabled').checked?1:0,
+      signin_second_start:$('#sSecondStart').value,signin_second_end:$('#sSecondEnd').value,
       btn_text:$('#sBtnText').value.trim(),btn_emoji:$('#sBtnEmoji').value.trim(),
       click_times:+$('#sClicks').value||1,click_interval:+$('#sClickGap').value||300,
       refresh_buttons:$('#sRefreshButtons').value==='0'?0:1,button_mode:$('#sButtonMode').value,
@@ -2685,6 +2703,7 @@ async function saveAuto(type){
     if(signinAIProviderSel.size)body.ai_provider_ids=[...signinAIProviderSel].join(',');
     if(body.icon_url&&!safeHttpUrl(body.icon_url))return toast('图标仅支持安全的 HTTP / HTTPS URL',1);
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
+    if(body.signin_second_enabled&&(!validTime(body.signin_second_start)||!validTime(body.signin_second_end)||body.signin_second_start>=body.signin_second_end))return toast('第二时间段须为同日且开始早于结束',1);
     if(!['none','captcha','image'].includes(body.signin_recognition_mode))return toast('请选择有效的图片处理方式',1);
     if(body.signin_recognition_mode==='image'&&!body.signin_image_prompt)return toast('图片识别需要填写提示词',1);
     if(!['reply','click'].includes(body.signin_image_action))return toast('请选择图片识别后的执行方式',1);
@@ -2982,8 +3001,8 @@ async function exportConfig(selected){
 }
 
 // ---------- AI 助手：所有保存和应用均由用户确认 ----------
-const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,scheduled_at,click_btn,btn_text,btn_emoji,button_mode,popup_success_kw,popup_fail_kw,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_provider_ids,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_knowledge_chars,groups,keywords,action,reply_text,poll_interval,custom_trigger,custom_steps,chain_retry,cooldown,enabled'.split(',');
-const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',scheduled_at:'计划时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',button_mode:'按钮处理模式',popup_success_kw:'成功弹窗关键词',popup_fail_kw:'失败弹窗关键词',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',result_delay:'结果判断前延迟（秒）',result_timeout:'等待最终回复上限（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',signin_recognition_mode:'图片处理',signin_image_prompt:'图片识别提示词',signin_image_action:'图片识别动作',ai_provider_ids:'识别 API',custom_trigger:'触发条件',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
+const AI_TASK_FIELDS='type,name,icon_url,target,command,win_start,win_end,signin_independent,signin_second_enabled,signin_second_start,signin_second_end,scheduled_at,click_btn,btn_text,btn_emoji,button_mode,popup_success_kw,popup_fail_kw,click_times,click_interval,command_delay,button_delay,result_delay,result_timeout,refresh_buttons,success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_provider_ids,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_knowledge_chars,groups,keywords,action,reply_text,poll_interval,custom_trigger,custom_steps,chain_retry,cooldown,enabled'.split(',');
+const AI_LABELS={type:'任务类型',name:'名称',target:'目标',command:'发送指令',win_start:'开始时间',win_end:'结束时间',signin_independent:'独立于统一时间',signin_second_enabled:'开启第二时间段',signin_second_start:'第二时间段开始',signin_second_end:'第二时间段结束',scheduled_at:'计划时间',click_btn:'点击按钮',btn_text:'按钮文字',btn_emoji:'按钮表情',button_mode:'按钮处理模式',popup_success_kw:'成功弹窗关键词',popup_fail_kw:'失败弹窗关键词',command_delay:'命令后等待（秒）',button_delay:'按钮后等待（秒）',result_delay:'结果判断前延迟（秒）',result_timeout:'等待最终回复上限（秒）',click_times:'连点次数',click_interval:'连点间隔（毫秒）',refresh_buttons:'刷新按钮状态',success_kw:'成功关键词',fail_kw:'失败关键词',retries:'额外重试次数',signin_recognition_mode:'图片处理',signin_image_prompt:'图片识别提示词',signin_image_action:'图片识别动作',ai_provider_ids:'识别 API',custom_trigger:'触发条件',custom_steps:'步骤配置',reply_text:'发送内容',poll_interval:'执行间隔（秒）',chain_retry:'步骤重试次数',icon_url:'图标',enabled:'启用状态'};
 const AI_RANGES={command_delay:[0,120],button_delay:[0,120],result_delay:[0,120],result_timeout:[1,300],refresh_buttons:[0,1],click_times:[1,20],click_interval:[50,3000],retries:[0,5],poll_interval:[60,7776000]};
 const AI_TEXT_FIELDS=['win_start','win_end','success_kw','fail_kw','btn_text','btn_emoji','command'];
 let aiDraft=null,aiDraftBusy=false,aiDraftSeq=0,assistantFormDraft=null,aiDiagnoses=new Map();

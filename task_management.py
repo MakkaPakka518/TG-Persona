@@ -32,7 +32,7 @@ MAX_BYTES = 2 * 1024 * 1024
 SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
-    "poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,button_mode,popup_success_kw,popup_fail_kw,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
+    "poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,button_mode,popup_success_kw,popup_fail_kw,signin_independent,signin_second_enabled,signin_second_start,signin_second_end,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
     "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars,ai_flock_knowledge_on_demand"
 ).split(","))
 # Credentials are stored per-account in settings, never in task rows/exports.
@@ -48,6 +48,7 @@ INTEGER_LIMITS = {
     "ai_flock_skill_chars": (0, 200000), "ai_flock_max_tokens": (50, 8192),
     "ai_flock_knowledge_chars": (-1, 5 * 1024 * 1024),
     "ai_flock_knowledge_on_demand": (0, 1),
+    "signin_independent": (0, 1), "signin_second_enabled": (0, 1),
 }
 # Only effective fields are applied; custom windows/delays are NOT scheduled.
 APPLICABILITY = {
@@ -56,6 +57,8 @@ APPLICABILITY = {
                                "click_times", "click_interval")},
     "button_mode": {"signin", "scheduled_register", "link_register", "button_register", "code_register", "redpacket"},
     "popup_success_kw": {"signin"}, "popup_fail_kw": {"signin"},
+    **{key: {"signin"} for key in ("signin_independent", "signin_second_enabled",
+                                    "signin_second_start", "signin_second_end")},
     "result_timeout": {"signin", "scheduled_register", "link_register", "button_register", "code_register"},
     "scheduled_at": {"scheduled_register"},
     "history_first": {"scheduled_register"},
