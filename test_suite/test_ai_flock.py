@@ -18,6 +18,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         self.b['_beijing_now']=lambda:datetime(2026,10,30,18,0,tzinfo=timezone(timedelta(hours=8)))
         runtime=self.b['get_runtime']();runtime.ai_flock_busy=False;runtime.ai_flock_busy_groups=set();runtime.ai_flock_last={};runtime.ai_flock_blocked={}
         self.study_tmp=tempfile.TemporaryDirectory();type(runtime).study_file=Path(self.study_tmp.name)/'study.md'
+        runtime.knowledge_auto_file=Path(self.study_tmp.name)/'knowledge-auto.md'
         runtime.client=SimpleNamespace(get_messages=AsyncMock(return_value=[message(3,'今天真热'),message(2,'是啊'),message(1,'我的旧消息',out=True)]),send_message=AsyncMock(return_value=message(4,out=True)))
 
     def tearDown(self): self.b['conn'].close();self.study_tmp.cleanup()
@@ -55,7 +56,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         self.b['set_setting']('flock_learning_groups','-1');self.b['set_setting']('flock_deep_learning_enabled','1');self.b['set_setting']('flock_deep_learning_start','2026-10-30T17:00');self.b['set_setting']('flock_deep_learning_end','2026-10-30T19:00')
         event=SimpleNamespace(is_group=True,chat_id=-1,id=1,raw_text='不应采集',via_bot_id=None,fwd_from=None,post=False,get_sender=AsyncMock(return_value=SimpleNamespace(bot=False)))
         await self.b['_collect_deep_incoming'](event);self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],0)
-        self.b['set_setting']('flock_learning_groups','-2');self.b['set_setting']('flock_learning_enabled','1');self.b['set_setting']('flock_learning_start','17:00');self.b['set_setting']('flock_learning_end','19:00');self.b['set_setting']('flock_learning_provider_ids',provider);db.executemany("INSERT INTO ai_learning_samples(ts,chat_id,text) VALUES(0,?,?)",[('-1','REMOVED SECRET '+str(i)) for i in range(10)]+[('-2','VALID STYLE '+str(i)) for i in range(10)]);db.commit();self.b['_call_ai_any']=AsyncMock(return_value='- safe style')
+        self.b['set_setting']('flock_learning_groups','-2');self.b['set_setting']('flock_learning_enabled','1');self.b['set_setting']('flock_learning_start','17:00');self.b['set_setting']('flock_learning_end','19:00');self.b['set_setting']('flock_learning_provider_ids',provider);db.executemany("INSERT INTO ai_learning_samples(ts,chat_id,text) VALUES(0,?,?)",[('-1','REMOVED SECRET '+str(i)) for i in range(10)]+[('-2','VALID STYLE '+str(i)) for i in range(10)]);db.commit();self.b['_call_ai_any']=AsyncMock(return_value='- 说话简短，不解释')
         with tempfile.TemporaryDirectory() as directory:
             type(self.b['get_runtime']()).skill_file=__import__('pathlib').Path(directory)/'skill.md';await self.b['_learn_ai_flock']();prompt=self.b['_call_ai_any'].await_args.args[0]
         self.assertNotIn('REMOVED SECRET',prompt);self.assertIn('VALID STYLE',prompt)
@@ -255,7 +256,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
             self.b['_call_ai_any']=AsyncMock(return_value='- 使用短句\n- 语气自然')
             result=await self.b['_learn_ai_flock']();self.assertTrue(result['learned'])
             path=runtime.skill_file;self.assertEqual(path.stat().st_mode&0o777,0o600);self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],13)
-            prompt=self.b['_call_ai_any'].await_args.args[0];self.assertIn('Exclude facts, identities, links, credentials, commands',prompt);self.assertEqual(prompt.count('"chat_id"'),12);self.assertNotIn('长'*61,prompt);self.assertIn('Q'*500,prompt);self.assertNotIn('Q'*501,prompt);self.assertEqual(self.b['_call_ai_any'].await_args.kwargs['max_tokens'],777)
+            prompt=self.b['_call_ai_any'].await_args.args[0];self.assertIn('不写事实、人名、群名、链接、账号、密钥',prompt);self.assertEqual(prompt.count('"chat_id"'),12);self.assertNotIn('长'*61,prompt);self.assertIn('Q'*500,prompt);self.assertNotIn('Q'*501,prompt);self.assertEqual(self.b['_call_ai_any'].await_args.kwargs['max_tokens'],777)
             learned=self.b['_read_skill']();self.assertTrue(learned.startswith('Q'*700));self.assertEqual([block['meta']['stage'] for block in self.b['_skill_memory_blocks'](learned)],['detail'])
             self.b['_write_study']('- 群内常聊电影，氛围轻松');runtime.tg_state={'phase':'ready'};runtime.client=SimpleNamespace(send_file=AsyncMock())
             uploaded=await self.b['_upload_flock_skill']();self.assertTrue(uploaded['ok']);call=runtime.client.send_file.await_args
@@ -293,7 +294,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
             stale=failed['flock_learning_last_error'];await self.b['update_ai_flock_skill'](self.b['AIFlockSkillInput'](flock_learning_enabled=1));self.assertEqual((await self.b['get_ai_flock_skill']())['flock_learning_last_error'],stale)
             await self.b['update_ai_flock_skill'](self.b['AIFlockSkillInput'](flock_learning_message_chars=161));self.assertEqual((await self.b['get_ai_flock_skill']())['flock_learning_last_error'],'')
             entered=asyncio.Event();release=asyncio.Event()
-            async def slow(*_args,**_kwargs):entered.set();await release.wait();return '- safe style'
+            async def slow(*_args,**_kwargs):entered.set();await release.wait();return '- 说话简短，不解释'
             self.b['_call_ai_any']=AsyncMock(side_effect=slow);task=asyncio.create_task(self.b['_learn_ai_flock']());await entered.wait();active=await self.b['get_ai_flock_skill']();self.assertTrue(runtime.ai_learning_busy);self.assertEqual(active['learning_state'],'learning');release.set();await task
             success=await self.b['get_ai_flock_skill']();self.assertFalse(runtime.ai_learning_busy);self.assertEqual((success['flock_learning_last_status'],success['flock_learning_last_error']),('success',''));self.assertTrue(int(success['flock_learning_last_success_at'])>0);self.assertGreater(success['skill_size'],0)
 
@@ -301,7 +302,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         provider=await self.provider();runtime=self.b['get_runtime']();db=self.b['conn'];db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit()
         for key,value in {'flock_learning_enabled':'1','flock_learning_groups':'-1','flock_learning_start':'17:00','flock_learning_end':'19:00','flock_learning_provider_ids':provider}.items():self.b['set_setting'](key,value)
         entered=asyncio.Event();release=asyncio.Event()
-        async def slow(*_args,**_kwargs):entered.set();await release.wait();return '- learned style'
+        async def slow(*_args,**_kwargs):entered.set();await release.wait();return '- 常用短句收尾'
         with tempfile.TemporaryDirectory() as directory:
             type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md';self.b['_call_ai_any']=AsyncMock(side_effect=slow)
             self.b['_store_learning_samples']([(0,'-1','自动样本 '+str(i),'owner') for i in range(10)]);worker=runtime.ai_learning_worker_task;self.assertIsNotNone(worker);self.assertFalse(self.b['_schedule_ai_learning']())
@@ -309,7 +310,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
             queued=await self.b['get_ai_flock_skill']();self.assertIn(queued['learning_state'],('queued','learning'));await entered.wait();self.assertEqual((await self.b['get_ai_flock_skill']())['learning_state'],'learning');release.set();await worker
             self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],0)
             db.executemany("INSERT INTO ai_learning_samples(ts,chat_id,text) VALUES(0,'-1',?)",[('失败样本 '+str(i),) for i in range(10)]);db.commit();self.b['_call_ai_any']=AsyncMock(side_effect=RuntimeError('provider unavailable'));self.assertTrue(self.b['_schedule_ai_learning']());failed=runtime.ai_learning_worker_task;await failed;self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],10);self.assertIsNone(runtime.ai_learning_worker_task)
-            self.b['_call_ai_any']=AsyncMock(return_value='- retry success');self.assertTrue(self.b['_schedule_ai_learning']());await runtime.ai_learning_worker_task;self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],0)
+            self.b['_call_ai_any']=AsyncMock(return_value='- 重试后仍然简短');self.assertTrue(self.b['_schedule_ai_learning']());await runtime.ai_learning_worker_task;self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],0)
 
     async def test_learning_exam_is_read_only_safe_and_uses_selected_provider(self):
         provider=await self.provider();runtime=self.b['get_runtime']();db=self.b['conn'];db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");self.b['set_setting']('flock_learning_groups','-1');self.b['set_setting']('flock_learning_provider_ids',provider);today=int(self.b['_beijing_now']().replace(hour=1).timestamp());db.execute("INSERT INTO ai_learning_samples(ts,chat_id,text,role) VALUES(?,'-1','张三提到项目；大家感谢李四；Alice Smith 分享方案；@private_user 回复','owner')",(today,));db.commit()
@@ -343,14 +344,14 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         for key,value in {'flock_learning_enabled':'1','flock_learning_groups':'-1','flock_learning_start':'17:00','flock_learning_end':'19:00'}.items():self.b['set_setting'](key,value)
         db.executemany("INSERT INTO ai_learning_samples(ts,chat_id,text) VALUES(0,'-1',?)",[('样本足够长'+str(i),) for i in range(10)]);db.commit()
         with tempfile.TemporaryDirectory() as directory:
-            type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md';pinned='P'*(self.b['SKILL_MAX_BYTES']-60*1024);runtime.skill_file.write_text(pinned);self.b['_call_ai_any']=AsyncMock(return_value='- paid')
+            type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md';pinned='P'*(self.b['SKILL_MAX_BYTES']-60*1024);runtime.skill_file.write_text(pinned);self.b['_call_ai_any']=AsyncMock(return_value='- 付费线路的风格')
             with self.assertRaises(ValueError):await self.b['_learn_ai_flock']()
             self.b['_call_ai_any'].assert_not_awaited();self.assertEqual(self.b['get_setting']('flock_learning_enabled'),'0');self.assertEqual(self.b['_read_skill'](),pinned);self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],10)
             pinned='W'*(self.b['SKILL_MAX_BYTES']-250*1024);runtime.skill_file.write_text(pinned);self.b['set_setting']('flock_learning_unlimited','1');self.b['set_setting']('flock_deep_learning_enabled','1');self.b['set_setting']('flock_learning_unlimited_start','2026-10-30T17:00');self.b['set_setting']('flock_learning_unlimited_end','2026-10-30T19:00');self.b['set_setting']('flock_deep_learning_start','2026-10-30T17:00');self.b['set_setting']('flock_deep_learning_end','2026-10-30T19:00');self.b['_call_ai_any'].reset_mock()
             with self.assertRaises(ValueError):await self.b['_learn_ai_flock']()
             self.b['_call_ai_any'].assert_not_awaited();self.assertEqual(tuple(self.b['get_setting'](key) for key in ('flock_learning_unlimited','flock_deep_learning_enabled')),('0','0'));self.assertEqual(self.b['_read_skill'](),pinned)
             old=self.b['_skill_memory_block']('- old detail','detail',int(self.b['time'].time())-8*86400);pinned='P'*(self.b['SKILL_MAX_BYTES']-60*1024-len(old));runtime.skill_file.write_text(pinned+old);self.b['set_setting']('flock_skill_distill_enabled','1');self.b['_call_ai_any'].reset_mock()
-            self.b['_call_ai_any'].return_value='- compacted';self.assertTrue((await self.b['_distill_flock_skill']())['distilled'])
+            self.b['_call_ai_any'].return_value='- 压缩后的风格';self.assertTrue((await self.b['_distill_flock_skill']())['distilled'])
             self.b['_call_ai_any'].assert_awaited_once();self.assertEqual(self.b['get_setting']('flock_skill_distill_enabled'),'1');self.assertTrue(self.b['_read_skill']().startswith(pinned));self.assertNotIn('old detail',self.b['_read_skill']())
 
     async def test_capacity_compacts_then_deletes_oldest_managed_memory(self):
@@ -359,7 +360,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         newer=self.b['_skill_memory_block']('NEW-'+('B'*70000),'detail',now-10)
         pinned='PINNED\n'+('P'*(self.b['SKILL_MAX_BYTES']-200*1024));content=pinned+old+newer
         self.assertLessEqual(len(content.encode()),self.b['SKILL_MAX_BYTES']);self.assertGreater(len(content.encode())+64*1024,self.b['SKILL_MAX_BYTES'])
-        self.b['_call_ai_any']=AsyncMock(return_value='- compacted oldest style')
+        self.b['_call_ai_any']=AsyncMock(return_value='- 压缩后的旧风格')
         compacted=await self.b['_make_skill_room'](content);blocks=self.b['_skill_memory_blocks'](compacted)
         self.assertTrue(compacted.startswith(pinned));self.assertEqual(len(blocks),1);self.assertEqual(blocks[0]['meta']['stage'],'summary');self.assertEqual(blocks[0]['meta']['created_at'],now-20);self.assertNotIn('OLD-',compacted);self.assertNotIn('NEW-',compacted)
         self.b['_call_ai_any']=AsyncMock(side_effect=RuntimeError('provider unavailable'))
@@ -385,12 +386,12 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         old=self.b['_skill_memory_block']('OLD-'+('A'*110000),'detail',0);fixed='P'*100000
         with tempfile.TemporaryDirectory() as directory:
             type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md';self.b['_write_skill'](fixed+old);before=runtime.skill_file.read_bytes()
-            self.b['_call_ai_any']=AsyncMock(side_effect=['- compacted',RuntimeError('learning unavailable')])
+            self.b['_call_ai_any']=AsyncMock(side_effect=['- 压缩后的风格',RuntimeError('learning unavailable')])
             with self.assertRaisesRegex(RuntimeError,'learning unavailable'):await self.b['_learn_ai_flock']()
             self.assertEqual(runtime.skill_file.read_bytes(),before);self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],10)
-            self.b['_call_ai_any']=AsyncMock(side_effect=['- compacted','- learned style'])
+            self.b['_call_ai_any']=AsyncMock(side_effect=['- 压缩后的风格','- 常用短句收尾'])
             learned=await self.b['_learn_ai_flock']();self.assertTrue(learned['learned']);self.assertEqual(learned['samples'],10)
-            saved=self.b['_read_skill']();self.assertTrue(saved.startswith(fixed));self.assertNotIn('OLD-',saved);self.assertIn('learned style',saved)
+            saved=self.b['_read_skill']();self.assertTrue(saved.startswith(fixed));self.assertNotIn('OLD-',saved);self.assertIn('常用短句收尾',saved)
             self.assertEqual(db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0],0);self.assertLessEqual(runtime.skill_file.stat().st_size,self.b['SKILL_MAX_BYTES'])
 
     async def test_learning_unlimited_uses_hard_caps_and_ignores_normal_budgets(self):
@@ -446,11 +447,11 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
             await self.b['_collect_deep_incoming'](event(100+i,'群友讨论电影 '+str(i)))
         self.assertEqual([tuple(row) for row in db.execute('SELECT role,COUNT(*) FROM ai_learning_samples GROUP BY role ORDER BY role')],[('group',5),('owner',5)])
         self.b['_write_study']('S'*7000+'STUDY_TAIL')
-        self.b['_call_ai_any']=AsyncMock(side_effect=lambda prompt,**_kwargs:'- 群里常聊电影，整体轻松' if 'group-chat samples' in prompt else '- 主人偏好短句')
+        self.b['_call_ai_any']=AsyncMock(side_effect=lambda prompt,**_kwargs:'- 群里常聊电影，整体轻松' if '群里的聊天' in prompt else '- 主人偏好短句')
         with tempfile.TemporaryDirectory() as directory:
             type(runtime).skill_file=Path(directory)/'skill.md';result=await self.b['_learn_ai_flock']()
             self.assertEqual(result['samples'],10);self.assertIn('主人偏好短句',self.b['_read_skill']());self.assertNotIn('群里常聊电影',self.b['_read_skill']())
-        group_prompt=next(call.args[0] for call in self.b['_call_ai_any'].await_args_list if 'group-chat samples' in call.args[0]);self.assertNotIn('STUDY_TAIL',group_prompt)
+        group_prompt=next(call.args[0] for call in self.b['_call_ai_any'].await_args_list if '群里的聊天' in call.args[0]);self.assertNotIn('STUDY_TAIL',group_prompt)
         self.assertIn('群里常聊电影',self.b['_study_reference'](self.b['_read_study']()))
 
     async def test_generated_message_ledger_survives_runtime_cache_and_history(self):
@@ -474,7 +475,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         provider=await self.provider();runtime=self.b['get_runtime']();db=self.b['conn'];db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit()
         for key,value in {'flock_learning_enabled':'1','flock_learning_groups':'-1','flock_learning_start':'17:00','flock_learning_end':'19:00','flock_learning_provider_ids':provider}.items():self.b['set_setting'](key,value)
         db.executemany('INSERT INTO ai_learning_samples(ts,chat_id,text,role) VALUES(?,?,?,?)',[(0,'-1','主人 '+str(i),'owner') for i in range(5)]+[(0,'-1','群友 '+str(i),'group') for i in range(5)]);db.commit()
-        self.b['_call_ai_any']=AsyncMock(side_effect=lambda prompt,**_kwargs:'- 群聊氛围轻松' if 'group-chat samples' in prompt else '- 主人爱用短句')
+        self.b['_call_ai_any']=AsyncMock(side_effect=lambda prompt,**_kwargs:'- 群聊氛围轻松' if '群里的聊天' in prompt else '- 主人爱用短句')
         original=self.b['_write_study'];self.b['_write_study']=Mock(side_effect=OSError('disk unavailable'))
         try:
             with tempfile.TemporaryDirectory() as directory:
@@ -551,7 +552,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
                            [('-1', '群友聊了很多内容 ' + str(i), 'group') for i in range(10)])
             db.commit()
             async def model(prompt, *_args, **_kwargs):
-                return '- 合并后的群知识' if 'group-chat notes' in prompt else '- 简短自然'
+                return '- 合并后的群知识' if '群里的聊天' in prompt else '- 简短自然'
             self.b['_call_ai_any'] = AsyncMock(side_effect=model)
             await self.b['_learn_ai_flock'](force=True)
             blocks = [b for b in self.b['_study_blocks'](self.b['_read_study']())
@@ -570,7 +571,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
                 count=prompt.count('"role"')
                 if count>1:raise RuntimeError('context_length_exceeded')
                 if 'FAIL3' in prompt:raise RuntimeError('provider offline')
-                return '- safe style'
+                return '- 说话简短，不解释'
             self.b['_call_ai_any']=AsyncMock(side_effect=model);result=await self.b['_learn_ai_flock']()
             self.assertEqual((result['samples'],result['failed_samples']),(9,1));self.assertEqual([tuple(row) for row in db.execute('SELECT text FROM ai_learning_samples')],[('FAIL3内容足够长',)])
             self.assertEqual(len(self.b['_skill_memory_blocks'](self.b['_read_skill']())),4);self.assertEqual(len(self.b['_study_blocks'](self.b['_read_study']())),1)
@@ -581,7 +582,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         await self.provider();runtime=self.b['get_runtime']();now=int(self.b['time'].time());pinned='PINNED\n'
         with tempfile.TemporaryDirectory() as directory:
             type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md';runtime.skill_file.write_text(pinned+self.b['_skill_memory_block']('owner: full sanitized message','recent',now-86399))
-            self.b['_call_ai_any']=AsyncMock(return_value='- learned detail')
+            self.b['_call_ai_any']=AsyncMock(return_value='- 学到的细节')
             result=await self.b['_distill_flock_skill']();self.assertFalse(result['changed']);self.b['_call_ai_any'].assert_not_awaited();self.assertIn('owner: full sanitized message',self.b['_read_skill']())
             block=self.b['_skill_memory_blocks'](self.b['_read_skill']())[0];block['meta']['created_at']=now-86400
             runtime.skill_file.write_text(pinned+self.b['_skill_memory_block'](block['body'],'recent',now-86400))
@@ -591,17 +592,17 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         await self.provider();runtime=self.b['get_runtime']();now=int(self.b['time'].time());pinned='# PINNED MANUAL\nkeep exactly\n'
         with tempfile.TemporaryDirectory() as directory:
             type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md'
-            runtime.skill_file.write_text(pinned+'\n'+self.b['_skill_memory_block']('- detailed style rule with several words','detail',now-8*86400))
-            self.b['_call_ai_any']=AsyncMock(return_value='- concise style')
+            runtime.skill_file.write_text(pinned+'\n'+self.b['_skill_memory_block']('- 一条比较长的细节风格规则','detail',now-8*86400))
+            self.b['_call_ai_any']=AsyncMock(return_value='- 简洁的风格')
             result=await self.b['_distill_flock_skill']();content=self.b['_read_skill']();blocks=self.b['_skill_memory_blocks'](content)
-            self.assertTrue(result['changed']);self.assertTrue(content.startswith(pinned));self.assertEqual([(b['meta']['stage'],b['body']) for b in blocks],[('summary','- concise style')])
+            self.assertTrue(result['changed']);self.assertTrue(content.startswith(pinned));self.assertEqual([(b['meta']['stage'],b['body']) for b in blocks],[('summary','- 简洁的风格')])
             stats=await self.b['get_ai_flock_skill']();self.assertEqual((stats['generated_block_count'],stats['summary_block_count']),(1,1))
 
     async def test_distill_old_summary_requires_three_fade_passes(self):
         await self.provider();runtime=self.b['get_runtime']();now=int(self.b['time'].time());pinned='MANUAL PIN\n'
         with tempfile.TemporaryDirectory() as directory:
-            type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md';runtime.skill_file.write_text(pinned+self.b['_skill_memory_block']('- a fairly long summary style rule','summary',now-61*86400))
-            self.b['_call_ai_any']=AsyncMock(side_effect=['- shorter summary','- short','- x'])
+            type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md';runtime.skill_file.write_text(pinned+self.b['_skill_memory_block']('- 相当长的摘要风格规则','summary',now-61*86400))
+            self.b['_call_ai_any']=AsyncMock(side_effect=['- 更短的摘要','- 短','- 略'])
             await self.b['_distill_flock_skill']();block=self.b['_skill_memory_blocks'](self.b['_read_skill']())[0];self.assertEqual((block['meta']['stage'],block['meta']['fade_count']),('fading',1));self.assertTrue(self.b['_read_skill']().startswith(pinned))
             await self.b['_distill_flock_skill']();block=self.b['_skill_memory_blocks'](self.b['_read_skill']())[0];self.assertEqual(block['meta']['fade_count'],2);self.assertTrue(self.b['_read_skill']().startswith(pinned))
             await self.b['_distill_flock_skill']();self.assertEqual(self.b['_skill_memory_blocks'](self.b['_read_skill']()),[]);self.assertTrue(self.b['_read_skill']().startswith(pinned))
@@ -609,11 +610,11 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
     async def test_distill_failure_keeps_file_and_daily_marker_unset(self):
         await self.provider();runtime=self.b['get_runtime']();now=int(self.b['time'].time())
         with tempfile.TemporaryDirectory() as directory:
-            type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md';original='PIN\n'+self.b['_skill_memory_block']('- old detail memory','detail',now-8*86400);runtime.skill_file.write_text(original)
+            type(runtime).skill_file=__import__('pathlib').Path(directory)/'skill.md';original='PIN\n'+self.b['_skill_memory_block']('- 旧的细节记忆','detail',now-8*86400);runtime.skill_file.write_text(original)
             self.b['_call_ai_any']=AsyncMock(side_effect=RuntimeError('offline'))
             with self.assertRaises(RuntimeError):await self.b['_distill_flock_skill']()
             self.assertEqual(self.b['_read_skill'](),original);self.assertEqual(self.b['get_setting']('flock_skill_last_distill_date',''),'')
-            self.b['_call_ai_any']=AsyncMock(return_value='- summary')
+            self.b['_call_ai_any']=AsyncMock(return_value='- 摘要内容')
             await self.b['_distill_flock_skill']();self.assertEqual(self.b['get_setting']('flock_skill_last_distill_date',''),'2026-10-30')
 
     async def test_scheduled_flock_requires_provider_group_prompt_and_window(self):
@@ -622,7 +623,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException): await self.b['update_settings'](body)
         await self.provider();await self.b['update_settings'](body)
         source=self.b['_ai_flock_source']('-1001');self.assertEqual((source['kind'],source['prompt']),('scheduled','自然聊天'))
-        self.assertEqual(tuple(source[key] for key in ('context_messages','message_chars','skill_chars','max_tokens')),(6,120,3000,200))
+        self.assertEqual(tuple(source[key] for key in ('context_messages','message_chars','skill_chars','max_tokens')),(15,400,8000,600))
         self.b['now_local']=lambda:datetime(2026,10,30,12,0,tzinfo=timezone.utc)
         self.assertIsNone(self.b['_ai_flock_source']('-1001'))
 

@@ -223,6 +223,11 @@ class AccountRuntime:
         return self.directory / "knowledge.md"
 
     @property
+    def knowledge_auto_file(self):
+        # AI 自己攒的待验证知识，和号主手写的 knowledge.md 分开存，互不覆盖。
+        return self.directory / "knowledge-auto.md"
+
+    @property
     def study_file(self):
         return self.directory / "study.md"
 
