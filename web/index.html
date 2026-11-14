@@ -1395,231 +1395,324 @@ section.act,.fold.open .fold-b{animation:none}
   <section id="tab-settings">
     <h2><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</h2>
     <div class="sub">触发行为与面板安全</div>
-    <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>系统更新</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+    <div class="card fold" id="apiHubCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3a4 4 0 0 0-4 4v1a4 4 0 0 0-3 6v1a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4v-1a4 4 0 0 0-3-6V7a4 4 0 0 0-4-4zM9 12h6M12 9v6"/></svg>API 与用量</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <div class="hint" id="updInfo">版本信息加载中…</div>
-        <div class="flex" style="margin-top:10px">
-          <button class="btn" id="updCheck" style="flex:1" onclick="checkUpdate()">检查更新</button>
-          <button class="btn" id="updBtn" style="flex:1" onclick="doUpdate()">立即更新</button>
-        </div>
-        <pre id="updLog" class="hint" style="white-space:pre-wrap;display:none;margin-top:12px;max-height:260px;overflow:auto"></pre>
-        <div class="hint">更新会自动备份当前文件到 data/backup-时间戳,再拉取仓库最新文件并重启服务;data 数据和 venv 不受影响。</div>
-        <h4 style="margin:16px 0 8px">备份管理</h4>
-        <div class="hint" id="backupsInfo" aria-live="polite">尚未加载备份列表</div>
-        <div class="hint" id="backupsReason">请先查看备份；清理只删除备份，不删除数据库、会话或 venv。</div>
-        <div class="flex" style="margin-top:10px;flex-wrap:wrap">
-          <button class="ghost" type="button" id="backupsLoadBtn" onclick="loadBackups()">查看备份</button>
-          <button class="btn" type="button" id="backupsKeepBtn" onclick="cleanupBackups('keep_latest')" disabled>保留最新一份，清理其余（推荐）</button>
-          <button class="danger" type="button" id="backupsAllBtn" onclick="cleanupBackups('all')" disabled>删除全部备份</button>
-        </div>
-        <div id="backupsList" style="margin-top:10px;max-height:260px;overflow:auto"></div>
-        <div class="hint" id="backupsResult" aria-live="polite" style="margin-top:8px"></div>
-      </div>
-    </div>
-    <div class="card fold" id="foldAiProviders">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3a4 4 0 0 0-4 4v1a4 4 0 0 0-3 6v1a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4v-1a4 4 0 0 0-3-6V7a4 4 0 0 0-4-4zM9 12h6M12 9v6"/></svg>AI API</span><span class="cnt" id="aiProvidersCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <div class="hint">验证码识别、图片识别、说人话建任务和 AI 排障共用。启用多条时按列表轮询，失败自动切换下一条。</div>
-        <div id="aiProvidersList"></div>
-        <button class="btn" type="button" id="aiProviderAdd" style="margin-top:10px" onclick="openAIProviderForm()">添加 AI API</button>
-        <div id="aiProviderForm" class="hidden">
-          <label for="aiProviderNote">备注</label><input type="text" id="aiProviderNote" maxlength="80" placeholder="如：主线路、GLM 备用">
-          <label for="aiProviderBase">API 地址（OpenAI 兼容）</label><input type="url" id="aiProviderBase" maxlength="2048" placeholder="https://api.openai.com/v1" oninput="clearAIProviderModelChoices()">
-          <label for="aiProviderKey">API Key</label><input type="password" id="aiProviderKey" maxlength="4096" autocomplete="new-password" placeholder="sk-..." oninput="clearAIProviderModelChoices()">
-          <label for="aiProviderModel">模型</label><div class="water-ai-model-row"><input type="text" id="aiProviderModel" list="aiProviderModelOptions" maxlength="256" placeholder="gpt-4o-mini" onkeydown="if(event.key==='Escape')hideAIProviderModelList()"><button class="ghost" type="button" id="aiProviderModelsBtn" onclick="discoverAIProviderModels()">获取模型</button></div>
-          <datalist id="aiProviderModelOptions"></datalist><select id="aiProviderModelList" class="model-choice-list hidden" size="10" aria-label="获取到的模型列表" onchange="selectAIProviderModel()"></select><div id="aiProviderModelsStatus" class="hint" role="status" aria-live="polite"></div>
-          <label for="aiProviderReasoning">思考强度</label>
-          <select id="aiProviderReasoning" aria-describedby="aiProviderReasoningHint"><option value="default">模型默认</option><option value="none">关闭（none）</option><option value="low">低（low）</option><option value="medium">中（medium）</option><option value="high">高（high）</option><option value="xhigh">极高（xhigh）</option><option value="max">最高（max）</option></select>
-          <div class="hint" id="aiProviderReasoningHint">应用于使用此 API 的学习、水群、识别和助手。可用档位取决于模型；GLM-5.3 仅支持默认、low、high、max。思考可能占用输出 Token 预算，高强度时请相应提高任务上限。</div>
-          <label for="aiProviderProfile">客户端伪装</label>
-          <select id="aiProviderProfile" aria-describedby="aiProviderProfileHint"><option value="none">不伪装</option><option value="opencode">opencode</option><option value="codex">codex</option><option value="claude">claude</option></select>
-          <div class="hint" id="aiProviderProfileHint">仅影响发往此 API 的请求头，用于只放行特定客户端的第三方中转站。会话标识按 API 持久保存；伪装可能违反中转站条款，存在被限流或封禁风险。</div>
-          <label class="check"><input type="checkbox" id="aiProviderEnabled" checked> 启用</label>
-          <div class="flex" style="margin-top:12px"><button class="btn" type="button" id="aiProviderSave" onclick="saveAIProvider()">保存</button><button class="ghost" type="button" onclick="closeAIProviderForm()">取消</button></div>
-        </div>
-        <div id="aiTestResult" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
-      </div>
-    </div>
-    <div class="card fold" id="flockLearningCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M4 19c5-1 8-4 9-9 3 1 5 3 7 6M5 5h6v6H5zM15 4v4M13 6h4"/></svg>AI 学习</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b" id="waterAiSkillSection">
-        <label class="check"><input type="checkbox" id="waterAiSkillEnabled"> 每日普通学习</label>
-        <div class="water-ai-time"><div><label for="waterAiSkillStart">普通学习开始（北京时间）</label><input type="text" id="waterAiSkillStart" value="09:00" readonly onclick="openTimePicker('waterAiSkillStart')"></div><div><label for="waterAiSkillEnd">普通学习结束（北京时间）</label><input type="text" id="waterAiSkillEnd" value="22:00" readonly onclick="openTimePicker('waterAiSkillEnd')"></div></div>
-        <label>学习群</label><div id="waterAiSkillGroups" class="grp-pick"></div>
-        <label>学习使用的 AI API（可多选）</label><div id="waterAiSkillProviders" class="grp-pick"></div>
-        <div class="hint">普通、鲸鱼和深度学习都会采集主人与群友消息；主人风格写入 skill.md，群内知识、话题与氛围写入 study.md。程序自动发送的消息不会进入样本。</div>
-        <div class="water-ai-limits">
-          <div><label for="waterAiSkillBatchSize">每批样本数</label><input id="waterAiSkillBatchSize" type="number" value="20" min="10" max="200" step="1" inputmode="numeric"></div>
-          <div><label for="waterAiSkillMessageChars">单条样本字数</label><input id="waterAiSkillMessageChars" type="number" value="160" min="40" max="4096" step="1" inputmode="numeric"></div>
-          <div><label for="waterAiSkillSkillChars">学习时 skill 参考字数</label><input id="waterAiSkillSkillChars" type="number" value="6000" min="500" max="5242880" step="1" inputmode="numeric"></div>
-          <div><label for="waterAiSkillMaxTokens">最大输出 Token</label><input id="waterAiSkillMaxTokens" type="number" value="600" min="100" max="32768" step="1" inputmode="numeric"></div>
-        </div>
-        <div class="hint">以上预算仅用于普通学习；数值会在鲸鱼模式结束后继续使用。</div>
-        <div class="water-ai-subsection">
-          <label class="check water-ai-cost-toggle"><input type="checkbox" id="waterAiSkillUnlimited" aria-describedby="waterAiSkillUnlimitedWarning" onchange="syncFlockLearningUnlimited()"> 鲸鱼模式</label>
-          <div class="water-ai-time"><div><label for="waterAiSkillUnlimitedStart">开始（北京时间）</label><input type="datetime-local" id="waterAiSkillUnlimitedStart" step="60"></div><div><label for="waterAiSkillUnlimitedEnd">结束（北京时间）</label><input type="datetime-local" id="waterAiSkillUnlimitedEnd" step="60"></div></div>
-          <div class="hint water-ai-warning" id="waterAiSkillUnlimitedWarning">鲸鱼模式会产生高额 Token 费用：读取全部最多 200 条完整消息和完整 5 MiB skill.md，请求输出上限 32768 Token；实际仍受服务商与模型限制，到期后自动回到普通预算。</div>
-          <label class="check water-ai-cost-toggle"><input type="checkbox" id="waterAiSkillDeepEnabled" aria-describedby="waterAiSkillDeepWarning"> 深度学习</label>
-          <div class="water-ai-time"><div><label for="waterAiSkillDeepStart">开始（北京时间）</label><input type="datetime-local" id="waterAiSkillDeepStart" step="60"></div><div><label for="waterAiSkillDeepEnd">结束（北京时间）</label><input type="datetime-local" id="waterAiSkillDeepEnd" step="60"></div></div>
-          <div class="hint water-ai-warning" id="waterAiSkillDeepWarning">深度学习会额外读取所选群近期最多 200 条主人与群友消息，Token 消耗较高，到期自动关闭；上下文过长时会自动拆分。</div>
-        </div>
-        <label class="check"><input type="checkbox" id="waterAiSkillUploadEnabled"> 定时上传 skill.md 与 study.md 到 Telegram 收藏夹</label>
-        <label for="waterAiSkillUploadTime">上传时间（北京时间）</label><input type="time" id="waterAiSkillUploadTime" value="03:00">
-        <label class="check water-ai-distill"><input type="checkbox" id="waterAiSkillDistillEnabled"> 每日提炼生成记忆</label>
-        <label for="waterAiSkillDistillTime">提炼时间（北京时间）</label><input type="time" id="waterAiSkillDistillTime" value="04:00">
-        <div class="hint">学习只写入提炼后的详细记忆，不再保存原始消息副本。近期超过 40 条合并为详细记忆，详细超过 200 条合并为摘要，摘要超过 300 条转为淡化；淡化 3 次或长期无人引用后删除。单条记忆最多 700 字。淘汰时优先保留常被引用和固定内容，手动导入或固定的 Markdown 永远不会被自动删除。</div>
-        <div id="waterAiSkillActiveStatus" class="learning-status state-waiting" role="status" aria-live="polite"><span class="learning-status-dot" aria-hidden="true"></span><div class="learning-status-main"><div class="learning-status-title" id="waterAiSkillStateTitle">未启用</div><div class="learning-status-meta" id="waterAiSkillStateMeta"></div><div class="learning-status-error" id="waterAiSkillStateError"></div></div></div>
-        <button class="btn" type="button" id="waterAiSkillSave" style="margin-top:12px" onclick="saveFlockSkill()">保存学习设置</button>
-        <div class="water-ai-stats"><span id="waterAiSkillSamples">样本：--</span><span id="waterAiSkillSize">skill.md：--</span><span id="waterAiStudySize">study.md：--</span><span id="waterAiSkillLastUpload">上次上传：--</span></div>
-        <div class="hint" id="aiSchedulerStatus" role="status" aria-live="polite"></div>
-        <div class="learning-metrics" id="learningMetrics" aria-live="polite"></div>
-        <div class="hint" id="learningLastCollected"></div>
-        <div class="water-ai-stats hidden" id="waterAiSkillGeneratedStats"><span id="waterAiSkillRecentCount">近期记忆：--</span><span id="waterAiSkillDetailCount">详细记忆：--</span><span id="waterAiSkillSummaryCount">摘要记忆：--</span><span id="waterAiSkillFadingCount">淡化记忆：--</span></div>
-        <div class="water-ai-toolbar"><button class="ghost" type="button" id="waterAiLearnNow" onclick="runFlockSkillAction('learn-now')">立即学习</button><button class="ghost" type="button" id="waterAiSkillExam" onclick="runFlockSkillExam()">学习验收</button><button class="ghost" type="button" id="waterAiDistillNow" onclick="runFlockSkillAction('distill-now')">立即提炼</button><button class="ghost" type="button" id="waterAiUploadNow" onclick="runFlockSkillAction('upload-now')">上传学习文件</button><button class="ghost" type="button" id="waterAiSkillExport" onclick="exportFlockSkill()">导出 skill.md</button><button class="ghost" type="button" id="waterAiStudyExport" onclick="exportStudy()">导出 study.md</button></div>
-        <pre class="learning-exam-result" id="waterAiSkillExamResult" role="status" aria-live="polite"></pre>
-        <label for="waterAiSkillFile">选择 Markdown 文件（最大 5 MiB）</label><input type="file" id="waterAiSkillFile" accept=".md,.markdown,text/markdown,text/plain" onchange="readFlockSkillFile()">
-        <button class="danger" type="button" id="waterAiSkillImport" style="margin-top:10px" disabled onclick="importFlockSkill()">确认导入并替换 skill.md</button>
-        <label for="waterAiStudyFile">选择 study.md 文件（最大 5 MiB）</label><input type="file" id="waterAiStudyFile" accept=".md,.markdown,text/markdown,text/plain" onchange="readStudyFile()">
-        <button class="danger" type="button" id="waterAiStudyImport" style="margin-top:10px" disabled onclick="importStudy()">确认导入并替换 study.md</button>
-        <div class="water-ai-subsection">
-          <h4>查看与管理记忆</h4>
-          <div class="memory-tools"><select id="memoryFile" aria-label="记忆文件" onchange="loadMemory()"><option value="study">study.md</option><option value="skill">skill.md</option></select><input type="search" id="memorySearch" maxlength="200" placeholder="搜索记忆" aria-label="搜索记忆" onkeydown="if(event.key==='Enter')loadMemory()"><button class="ghost" type="button" id="memoryReload" onclick="loadMemory()">载入记忆</button></div>
-          <div id="memoryStatus" class="hint" role="status" aria-live="polite"></div>
-          <div id="memoryList"></div>
-          <div class="memory-actions"><button class="ghost" type="button" id="memoryPrev" disabled onclick="loadMemory(Math.max(0,memoryOffset-20))">上一页</button><button class="ghost" type="button" id="memoryNext" disabled onclick="loadMemory(memoryOffset+20)">下一页</button></div>
-        </div>
-        <div id="waterAiSkillStatus" class="hint" role="status" aria-live="polite"></div>
-        <div class="hint">skill.md 与 study.md 可能包含群聊习惯和私人信息，请仅导入可信文件并妥善保管导出内容。页面不会展示原始学习样本。</div>
-      </div>
-    </div>
-    <div class="card fold" id="aiUsageCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 3v18h18M7 15l3-4 3 3 4-6"/></svg>AI 用量</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <div class="hint">按服务商实际返回的 Token 统计，按北京时间自然日归集；仅统计当前账号。</div>
-        <div class="water-ai-toolbar"><button class="ghost" type="button" id="aiUsageReload" onclick="loadAIUsage()">刷新用量</button></div>
-        <div id="aiUsageBody" class="hint" aria-live="polite">尚未加载</div>
-      </div>
-    </div>
-    <div class="card fold" id="ownerAiCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-8 9-8 9s-8-4-8-9V7zM8 12l3 3 5-6"/></svg>号主指令与 AI 用量限制</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <label class="check"><input type="checkbox" id="ownerPauseEnabled"> 我发言后暂停当前群 AI 水群</label>
-        <div class="hint">仅普通聊天发言触发；纠正、群聊总结指令及其自动回复不会启动或延长暂停。</div>
-        <label for="ownerPauseMinutes">暂停分钟数</label><input type="number" id="ownerPauseMinutes" value="10" min="1" max="1440" inputmode="numeric">
-        <div class="water-ai-subsection">
-          <label class="check"><input type="checkbox" id="ownerCorrectionEnabled"> 启用主人纠正</label>
-          <label for="ownerCorrectionKeywords">纠正关键词（每行一个）</label><textarea id="ownerCorrectionKeywords" rows="2" maxlength="2000" placeholder="例如：改正"></textarea>
-          <div class="hint">仅当号主回复本程序的 AI 消息，并以纠正关键词开头且附上正确内容时触发。固定回复“收到，正在写入记忆……”后写入本群固定记忆。</div>
-        </div>
-        <div class="water-ai-subsection">
-          <label class="check"><input type="checkbox" id="ownerSummaryEnabled"> 启用群聊总结</label>
-          <label for="ownerSummaryKeywords">总结关键词（每行一个）</label><textarea id="ownerSummaryKeywords" rows="2" maxlength="2000" placeholder="例如：最近他们聊了什么"></textarea>
-          <div class="owner-ai-fields"><div><label for="ownerSummaryHours">回看小时数</label><input type="number" id="ownerSummaryHours" value="6" min="1" max="168" inputmode="numeric"></div><div><label for="ownerSummaryMessages">最多读取消息数</label><input type="number" id="ownerSummaryMessages" value="200" min="20" max="1000" inputmode="numeric"></div></div>
-          <label class="check"><input type="checkbox" id="ownerSummaryUnlimitedEnabled" aria-describedby="ownerSummaryUnlimitedHint"> 不限制总结长度</label>
-          <div class="hint" id="ownerSummaryUnlimitedHint">默认精简总结，尽量一条发完。勾选后不设字数和输出 Token 上限；超长时分段发送，仍受服务商和每日总用量限制。</div>
-          <label for="ownerAIProviders">总结使用的 API（留空使用全部启用项）</label><input type="text" id="ownerAIProviders" class="hidden" aria-hidden="true"><div id="ownerAIProviderPicks" class="grp-pick"></div>
-          <div class="hint">仅号主在监听群发送完整关键词时触发，群友无法触发纠正或总结。</div>
-        </div>
-        <div class="water-ai-subsection">
-          <h4>每日 Token 上限</h4>
-          <div class="hint">0 表示不限额。按北京时间每日重置，累计服务商返回的输入与输出 Token；到达上限后停止新请求，正在执行的一次请求可能超出上限。80% 时提醒。</div>
-          <div class="owner-ai-fields"><div><label for="ownerDailyTotal">全部 AI</label><input type="number" id="ownerDailyTotal" value="0" min="0" max="1000000000" inputmode="numeric"></div><div><label for="ownerDailyLearning">学习</label><input type="number" id="ownerDailyLearning" value="0" min="0" max="1000000000" inputmode="numeric"></div><div><label for="ownerDailyFlock">水群</label><input type="number" id="ownerDailyFlock" value="0" min="0" max="1000000000" inputmode="numeric"></div></div>
-          <div class="hint" id="ownerBudgetStatus" aria-live="polite"></div>
-        </div>
-        <button class="btn" type="button" id="ownerAISave" onclick="saveOwnerAISettings()">保存号主与用量设置</button>
-        <div class="hint" id="ownerAIStatus" role="status" aria-live="polite"></div>
-      </div>
-    </div>
-    <div class="card fold" id="knowledgeCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1zM12 5v15"/></svg>知识参考 knowledge.md</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <div class="hint">仅供 AI 水群只读参考，AI 不会写入或学习为人格。各账号独立保存，文件最大 5 MiB；无上限引用会读取整份文档，仍受模型上下文限制。</div>
-        <div class="water-ai-toolbar"><button class="ghost" id="knowledgeEdit" type="button" disabled aria-expanded="false" aria-controls="knowledgeEditFields" onclick="toggleKnowledgeEditor()">编辑知识</button><button class="ghost" id="knowledgeReload" type="button" onclick="reloadKnowledge()">重新载入</button><button class="ghost" id="knowledgeExport" type="button" disabled onclick="exportKnowledge()">导出 knowledge.md</button><button class="ghost" id="knowledgeUpload" type="button" disabled onclick="uploadKnowledge()">上传 TG 收藏夹</button></div>
-        <div id="knowledgeEditFields" class="hidden">
-          <label for="knowledgeEditor">编辑知识（Markdown）</label><textarea id="knowledgeEditor" rows="12" disabled oninput="knowledgeChanged()" placeholder="输入或粘贴知识，点击保存后供水群引用"></textarea>
-          <button class="btn" id="knowledgeSave" type="button" disabled style="margin-top:10px" onclick="saveKnowledge()">保存知识</button>
-        </div>
-        <label for="knowledgeFile">导入 Markdown 文件（最大 5 MiB）</label><input id="knowledgeFile" type="file" accept=".md,.markdown,text/markdown,text/plain" onchange="readKnowledgeFile()">
-        <button class="danger" id="knowledgeImport" type="button" disabled onclick="importKnowledge()">确认导入并替换 knowledge.md</button>
-        <div class="water-ai-subsection">
-          <div class="hint">按需预览：输入一句模拟群消息，查看会引用的 study.md 与 knowledge.md 内容；只读预览，不发送、不调用 AI。</div>
-          <input type="text" id="knowledgePreviewText" maxlength="2000" placeholder="例如：CF 522 怎么解决" onkeydown="if(event.key==='Enter')previewKnowledge()">
-          <div class="flex" style="margin-top:8px"><div><label for="knowledgePreviewChars">两份文件引用字数</label><input id="knowledgePreviewChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"></div><div><label for="knowledgePreviewOnDemand">按需模式</label><select id="knowledgePreviewOnDemand"><option value="0">每轮引用</option><option value="1">按需引用</option></select></div></div>
-          <button class="ghost" type="button" id="knowledgePreviewBtn" onclick="previewKnowledge()">预览引用</button>
-          <pre class="learning-exam-result" id="knowledgePreviewResult" role="status" aria-live="polite"></pre>
-        </div>
-        <div class="water-ai-subsection">
-          <label class="button-reply-toggle"><input type="checkbox" id="knowledgeAutoEnabled" onchange="saveKnowledgeAutoToggle()"> AI 自动积累知识（knowledge-auto.md）</label>
-          <div class="hint">学习时它会把能长期复用的知识单独写进 knowledge-auto.md，需要你确认后才升级成「已验证」，已验证的条目在挑选引用时排前面，未确认的仍会被引用但排在后面。和上面手写的 knowledge.md 分开存，不会覆盖你的内容；关闭后不再写入，也不再引用。</div>
-          <div class="hint" id="knowledgeAutoMeta">自动知识尚未载入</div>
-          <div class="water-ai-toolbar" id="knowledgeAutoVerifyBar" style="display:none"><button class="ghost" id="knowledgeAutoPromoteAll" type="button" onclick="promoteAllKnowledgeAuto()">全部标为已验证</button><span class="hint" id="knowledgeAutoVerifyHint"></span></div>
-          <div id="knowledgeAutoList"></div>
-          <div class="water-ai-toolbar"><button class="ghost" id="knowledgeAutoReload" type="button" onclick="reloadKnowledgeAuto()">重新载入</button><button class="ghost" id="knowledgeAutoExport" type="button" onclick="exportKnowledgeAuto()">导出 knowledge-auto.md</button><button class="danger" id="knowledgeAutoClear" type="button" onclick="clearKnowledgeAuto()">清空自动知识</button></div>
-          <textarea id="knowledgeAutoEditor" rows="6" placeholder="自动积累的条目会出现在这里，也可以直接改"></textarea>
-          <button class="btn" id="knowledgeAutoSave" type="button" style="margin-top:10px" onclick="saveKnowledgeAuto()">保存自动知识</button>
-          <div class="water-ai-toolbar" style="margin-top:14px">
-            <label class="button-reply-toggle"><input type="checkbox" id="knowledgeUploadEnabled" onchange="saveKnowledgeUpload()"> 定时上传到我的 TG 收藏</label>
-            <input id="knowledgeUploadTime" type="time" value="23:50" onchange="saveKnowledgeUpload()">
-            <select id="knowledgeUploadAccount" onchange="saveKnowledgeUpload()"></select>
-            <button class="ghost" id="knowledgeUploadNow" type="button" onclick="runKnowledgeUploadNow()">立即上传一次</button>
+      <div class="fold sub-fold" id="foldAiProviders">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3a4 4 0 0 0-4 4v1a4 4 0 0 0-3 6v1a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4v-1a4 4 0 0 0-3-6V7a4 4 0 0 0-4-4zM9 12h6M12 9v6"/></svg>AI API</span><span class="cnt" id="aiProvidersCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <div class="hint">验证码识别、图片识别、说人话建任务和 AI 排障共用。启用多条时按列表轮询，失败自动切换下一条。</div>
+          <div id="aiProvidersList"></div>
+          <button class="btn" type="button" id="aiProviderAdd" style="margin-top:10px" onclick="openAIProviderForm()">添加 AI API</button>
+          <div id="aiProviderForm" class="hidden">
+            <label for="aiProviderNote">备注</label><input type="text" id="aiProviderNote" maxlength="80" placeholder="如：主线路、GLM 备用">
+            <label for="aiProviderBase">API 地址（OpenAI 兼容）</label><input type="url" id="aiProviderBase" maxlength="2048" placeholder="https://api.openai.com/v1" oninput="clearAIProviderModelChoices()">
+            <label for="aiProviderKey">API Key</label><input type="password" id="aiProviderKey" maxlength="4096" autocomplete="new-password" placeholder="sk-..." oninput="clearAIProviderModelChoices()">
+            <label for="aiProviderModel">模型</label><div class="water-ai-model-row"><input type="text" id="aiProviderModel" list="aiProviderModelOptions" maxlength="256" placeholder="gpt-4o-mini" onkeydown="if(event.key==='Escape')hideAIProviderModelList()"><button class="ghost" type="button" id="aiProviderModelsBtn" onclick="discoverAIProviderModels()">获取模型</button></div>
+            <datalist id="aiProviderModelOptions"></datalist><select id="aiProviderModelList" class="model-choice-list hidden" size="10" aria-label="获取到的模型列表" onchange="selectAIProviderModel()"></select><div id="aiProviderModelsStatus" class="hint" role="status" aria-live="polite"></div>
+            <label for="aiProviderReasoning">思考强度</label>
+            <select id="aiProviderReasoning" aria-describedby="aiProviderReasoningHint"><option value="default">模型默认</option><option value="none">关闭（none）</option><option value="low">低（low）</option><option value="medium">中（medium）</option><option value="high">高（high）</option><option value="xhigh">极高（xhigh）</option><option value="max">最高（max）</option></select>
+            <div class="hint" id="aiProviderReasoningHint">应用于使用此 API 的学习、水群、识别和助手。可用档位取决于模型；GLM-5.3 仅支持默认、low、high、max。思考可能占用输出 Token 预算，高强度时请相应提高任务上限。</div>
+            <label for="aiProviderProfile">客户端伪装</label>
+            <select id="aiProviderProfile" aria-describedby="aiProviderProfileHint"><option value="none">不伪装</option><option value="opencode">opencode</option><option value="codex">codex</option><option value="claude">claude</option></select>
+            <div class="hint" id="aiProviderProfileHint">仅影响发往此 API 的请求头，用于只放行特定客户端的第三方中转站。会话标识按 API 持久保存；伪装可能违反中转站条款，存在被限流或封禁风险。</div>
+            <label class="check"><input type="checkbox" id="aiProviderEnabled" checked> 启用</label>
+            <div class="flex" style="margin-top:12px"><button class="btn" type="button" id="aiProviderSave" onclick="saveAIProvider()">保存</button><button class="ghost" type="button" onclick="closeAIProviderForm()">取消</button></div>
           </div>
-          <div class="hint" id="knowledgeUploadMeta">定时上传状态未载入</div>
-        </div>
-        <div class="hint" id="knowledgeStatus" role="status" aria-live="polite"></div><div class="hint" id="knowledgeMeta"></div>
-      </div>
-    </div>
-    <div class="card fold" id="migrationCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14M4 3h16v4"/></svg>整机迁移</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <div class="hint">迁移包包含全部账号数据库、Telegram Session、任务、规则、设置、凭据、头像和图标库配置；不包含代码、venv、历史更新备份或系统 nginx 配置。</div>
-        <label for="migrationPanelPassword">当前面板密码</label><input type="password" id="migrationPanelPassword" autocomplete="current-password">
-        <label for="migrationBackupPassword">迁移包密码（至少 8 位，丢失无法恢复）</label><input type="password" id="migrationBackupPassword" autocomplete="new-password">
-        <label for="migrationBackupPasswordConfirm">再次输入迁移包密码（仅导出时需要）</label><input type="password" id="migrationBackupPasswordConfirm" autocomplete="new-password">
-        <div class="flex" style="margin-top:12px"><button class="btn" type="button" id="migrationExport" onclick="exportMachineBackup()">导出加密迁移包</button></div>
-        <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
-        <label for="migrationFile">导入迁移包（.tgp，最大 512MB）</label><input type="file" id="migrationFile" accept=".tgp,application/octet-stream">
-        <div class="flex" style="margin-top:12px"><button class="ghost" type="button" id="migrationPreview" onclick="previewMachineBackup()">上传并校验</button><button class="danger" type="button" id="migrationApply" disabled onclick="applyMachineBackup()">覆盖现机并重启</button></div>
-        <div class="hint" id="migrationResult" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
-        <div class="hint">导入会完整替换现机数据。请先停止旧 VPS，避免同一 Telegram Session 同时在线导致失效。</div>
-        <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
-        <h4 style="margin:0 0 8px">每日自动备份到收藏夹</h4>
-        <label class="check"><input type="checkbox" id="autoBackupEnabled" onchange="syncAutoBackupForm()"> 启用每日自动整机备份</label>
-        <div id="autoBackupFields">
-          <div class="water-ai-time"><div><label for="autoBackupTime">每天执行时间（北京时间）</label><input type="time" id="autoBackupTime" value="04:30"></div><div><label for="autoBackupAccount">上传到哪个账号的收藏夹</label><select id="autoBackupAccount"></select></div></div>
-          <label for="autoBackupPassword">自动备份密码（至少 8 位，留空沿用已保存）</label><input type="password" id="autoBackupPassword" autocomplete="new-password" placeholder="留空不修改">
-          <label class="check"><input type="checkbox" id="autoBackupCaptionPassword"> 在收藏夹消息中附带密码文字</label>
-          <div class="hint">每次生成完整迁移包后上传到所选账号收藏夹，本地临时文件立即删除；收藏夹只保留最近 3 份自动备份，超出时删除更旧的。附带密码会把密码以明文保存在 Telegram 收藏夹。</div>
-          <div class="flex" style="margin-top:10px"><button class="btn" type="button" id="autoBackupSave" onclick="saveAutoBackup()">保存自动备份</button><button class="ghost" type="button" id="autoBackupNow" onclick="runAutoBackupNow()">立即备份</button></div>
-          <div class="hint" id="autoBackupStatus" role="status" aria-live="polite"></div>
+          <div id="aiTestResult" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
         </div>
       </div>
+      <div class="fold sub-fold" id="aiUsageCard">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 3v18h18M7 15l3-4 3 3 4-6"/></svg>AI 用量</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <div class="hint">按服务商实际返回的 Token 统计，按北京时间自然日归集；仅统计当前账号。</div>
+          <div class="water-ai-toolbar"><button class="ghost" type="button" id="aiUsageReload" onclick="loadAIUsage()">刷新用量</button></div>
+          <div id="aiUsageBody" class="hint" aria-live="polite">尚未加载</div>
+        </div>
+      </div>
+      </div>
     </div>
-    <div class="card fold" id="foldTg">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>Telegram 账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+    <div class="card fold" id="learnHubCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M4 19c5-1 8-4 9-9 3 1 5 3 7 6M5 5h6v6H5zM15 4v4M13 6h4"/></svg>AI 学习拓展</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <h4 style="margin:0 0 8px">共用 Telegram API</h4>
+      <div class="fold sub-fold" id="flockLearningCard">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M4 19c5-1 8-4 9-9 3 1 5 3 7 6M5 5h6v6H5zM15 4v4M13 6h4"/></svg>AI 学习</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b" id="waterAiSkillSection">
+          <label class="check"><input type="checkbox" id="waterAiSkillEnabled"> 每日普通学习</label>
+          <div class="water-ai-time"><div><label for="waterAiSkillStart">普通学习开始（北京时间）</label><input type="text" id="waterAiSkillStart" value="09:00" readonly onclick="openTimePicker('waterAiSkillStart')"></div><div><label for="waterAiSkillEnd">普通学习结束（北京时间）</label><input type="text" id="waterAiSkillEnd" value="22:00" readonly onclick="openTimePicker('waterAiSkillEnd')"></div></div>
+          <label>学习群</label><div id="waterAiSkillGroups" class="grp-pick"></div>
+          <label>学习使用的 AI API（可多选）</label><div id="waterAiSkillProviders" class="grp-pick"></div>
+          <div class="hint">普通、鲸鱼和深度学习都会采集主人与群友消息；主人风格写入 skill.md，群内知识、话题与氛围写入 study.md。程序自动发送的消息不会进入样本。</div>
+          <div class="water-ai-limits">
+            <div><label for="waterAiSkillBatchSize">每批样本数</label><input id="waterAiSkillBatchSize" type="number" value="20" min="10" max="200" step="1" inputmode="numeric"></div>
+            <div><label for="waterAiSkillMessageChars">单条样本字数</label><input id="waterAiSkillMessageChars" type="number" value="160" min="40" max="4096" step="1" inputmode="numeric"></div>
+            <div><label for="waterAiSkillSkillChars">学习时 skill 参考字数</label><input id="waterAiSkillSkillChars" type="number" value="6000" min="500" max="5242880" step="1" inputmode="numeric"></div>
+            <div><label for="waterAiSkillMaxTokens">最大输出 Token</label><input id="waterAiSkillMaxTokens" type="number" value="600" min="100" max="32768" step="1" inputmode="numeric"></div>
+          </div>
+          <div class="hint">以上预算仅用于普通学习；数值会在鲸鱼模式结束后继续使用。</div>
+          <div class="water-ai-subsection">
+            <label class="check water-ai-cost-toggle"><input type="checkbox" id="waterAiSkillUnlimited" aria-describedby="waterAiSkillUnlimitedWarning" onchange="syncFlockLearningUnlimited()"> 鲸鱼模式</label>
+            <div class="water-ai-time"><div><label for="waterAiSkillUnlimitedStart">开始（北京时间）</label><input type="datetime-local" id="waterAiSkillUnlimitedStart" step="60"></div><div><label for="waterAiSkillUnlimitedEnd">结束（北京时间）</label><input type="datetime-local" id="waterAiSkillUnlimitedEnd" step="60"></div></div>
+            <div class="hint water-ai-warning" id="waterAiSkillUnlimitedWarning">鲸鱼模式会产生高额 Token 费用：读取全部最多 200 条完整消息和完整 5 MiB skill.md，请求输出上限 32768 Token；实际仍受服务商与模型限制，到期后自动回到普通预算。</div>
+            <label class="check water-ai-cost-toggle"><input type="checkbox" id="waterAiSkillDeepEnabled" aria-describedby="waterAiSkillDeepWarning"> 深度学习</label>
+            <div class="water-ai-time"><div><label for="waterAiSkillDeepStart">开始（北京时间）</label><input type="datetime-local" id="waterAiSkillDeepStart" step="60"></div><div><label for="waterAiSkillDeepEnd">结束（北京时间）</label><input type="datetime-local" id="waterAiSkillDeepEnd" step="60"></div></div>
+            <div class="hint water-ai-warning" id="waterAiSkillDeepWarning">深度学习会额外读取所选群近期最多 200 条主人与群友消息，Token 消耗较高，到期自动关闭；上下文过长时会自动拆分。</div>
+          </div>
+          <label class="check"><input type="checkbox" id="waterAiSkillUploadEnabled"> 定时上传 skill.md 与 study.md 到 Telegram 收藏夹</label>
+          <label for="waterAiSkillUploadTime">上传时间（北京时间）</label><input type="time" id="waterAiSkillUploadTime" value="03:00">
+          <label class="check water-ai-distill"><input type="checkbox" id="waterAiSkillDistillEnabled"> 每日提炼生成记忆</label>
+          <label for="waterAiSkillDistillTime">提炼时间（北京时间）</label><input type="time" id="waterAiSkillDistillTime" value="04:00">
+          <div class="hint">学习只写入提炼后的详细记忆，不再保存原始消息副本。近期超过 40 条合并为详细记忆，详细超过 200 条合并为摘要，摘要超过 300 条转为淡化；淡化 3 次或长期无人引用后删除。单条记忆最多 700 字。淘汰时优先保留常被引用和固定内容，手动导入或固定的 Markdown 永远不会被自动删除。</div>
+          <div id="waterAiSkillActiveStatus" class="learning-status state-waiting" role="status" aria-live="polite"><span class="learning-status-dot" aria-hidden="true"></span><div class="learning-status-main"><div class="learning-status-title" id="waterAiSkillStateTitle">未启用</div><div class="learning-status-meta" id="waterAiSkillStateMeta"></div><div class="learning-status-error" id="waterAiSkillStateError"></div></div></div>
+          <button class="btn" type="button" id="waterAiSkillSave" style="margin-top:12px" onclick="saveFlockSkill()">保存学习设置</button>
+          <div class="water-ai-stats"><span id="waterAiSkillSamples">样本：--</span><span id="waterAiSkillSize">skill.md：--</span><span id="waterAiStudySize">study.md：--</span><span id="waterAiSkillLastUpload">上次上传：--</span></div>
+          <div class="hint" id="aiSchedulerStatus" role="status" aria-live="polite"></div>
+          <div class="learning-metrics" id="learningMetrics" aria-live="polite"></div>
+          <div class="hint" id="learningLastCollected"></div>
+          <div class="water-ai-stats hidden" id="waterAiSkillGeneratedStats"><span id="waterAiSkillRecentCount">近期记忆：--</span><span id="waterAiSkillDetailCount">详细记忆：--</span><span id="waterAiSkillSummaryCount">摘要记忆：--</span><span id="waterAiSkillFadingCount">淡化记忆：--</span></div>
+          <div class="water-ai-toolbar"><button class="ghost" type="button" id="waterAiLearnNow" onclick="runFlockSkillAction('learn-now')">立即学习</button><button class="ghost" type="button" id="waterAiSkillExam" onclick="runFlockSkillExam()">学习验收</button><button class="ghost" type="button" id="waterAiDistillNow" onclick="runFlockSkillAction('distill-now')">立即提炼</button><button class="ghost" type="button" id="waterAiUploadNow" onclick="runFlockSkillAction('upload-now')">上传学习文件</button><button class="ghost" type="button" id="waterAiSkillExport" onclick="exportFlockSkill()">导出 skill.md</button><button class="ghost" type="button" id="waterAiStudyExport" onclick="exportStudy()">导出 study.md</button></div>
+          <pre class="learning-exam-result" id="waterAiSkillExamResult" role="status" aria-live="polite"></pre>
+          <label for="waterAiSkillFile">选择 Markdown 文件（最大 5 MiB）</label><input type="file" id="waterAiSkillFile" accept=".md,.markdown,text/markdown,text/plain" onchange="readFlockSkillFile()">
+          <button class="danger" type="button" id="waterAiSkillImport" style="margin-top:10px" disabled onclick="importFlockSkill()">确认导入并替换 skill.md</button>
+          <label for="waterAiStudyFile">选择 study.md 文件（最大 5 MiB）</label><input type="file" id="waterAiStudyFile" accept=".md,.markdown,text/markdown,text/plain" onchange="readStudyFile()">
+          <button class="danger" type="button" id="waterAiStudyImport" style="margin-top:10px" disabled onclick="importStudy()">确认导入并替换 study.md</button>
+          <div class="water-ai-subsection">
+            <h4>查看与管理记忆</h4>
+            <div class="memory-tools"><select id="memoryFile" aria-label="记忆文件" onchange="loadMemory()"><option value="study">study.md</option><option value="skill">skill.md</option></select><input type="search" id="memorySearch" maxlength="200" placeholder="搜索记忆" aria-label="搜索记忆" onkeydown="if(event.key==='Enter')loadMemory()"><button class="ghost" type="button" id="memoryReload" onclick="loadMemory()">载入记忆</button></div>
+            <div id="memoryStatus" class="hint" role="status" aria-live="polite"></div>
+            <div id="memoryList"></div>
+            <div class="memory-actions"><button class="ghost" type="button" id="memoryPrev" disabled onclick="loadMemory(Math.max(0,memoryOffset-20))">上一页</button><button class="ghost" type="button" id="memoryNext" disabled onclick="loadMemory(memoryOffset+20)">下一页</button></div>
+          </div>
+          <div id="waterAiSkillStatus" class="hint" role="status" aria-live="polite"></div>
+          <div class="hint">skill.md 与 study.md 可能包含群聊习惯和私人信息，请仅导入可信文件并妥善保管导出内容。页面不会展示原始学习样本。</div>
+        </div>
+      </div>
+      <div class="fold sub-fold" id="knowledgeCard">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1zM12 5v15"/></svg>知识参考</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <div class="hint">仅供 AI 水群只读参考，AI 不会写入或学习为人格。各账号独立保存，文件最大 5 MiB；无上限引用会读取整份文档，仍受模型上下文限制。</div>
+          <div class="water-ai-toolbar"><button class="ghost" id="knowledgeEdit" type="button" disabled aria-expanded="false" aria-controls="knowledgeEditFields" onclick="toggleKnowledgeEditor()">编辑知识</button><button class="ghost" id="knowledgeReload" type="button" onclick="reloadKnowledge()">重新载入</button><button class="ghost" id="knowledgeExport" type="button" disabled onclick="exportKnowledge()">导出 knowledge.md</button><button class="ghost" id="knowledgeUpload" type="button" disabled onclick="uploadKnowledge()">上传 TG 收藏夹</button></div>
+          <div id="knowledgeEditFields" class="hidden">
+            <label for="knowledgeEditor">编辑知识（Markdown）</label><textarea id="knowledgeEditor" rows="12" disabled oninput="knowledgeChanged()" placeholder="输入或粘贴知识，点击保存后供水群引用"></textarea>
+            <button class="btn" id="knowledgeSave" type="button" disabled style="margin-top:10px" onclick="saveKnowledge()">保存知识</button>
+          </div>
+          <label for="knowledgeFile">导入 Markdown 文件（最大 5 MiB）</label><input id="knowledgeFile" type="file" accept=".md,.markdown,text/markdown,text/plain" onchange="readKnowledgeFile()">
+          <button class="danger" id="knowledgeImport" type="button" disabled onclick="importKnowledge()">确认导入并替换 knowledge.md</button>
+          <div class="water-ai-subsection">
+            <div class="hint">按需预览：输入一句模拟群消息，查看会引用的 study.md 与 knowledge.md 内容；只读预览，不发送、不调用 AI。</div>
+            <input type="text" id="knowledgePreviewText" maxlength="2000" placeholder="例如：CF 522 怎么解决" onkeydown="if(event.key==='Enter')previewKnowledge()">
+            <div class="flex" style="margin-top:8px"><div><label for="knowledgePreviewChars">两份文件引用字数</label><input id="knowledgePreviewChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"></div><div><label for="knowledgePreviewOnDemand">按需模式</label><select id="knowledgePreviewOnDemand"><option value="0">每轮引用</option><option value="1">按需引用</option></select></div></div>
+            <button class="ghost" type="button" id="knowledgePreviewBtn" onclick="previewKnowledge()">预览引用</button>
+            <pre class="learning-exam-result" id="knowledgePreviewResult" role="status" aria-live="polite"></pre>
+          </div>
+          <div class="water-ai-subsection">
+            <label class="button-reply-toggle"><input type="checkbox" id="knowledgeAutoEnabled" onchange="saveKnowledgeAutoToggle()"> AI 自动积累知识（knowledge-auto.md）</label>
+            <div class="hint">学习时它会把能长期复用的知识单独写进 knowledge-auto.md，需要你确认后才升级成「已验证」，已验证的条目在挑选引用时排前面，未确认的仍会被引用但排在后面。和上面手写的 knowledge.md 分开存，不会覆盖你的内容；关闭后不再写入，也不再引用。</div>
+            <div class="hint" id="knowledgeAutoMeta">自动知识尚未载入</div>
+            <div class="water-ai-toolbar" id="knowledgeAutoVerifyBar" style="display:none"><button class="ghost" id="knowledgeAutoPromoteAll" type="button" onclick="promoteAllKnowledgeAuto()">全部标为已验证</button><span class="hint" id="knowledgeAutoVerifyHint"></span></div>
+            <div id="knowledgeAutoList"></div>
+            <div class="water-ai-toolbar"><button class="ghost" id="knowledgeAutoReload" type="button" onclick="reloadKnowledgeAuto()">重新载入</button><button class="ghost" id="knowledgeAutoExport" type="button" onclick="exportKnowledgeAuto()">导出 knowledge-auto.md</button><button class="danger" id="knowledgeAutoClear" type="button" onclick="clearKnowledgeAuto()">清空自动知识</button></div>
+            <textarea id="knowledgeAutoEditor" rows="6" placeholder="自动积累的条目会出现在这里，也可以直接改"></textarea>
+            <button class="btn" id="knowledgeAutoSave" type="button" style="margin-top:10px" onclick="saveKnowledgeAuto()">保存自动知识</button>
+            <div class="water-ai-toolbar" style="margin-top:14px">
+              <label class="button-reply-toggle"><input type="checkbox" id="knowledgeUploadEnabled" onchange="saveKnowledgeUpload()"> 定时上传到我的 TG 收藏</label>
+              <input id="knowledgeUploadTime" type="time" value="23:50" onchange="saveKnowledgeUpload()">
+              <select id="knowledgeUploadAccount" onchange="saveKnowledgeUpload()"></select>
+              <button class="ghost" id="knowledgeUploadNow" type="button" onclick="runKnowledgeUploadNow()">立即上传一次</button>
+            </div>
+            <div class="hint" id="knowledgeUploadMeta">定时上传状态未载入</div>
+          </div>
+          <div class="hint" id="knowledgeStatus" role="status" aria-live="polite"></div><div class="hint" id="knowledgeMeta"></div>
+        </div>
+      </div>
+      <div class="fold sub-fold" id="ownerAiCard">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-8 9-8 9s-8-4-8-9V7zM8 12l3 3 5-6"/></svg>指令与限制</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <label class="check"><input type="checkbox" id="ownerPauseEnabled"> 我发言后暂停当前群 AI 水群</label>
+          <div class="hint">仅普通聊天发言触发；纠正、群聊总结指令及其自动回复不会启动或延长暂停。</div>
+          <label for="ownerPauseMinutes">暂停分钟数</label><input type="number" id="ownerPauseMinutes" value="10" min="1" max="1440" inputmode="numeric">
+          <div class="water-ai-subsection">
+            <label class="check"><input type="checkbox" id="ownerCorrectionEnabled"> 启用主人纠正</label>
+            <label for="ownerCorrectionKeywords">纠正关键词（每行一个）</label><textarea id="ownerCorrectionKeywords" rows="2" maxlength="2000" placeholder="例如：改正"></textarea>
+            <div class="hint">仅当号主回复本程序的 AI 消息，并以纠正关键词开头且附上正确内容时触发。固定回复“收到，正在写入记忆……”后写入本群固定记忆。</div>
+          </div>
+          <div class="water-ai-subsection">
+            <label class="check"><input type="checkbox" id="ownerSummaryEnabled"> 启用群聊总结</label>
+            <label for="ownerSummaryKeywords">总结关键词（每行一个）</label><textarea id="ownerSummaryKeywords" rows="2" maxlength="2000" placeholder="例如：最近他们聊了什么"></textarea>
+            <div class="owner-ai-fields"><div><label for="ownerSummaryHours">回看小时数</label><input type="number" id="ownerSummaryHours" value="6" min="1" max="168" inputmode="numeric"></div><div><label for="ownerSummaryMessages">最多读取消息数</label><input type="number" id="ownerSummaryMessages" value="200" min="20" max="1000" inputmode="numeric"></div></div>
+            <label class="check"><input type="checkbox" id="ownerSummaryUnlimitedEnabled" aria-describedby="ownerSummaryUnlimitedHint"> 不限制总结长度</label>
+            <div class="hint" id="ownerSummaryUnlimitedHint">默认精简总结，尽量一条发完。勾选后不设字数和输出 Token 上限；超长时分段发送，仍受服务商和每日总用量限制。</div>
+            <label for="ownerAIProviders">总结使用的 API（留空使用全部启用项）</label><input type="text" id="ownerAIProviders" class="hidden" aria-hidden="true"><div id="ownerAIProviderPicks" class="grp-pick"></div>
+            <div class="hint">仅号主在监听群发送完整关键词时触发，群友无法触发纠正或总结。</div>
+          </div>
+          <div class="water-ai-subsection">
+            <h4>每日 Token 上限</h4>
+            <div class="hint">0 表示不限额。按北京时间每日重置，累计服务商返回的输入与输出 Token；到达上限后停止新请求，正在执行的一次请求可能超出上限。80% 时提醒。</div>
+            <div class="owner-ai-fields"><div><label for="ownerDailyTotal">全部 AI</label><input type="number" id="ownerDailyTotal" value="0" min="0" max="1000000000" inputmode="numeric"></div><div><label for="ownerDailyLearning">学习</label><input type="number" id="ownerDailyLearning" value="0" min="0" max="1000000000" inputmode="numeric"></div><div><label for="ownerDailyFlock">水群</label><input type="number" id="ownerDailyFlock" value="0" min="0" max="1000000000" inputmode="numeric"></div></div>
+            <div class="hint" id="ownerBudgetStatus" aria-live="polite"></div>
+          </div>
+          <button class="btn" type="button" id="ownerAISave" onclick="saveOwnerAISettings()">保存号主与用量设置</button>
+          <div class="hint" id="ownerAIStatus" role="status" aria-live="polite"></div>
+        </div>
+      </div>
+      </div>
+    </div>
+    <div class="card fold" id="sysHubCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>系统设置</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>系统更新</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <div class="hint" id="updInfo">版本信息加载中…</div>
+          <div class="flex" style="margin-top:10px">
+            <button class="btn" id="updCheck" style="flex:1" onclick="checkUpdate()">检查更新</button>
+            <button class="btn" id="updBtn" style="flex:1" onclick="doUpdate()">立即更新</button>
+          </div>
+          <pre id="updLog" class="hint" style="white-space:pre-wrap;display:none;margin-top:12px;max-height:260px;overflow:auto"></pre>
+          <div class="hint">更新会自动备份当前文件到 data/backup-时间戳,再拉取仓库最新文件并重启服务;data 数据和 venv 不受影响。</div>
+          <h4 style="margin:16px 0 8px">备份管理</h4>
+          <div class="hint" id="backupsInfo" aria-live="polite">尚未加载备份列表</div>
+          <div class="hint" id="backupsReason">请先查看备份；清理只删除备份，不删除数据库、会话或 venv。</div>
+          <div class="flex" style="margin-top:10px;flex-wrap:wrap">
+            <button class="ghost" type="button" id="backupsLoadBtn" onclick="loadBackups()">查看备份</button>
+            <button class="btn" type="button" id="backupsKeepBtn" onclick="cleanupBackups('keep_latest')" disabled>保留最新一份，清理其余（推荐）</button>
+            <button class="danger" type="button" id="backupsAllBtn" onclick="cleanupBackups('all')" disabled>删除全部备份</button>
+          </div>
+          <div id="backupsList" style="margin-top:10px;max-height:260px;overflow:auto"></div>
+          <div class="hint" id="backupsResult" aria-live="polite" style="margin-top:8px"></div>
+        </div>
+      </div>
+      <div class="fold sub-fold" id="migrationCard">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14M4 3h16v4"/></svg>整机迁移</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <div class="hint">迁移包包含全部账号数据库、Telegram Session、任务、规则、设置、凭据、头像和图标库配置；不包含代码、venv、历史更新备份或系统 nginx 配置。</div>
+          <label for="migrationPanelPassword">当前面板密码</label><input type="password" id="migrationPanelPassword" autocomplete="current-password">
+          <label for="migrationBackupPassword">迁移包密码（至少 8 位，丢失无法恢复）</label><input type="password" id="migrationBackupPassword" autocomplete="new-password">
+          <label for="migrationBackupPasswordConfirm">再次输入迁移包密码（仅导出时需要）</label><input type="password" id="migrationBackupPasswordConfirm" autocomplete="new-password">
+          <div class="flex" style="margin-top:12px"><button class="btn" type="button" id="migrationExport" onclick="exportMachineBackup()">导出加密迁移包</button></div>
+          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
+          <label for="migrationFile">导入迁移包（.tgp，最大 512MB）</label><input type="file" id="migrationFile" accept=".tgp,application/octet-stream">
+          <div class="flex" style="margin-top:12px"><button class="ghost" type="button" id="migrationPreview" onclick="previewMachineBackup()">上传并校验</button><button class="danger" type="button" id="migrationApply" disabled onclick="applyMachineBackup()">覆盖现机并重启</button></div>
+          <div class="hint" id="migrationResult" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
+          <div class="hint">导入会完整替换现机数据。请先停止旧 VPS，避免同一 Telegram Session 同时在线导致失效。</div>
+          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
+          <h4 style="margin:0 0 8px">每日自动备份到收藏夹</h4>
+          <label class="check"><input type="checkbox" id="autoBackupEnabled" onchange="syncAutoBackupForm()"> 启用每日自动整机备份</label>
+          <div id="autoBackupFields">
+            <div class="water-ai-time"><div><label for="autoBackupTime">每天执行时间（北京时间）</label><input type="time" id="autoBackupTime" value="04:30"></div><div><label for="autoBackupAccount">上传到哪个账号的收藏夹</label><select id="autoBackupAccount"></select></div></div>
+            <label for="autoBackupPassword">自动备份密码（至少 8 位，留空沿用已保存）</label><input type="password" id="autoBackupPassword" autocomplete="new-password" placeholder="留空不修改">
+            <label class="check"><input type="checkbox" id="autoBackupCaptionPassword"> 在收藏夹消息中附带密码文字</label>
+            <div class="hint">每次生成完整迁移包后上传到所选账号收藏夹，本地临时文件立即删除；收藏夹只保留最近 3 份自动备份，超出时删除更旧的。附带密码会把密码以明文保存在 Telegram 收藏夹。</div>
+            <div class="flex" style="margin-top:10px"><button class="btn" type="button" id="autoBackupSave" onclick="saveAutoBackup()">保存自动备份</button><button class="ghost" type="button" id="autoBackupNow" onclick="runAutoBackupNow()">立即备份</button></div>
+            <div class="hint" id="autoBackupStatus" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>面板安全</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+        <label>修改面板访问密码(至少 8 位)</label>
         <div class="flex">
-          <div><label for="tgApiId">API_ID</label><input type="text" id="tgApiId" placeholder="12345678" inputmode="numeric"></div>
-          <div><label for="tgApiHash">API_HASH</label><input type="text" id="tgApiHash" placeholder="在 my.telegram.org 获取"></div>
+          <div><input type="password" id="sOldPw" placeholder="原密码(必填)" autocomplete="current-password"></div>
+          <div><input type="password" id="sNewPw" placeholder="新面板密码" autocomplete="new-password"></div>
         </div>
-        <button class="ghost" id="tgApiSave" style="margin-top:10px" onclick="saveTgApi()">保存共用 API</button>
-        <div class="hint">所有 Telegram 账号共用这一套 API，只需配置一次。</div>
-        <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
-        <label for="accountSettings">当前账号</label>
-        <select id="accountSettings" onchange="switchAccount(this.value)"><option value="default">默认账号</option></select>
-        <div id="accountStatus" class="hint" role="status" aria-live="polite">默认账号</div>
-        <label for="accountLabel">账号备注</label><input id="accountLabel" maxlength="80" placeholder="如：工作号、小号">
-        <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:12px">
-          <button class="btn" id="accountCreate" onclick="manageAccount('create')">添加账号并登录</button>
-          <button class="ghost" id="accountRename" onclick="manageAccount('rename')">修改当前备注</button>
-          <button class="ghost" id="accountReload" onclick="loadAccounts()">刷新</button>
-          <button class="danger" id="accountDelete" disabled onclick="manageAccount('delete')">删除当前</button>
+        <button class="btn" style="margin-top:12px" onclick="changePw()">修改密码</button>
+        <div class="hint">密码已改为 scrypt 哈希存储,明文文件不存在;改完其它设备会被强制下线</div>
+        <div class="hint" style="margin-top:14px" id="sessInfo">登录设备:-</div>
+        <button class="ghost" style="margin-top:8px" onclick="logoutAll()">退出所有设备</button>
+        <div class="hint">面板对外暴露时建议只监听 127.0.0.1 并用反向代理 + HTTPS</div>
         </div>
-        <div id="accountResult" class="hint" role="status" aria-live="polite"></div>
-        <div class="hint">默认账号不能删除；其他账号删除时会同时移除对应配置和登录会话。</div>
-        <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
-        <div id="tgCard"><div class="empty">加载中...</div></div>
+      </div>
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>通知推送</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <label>Bark 推送(Bark Key 或完整 URL,如 https://api.day.app/xxxx)</label>
+          <input type="text" id="sBark" placeholder="xxxx 或 https://api.day.app/xxxx">
+          <div class="flex">
+            <div><label>Telegram Bot Token</label><input type="text" id="sBt" placeholder="123456:ABC..."></div>
+            <div><label>接收 Chat ID</label><input type="text" id="sBc" placeholder="123456789"></div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="sNok" style="width:auto"> 成功时推送</label>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="checkbox" id="sNof" style="width:auto"> 失败时推送</label>
+          <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+          <div class="hint">配置任一(Bark 或 TG Bot)即可;签到成功/失败、抢注命中、自定义任务结束时按开关推送</div>
+        </div>
+      </div>
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>时区 / 服务器时间</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <label>时区</label>
+          <select id="sTz"></select>
+          <div class="hint" id="tzNow" style="margin-top:8px">服务器时间加载中...</div>
+          <button class="btn" style="margin-top:12px" onclick="saveTz()">保存时区</button>
+          <div class="hint">签到任务的「时间窗口」和「今天已签」都按这个时区计算;VPS 系统是 UTC 时也只需在这里选对</div>
+        </div>
+      </div>
+      </div>
+    </div>
+    <div class="card fold" id="acctHubCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>账号与行为</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>自动水群(从众)</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sFl" style="width:auto"> 开启从众模式(默认关闭)</label>
+          <div class="flex" style="margin-top:10px">
+            <div><label>同文本出现 N 条后跟风</label><input type="number" id="sFlCnt" min="2" max="30" value="5"></div>
+            <div><label>统计窗口(分钟)</label><input type="number" id="sFlMin" min="1" max="60" value="5"></div>
+          </div>
+          <label>跟风话术池(逗号分隔,随机选一条)</label>
+          <input type="text" id="sFlPool" placeholder="哈哈,确实,同意,+1,蹲一个">
+          <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+          <div class="hint">监听群内同一句话短时间出现多人的,你也跟一条,像真人一样融入群聊;命令类消息不会跟</div>
+        </div>
+      </div>
+      <div class="fold sub-fold">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>触发行为</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+        <div class="flex">
+          <div><label>同群同规则冷却(秒)</label><input type="number" id="sCooldown" min="0"></div>
+          <div><label>命中后随机延迟(秒,最小 最大)</label><input type="text" id="sDelay" placeholder="1.0 3.0"></div>
+          <div><label style="display:flex;align-items:center;gap:8px;margin-top:14px"><input type="checkbox" id="sIgnore" style="width:auto"> 忽略机器人消息</label></div>
+        </div>
+        <label for="sTaskConcurrency">每账号任务并发上限</label>
+        <select id="sTaskConcurrency">
+          <option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+        </select>
+        <div class="hint">按任务列表顺序，每批两个；整轮结束再排失败重试</div>
+        <label>日志保留天数(0 = 永久保留)</label>
+        <input type="number" id="sLogKeep" min="0" max="3650" value="30">
+        <div class="hint">每小时检查一次,超过天数的记录自动删除并压缩数据库</div>
+        <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
+        </div>
+      </div>
+      <div class="fold sub-fold" id="foldTg">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>TG账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <h4 style="margin:0 0 8px">共用 Telegram API</h4>
+          <div class="flex">
+            <div><label for="tgApiId">API_ID</label><input type="text" id="tgApiId" placeholder="12345678" inputmode="numeric"></div>
+            <div><label for="tgApiHash">API_HASH</label><input type="text" id="tgApiHash" placeholder="在 my.telegram.org 获取"></div>
+          </div>
+          <button class="ghost" id="tgApiSave" style="margin-top:10px" onclick="saveTgApi()">保存共用 API</button>
+          <div class="hint">所有 Telegram 账号共用这一套 API，只需配置一次。</div>
+          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
+          <label for="accountSettings">当前账号</label>
+          <select id="accountSettings" onchange="switchAccount(this.value)"><option value="default">默认账号</option></select>
+          <div id="accountStatus" class="hint" role="status" aria-live="polite">默认账号</div>
+          <label for="accountLabel">账号备注</label><input id="accountLabel" maxlength="80" placeholder="如：工作号、小号">
+          <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:12px">
+            <button class="btn" id="accountCreate" onclick="manageAccount('create')">添加账号并登录</button>
+            <button class="ghost" id="accountRename" onclick="manageAccount('rename')">修改当前备注</button>
+            <button class="ghost" id="accountReload" onclick="loadAccounts()">刷新</button>
+            <button class="danger" id="accountDelete" disabled onclick="manageAccount('delete')">删除当前</button>
+          </div>
+          <div id="accountResult" class="hint" role="status" aria-live="polite"></div>
+          <div class="hint">默认账号不能删除；其他账号删除时会同时移除对应配置和登录会话。</div>
+          <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
+          <div id="tgCard"><div class="empty">加载中...</div></div>
+        </div>
+      </div>
       </div>
     </div>
     <div class="card fold">
@@ -1632,79 +1725,6 @@ section.act,.fold.open .fold-b{animation:none}
         <label for="iconLibraryUrl">图标库 JSON URL</label><input type="url" id="iconLibraryUrl" placeholder="https://example.com/icons.json">
         <button class="btn" type="button" id="iconLibraryAdd" style="margin-top:10px" onclick="addIconLibrary()">保存共享图标库</button>
         <div id="iconLibrariesResult" class="hint" role="status" aria-live="polite"></div><pre id="iconLibraryErrors" class="hint" style="white-space:pre-wrap"></pre>
-      </div>
-    </div>
-    <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>触发行为</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-      <div class="flex">
-        <div><label>同群同规则冷却(秒)</label><input type="number" id="sCooldown" min="0"></div>
-        <div><label>命中后随机延迟(秒,最小 最大)</label><input type="text" id="sDelay" placeholder="1.0 3.0"></div>
-        <div><label style="display:flex;align-items:center;gap:8px;margin-top:14px"><input type="checkbox" id="sIgnore" style="width:auto"> 忽略机器人消息</label></div>
-      </div>
-      <label for="sTaskConcurrency">每账号任务并发上限</label>
-      <select id="sTaskConcurrency">
-        <option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
-      </select>
-      <div class="hint">按任务列表顺序，每批两个；整轮结束再排失败重试</div>
-      <label>日志保留天数(0 = 永久保留)</label>
-      <input type="number" id="sLogKeep" min="0" max="3650" value="30">
-      <div class="hint">每小时检查一次,超过天数的记录自动删除并压缩数据库</div>
-      <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
-      </div>
-    </div>
-    <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>时区 / 服务器时间</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <label>时区</label>
-        <select id="sTz"></select>
-        <div class="hint" id="tzNow" style="margin-top:8px">服务器时间加载中...</div>
-        <button class="btn" style="margin-top:12px" onclick="saveTz()">保存时区</button>
-        <div class="hint">签到任务的「时间窗口」和「今天已签」都按这个时区计算;VPS 系统是 UTC 时也只需在这里选对</div>
-      </div>
-    </div>
-    <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>面板安全</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-      <label>修改面板访问密码(至少 8 位)</label>
-      <div class="flex">
-        <div><input type="password" id="sOldPw" placeholder="原密码(必填)" autocomplete="current-password"></div>
-        <div><input type="password" id="sNewPw" placeholder="新面板密码" autocomplete="new-password"></div>
-      </div>
-      <button class="btn" style="margin-top:12px" onclick="changePw()">修改密码</button>
-      <div class="hint">密码已改为 scrypt 哈希存储,明文文件不存在;改完其它设备会被强制下线</div>
-      <div class="hint" style="margin-top:14px" id="sessInfo">登录设备:-</div>
-      <button class="ghost" style="margin-top:8px" onclick="logoutAll()">退出所有设备</button>
-      <div class="hint">面板对外暴露时建议只监听 127.0.0.1 并用反向代理 + HTTPS</div>
-      </div>
-    </div>
-    <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>通知推送</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <label>Bark 推送(Bark Key 或完整 URL,如 https://api.day.app/xxxx)</label>
-        <input type="text" id="sBark" placeholder="xxxx 或 https://api.day.app/xxxx">
-        <div class="flex">
-          <div><label>Telegram Bot Token</label><input type="text" id="sBt" placeholder="123456:ABC..."></div>
-          <div><label>接收 Chat ID</label><input type="text" id="sBc" placeholder="123456789"></div>
-        </div>
-        <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="sNok" style="width:auto"> 成功时推送</label>
-        <label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="checkbox" id="sNof" style="width:auto"> 失败时推送</label>
-        <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
-        <div class="hint">配置任一(Bark 或 TG Bot)即可;签到成功/失败、抢注命中、自定义任务结束时按开关推送</div>
-      </div>
-    </div>
-    <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>自动水群(从众)</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sFl" style="width:auto"> 开启从众模式(默认关闭)</label>
-        <div class="flex" style="margin-top:10px">
-          <div><label>同文本出现 N 条后跟风</label><input type="number" id="sFlCnt" min="2" max="30" value="5"></div>
-          <div><label>统计窗口(分钟)</label><input type="number" id="sFlMin" min="1" max="60" value="5"></div>
-        </div>
-        <label>跟风话术池(逗号分隔,随机选一条)</label>
-        <input type="text" id="sFlPool" placeholder="哈哈,确实,同意,+1,蹲一个">
-        <button class="btn" style="margin-top:14px" onclick="saveSettings()">保存设置</button>
-        <div class="hint">监听群内同一句话短时间出现多人的,你也跟一条,像真人一样融入群聊;命令类消息不会跟</div>
       </div>
     </div>
   </section>
