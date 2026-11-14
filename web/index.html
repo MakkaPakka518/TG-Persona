@@ -202,6 +202,7 @@ html[data-theme="light"] .grp-pick .gp.on{color:#15803d}
 .learning-metrics p{line-height:1.7}.learning-metrics span{display:inline-block;white-space:nowrap}@media(max-width:600px){.learning-metrics{grid-template-columns:minmax(0,1fr);gap:10px}}
 #waterAiCard{min-width:0;overflow:hidden}#waterAiCard .fold-b,#waterAiCard .water-ai-time,#waterAiCard .water-ai-time>div{min-width:0;max-width:100%}
 #waterAiCard input:not([type=checkbox]),#waterAiCard textarea,#waterAiCard button,#flockLearningCard input:not([type=checkbox]),#flockLearningCard button{min-height:44px;min-width:0;max-width:100%;box-sizing:border-box}.water-ai-time{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.water-ai-time>div{min-width:0}
 .water-ai-job{padding:11px 0;border-bottom:1px solid var(--hair)}.water-ai-job:last-child{border-bottom:0}.water-ai-job-head{display:flex;align-items:center;gap:8px}.water-ai-job-name{flex:1;min-width:0;font-weight:600;overflow-wrap:anywhere}.water-ai-job-meta{margin-top:4px;color:var(--dim);font-size:12px;line-height:1.55;overflow-wrap:anywhere}.water-ai-actions,.water-ai-toolbar,.water-ai-model-row{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch;margin-top:9px}.water-ai-actions button{flex:1 1 88px}.water-ai-toolbar button{flex:1 1 150px}.water-ai-form{margin-top:12px;padding-top:12px;border-top:1px solid var(--hair)}.water-ai-subsection{margin-top:16px;padding-top:14px;border-top:1px solid var(--hair)}.water-ai-subsection summary{min-height:44px;display:flex;align-items:center;cursor:pointer;font-weight:600;color:var(--sub)}.water-ai-stats{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.water-ai-stats span{flex:1 1 120px;color:var(--dim);font-size:12px}.water-ai-model-row input{flex:1 1 210px}.water-ai-model-row button{flex:0 1 auto}
 .water-ai-limits{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 8px}.water-ai-limits>div{min-width:0}
 #flockLearningCard label.check{min-height:44px}.water-ai-warning{color:var(--warn)}
@@ -236,8 +237,6 @@ select{appearance:none;-webkit-appearance:none;
 .flex>div>input,.flex>div>select,.flex>div>textarea{min-width:0;max-width:100%}
 input[type=time],input[type=date],input[type=datetime-local]{min-width:0}
 .flex>div{flex:1 1 130px;min-width:0}
-#signinGlobalFields .flex,#sSecondWindow{justify-content:center}
-#signinGlobalFields .flex>div,#sSecondWindow>div{flex:0 1 150px}
 input[type=time],input[type=date],input[type=datetime-local]{max-width:100%;min-width:0}
 .hint{font-size:11.5px;color:var(--dim);margin-top:8px;line-height:1.6}
 .form-actions{display:flex;gap:10px;margin-top:18px}#waterAiCard .form-actions button{min-width:44px}
@@ -662,8 +661,8 @@ section.act,.fold.open .fold-b{animation:none}
         <option value="enable">启用</option><option value="disable">停用</option><option value="delete">删除</option>
       </select>
       <div id="batchWindow" class="flex">
-        <div><label for="batchStart">开始</label><input type="time" id="batchStart" value="08:00" onchange="invalidateBatchPreview()"></div>
-        <div><label for="batchEnd">结束</label><input type="time" id="batchEnd" value="12:00" onchange="invalidateBatchPreview()"></div>
+        <div><label for="batchStart">开始</label><input type="text" id="batchStart" value="08:00" readonly onclick="openTimePicker('batchStart')" onchange="invalidateBatchPreview()"></div>
+        <div><label for="batchEnd">结束</label><input type="text" id="batchEnd" value="12:00" readonly onclick="openTimePicker('batchEnd')" onchange="invalidateBatchPreview()"></div>
       </div>
       <div id="batchInterval" class="flex hidden">
         <div><label for="batchEvery">间隔（轮询 0 = 关闭，保号最少 1 分钟）</label><input type="number" min="0" step="any" id="batchEvery" value="1" oninput="invalidateBatchPreview()"></div>
@@ -962,7 +961,7 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="waterAiJobName">任务名称</label><input type="text" id="waterAiJobName" maxlength="80" placeholder="如：晚间闲聊">
           <label class="check"><input type="checkbox" id="waterAiJobEnabled"> 启用任务</label>
           <label>生效群</label><div id="waterAiJobGroups" class="grp-pick"></div>
-          <div class="water-ai-time"><div><label for="waterAiJobStart">开始</label><input type="time" id="waterAiJobStart" value="09:00"></div><div><label for="waterAiJobEnd">结束</label><input type="time" id="waterAiJobEnd" value="22:00"><label class="button-reply-toggle"><input type="checkbox" id="waterAiJobEndNextDay"> 次日结束</label></div></div>
+          <div class="water-ai-time"><div><label for="waterAiJobStart">开始</label><input type="text" id="waterAiJobStart" value="09:00" readonly onclick="openTimePicker('waterAiJobStart')"</div><div><label for="waterAiJobEnd">结束</label><input type="text" id="waterAiJobEnd" value="22:00" readonly onclick="openTimePicker('waterAiJobEnd')"<label class="button-reply-toggle"><input type="checkbox" id="waterAiJobEndNextDay"> 次日结束</label></div></div>
           <div class="water-ai-limits">
             <div><label for="waterAiJobContextMessages">上下文消息数</label><input id="waterAiJobContextMessages" type="number" value="15" min="1" max="50" step="1" inputmode="numeric"></div>
             <div><label for="waterAiJobMessageChars">单条消息字数</label><input id="waterAiJobMessageChars" type="number" value="400" min="40" max="2000" step="1" inputmode="numeric"></div>
@@ -1010,7 +1009,7 @@ section.act,.fold.open .fold-b{animation:none}
           </div>
           <div class="hint" id="signinGlobalSummary">未启用 · 默认 00:05–00:41</div>
           <div id="signinGlobalFields" class="hidden">
-            <div class="flex"><div><label for="signinGlobalStart">开始（HH:MM）</label><input type="time" id="signinGlobalStart" value="00:05" onchange="markSigninGlobalDirty()"></div><div><label for="signinGlobalEnd">结束（HH:MM）</label><input type="time" id="signinGlobalEnd" value="00:41" onchange="markSigninGlobalDirty()"></div></div>
+            <div class="flex"><div><label for="signinGlobalStart">开始（HH:MM）</label><input type="text" id="signinGlobalStart" value="00:05" readonly onclick="openTimePicker('signinGlobalStart')" onchange="markSigninGlobalDirty()"></div><div><label for="signinGlobalEnd">结束（HH:MM）</label><input type="text" id="signinGlobalEnd" value="00:41" readonly onclick="openTimePicker('signinGlobalEnd')" onchange="markSigninGlobalDirty()"></div></div>
             <div class="hint">在时间段内随机开始，按设置时区执行。启用后，未勾选“独立于统一签到时间”的任务，其第一时间段跟随统一窗口；任务开启的第二时间段仍独立执行。独立任务完全排除在统一窗口和统一汇总之外。所有跟随统一的任务及失败重试轮完成后只推送一条汇总；保存不会强行中断正在执行的任务。</div>
           </div>
           <button class="btn" type="button" id="signinGlobalSave" style="margin-top:10px" onclick="saveSigninGlobal()">保存统一时间</button>
@@ -1039,8 +1038,8 @@ section.act,.fold.open .fold-b{animation:none}
           <div class="hint">开启后此任务永远不跟随统一时间，第一时间段使用上方任务窗口。</div>
           <label class="check"><input type="checkbox" id="sSecondEnabled" onchange="syncSigninTaskWindows()"> 开启第二时间段</label>
           <div id="sSecondWindow" class="flex hidden">
-            <div><label for="sSecondStart">第二时间段开始</label><input type="time" id="sSecondStart" value="12:00"></div>
-            <div><label for="sSecondEnd">第二时间段结束</label><input type="time" id="sSecondEnd" value="12:30"></div>
+            <div><label for="sSecondStart">第二时间段开始</label><input type="text" id="sSecondStart" value="12:00" readonly onclick="openTimePicker('sSecondStart')" onchange="syncSigninTaskWindows()"></div>
+            <div><label for="sSecondEnd">第二时间段结束</label><input type="text" id="sSecondEnd" value="12:30" readonly onclick="openTimePicker('sSecondEnd')" onchange="syncSigninTaskWindows()"></div>
           </div>
           <div class="hint" id="sWindowHint">单任务窗口：在每天时间段内随机开始。</div>
           <div class="flex">
@@ -1439,7 +1438,7 @@ section.act,.fold.open .fold-b{animation:none}
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M4 19c5-1 8-4 9-9 3 1 5 3 7 6M5 5h6v6H5zM15 4v4M13 6h4"/></svg>AI 学习</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b" id="waterAiSkillSection">
         <label class="check"><input type="checkbox" id="waterAiSkillEnabled"> 每日普通学习</label>
-        <div class="water-ai-time"><div><label for="waterAiSkillStart">普通学习开始（北京时间）</label><input type="time" id="waterAiSkillStart" value="09:00"></div><div><label for="waterAiSkillEnd">普通学习结束（北京时间）</label><input type="time" id="waterAiSkillEnd" value="22:00"></div></div>
+        <div class="water-ai-time"><div><label for="waterAiSkillStart">普通学习开始（北京时间）</label><input type="text" id="waterAiSkillStart" value="09:00" readonly onclick="openTimePicker('waterAiSkillStart')"</div><div><label for="waterAiSkillEnd">普通学习结束（北京时间）</label><input type="text" id="waterAiSkillEnd" value="22:00" readonly onclick="openTimePicker('waterAiSkillEnd')"</div></div>
         <label>学习群</label><div id="waterAiSkillGroups" class="grp-pick"></div>
         <label>学习使用的 AI API（可多选）</label><div id="waterAiSkillProviders" class="grp-pick"></div>
         <div class="hint">普通、鲸鱼和深度学习都会采集主人与群友消息；主人风格写入 skill.md，群内知识、话题与氛围写入 study.md。程序自动发送的消息不会进入样本。</div>
@@ -2060,7 +2059,9 @@ function tpReset(){
 function tpConfirm(){
   if(!tpTarget)return tpClose();
   const h=tpIndex($('#tpHour')),m=tpIndex($('#tpMin'));
-  $('#'+tpTarget).value=pad2(h)+':'+pad2(m);
+  const target=$('#'+tpTarget);
+  target.value=pad2(h)+':'+pad2(m);
+  target.dispatchEvent(new Event('change',{bubbles:true}));
   tpClose();
 }
 $('#tpOverlay').addEventListener('click',function(e){if(e.target===this)tpClose()});
