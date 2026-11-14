@@ -772,6 +772,23 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         button.click.assert_not_awaited()
         self.b['_call_ai_any'].assert_not_awaited()
 
+    async def test_replay_returns_only_latest_relevant_message(self):
+        """只读试运行不要把十几天前的签到回显全倒出来，只留当前那条能用的。"""
+        aid = await self.create(name='回放签到', target='@dummy', command='/sign', click_btn=1,
+                                btn_text='签到', button_mode='script')
+        button = SimpleNamespace(text='签到', click=AsyncMock())
+        history = [message(7, '当前持有 309 问币'), message(6, '恭喜获得 -1 问币'),
+                   message(5, '恭喜获得 3 问币')]
+        latest = message(8, '请选择功能', buttons=[[button]])
+        self.b['client'] = SimpleNamespace(get_messages=AsyncMock(return_value=[latest] + history),
+                                           send_message=AsyncMock())
+        self.b['resolve_entity'] = AsyncMock(return_value='entity')
+        result = await self.b['replay_auto'](aid)
+        msgs = result['sources'][0]['messages']
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]['id'], 8)
+        self.assertEqual(msgs[0]['script_match'], '签到')
+
     async def test_button_failure_log_keeps_real_mode(self):
         await self.b['create_ai_provider'](self.b['AIProviderInput'](
             note='按钮 AI', base='https://example.invalid/v1', key='fixture-key', model='m'))

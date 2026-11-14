@@ -7928,7 +7928,10 @@ async def replay_auto(aid: int):
                 sources.append({"target": target, "error": "目标无法解析", "messages": []})
                 continue
             messages = await get_runtime().client.get_messages(entity, limit=12 if a["type"] in ("signin", "scheduled_register") else 3)
-            sources.append({"target": target, "messages": [await _replay_message(message, a) for message in messages or []]})
+            replays = [await _replay_message(message, a) for message in messages or []]
+            # 只读试运行只需要"当前那条"：往前 12 条多是上几天的签到回显，没有诊断价值。
+            useful = [item for item in replays if item["buttons"] or item["trigger_match"]]
+            sources.append({"target": target, "messages": (useful or replays)[:1]})
         except Exception as error:
             sources.append({"target": target, "error": _safe_ai_error(error), "messages": []})
     return {"ok": True, "dry_run": True, "task": a["name"], "type": a["type"],
