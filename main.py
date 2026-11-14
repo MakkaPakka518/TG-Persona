@@ -240,6 +240,8 @@ def db_init(database=None):
             action TEXT DEFAULT 'reply',        -- grabcodes: reply(回复消息) | send(发送命令)
             reply_text TEXT DEFAULT '',         -- 回复/命令文本,{code} 替换为提取的邀请码
             cooldown INTEGER DEFAULT 30,        -- 同群同任务冷却(秒)
+            cooldown_unlimited INTEGER DEFAULT 0, -- 1=冷却不限制
+            success_window_seconds INTEGER DEFAULT 40, -- redpacket: 抢到后观察群聊窗口(秒)
             poll_interval INTEGER DEFAULT 0,    -- grabcodes: 轮询探测开注间隔(秒,0=关闭仅监听)
             custom_steps TEXT DEFAULT '',       -- custom: 多步任务 JSON
             custom_trigger TEXT DEFAULT '{"mode":"manual"}',
@@ -299,6 +301,8 @@ def db_init(database=None):
         ("success_reply_enabled", "INTEGER DEFAULT 0"),
         ("success_reply_text", "TEXT DEFAULT ''"),
         ("success_reply_delay", "INTEGER DEFAULT 5"),
+        ("success_window_seconds", "INTEGER DEFAULT 40"),
+        ("cooldown_unlimited", "INTEGER DEFAULT 0"),
         ("announcement_kw", "TEXT DEFAULT '定时注册'"),
         ("announcement_button", "TEXT DEFAULT '点击注册'"),
         ("ai_provider_ids", "TEXT DEFAULT ''"),
@@ -822,15 +826,30 @@ AI_FLOCK_LEARNING_RANGES = {
     "flock_learning_batch_size": (10, 200), "flock_learning_message_chars": (40, 4096),
     "flock_learning_skill_chars": (500, SKILL_MAX_BYTES), "flock_learning_max_tokens": (100, 32768),
 }
+DEFAULT_REDPACKET_AI_FLOCK_PROMPT = (
+    "你是刚在群里随手领到红包的普通群友。抢红包是顺手的事，不值得激动。"
+    "只处理三类消息，其余一律输出NO_REPLY，不要为了显得像活人而插话："
+    "一、有人明确质疑你是脚本、机器人、手速不正常、怎么每次都是你：轻松否认一句，如“手快而已”“刚好在看手机”，不解释第二遍，对方追问就沉默；"
+    "二、有人@你、回复你或点名你，但内容是打招呼、玩笑、调侃（如“大佬也在啊”“大佬手真快”“又来抢”）：可以轻回一句，如“顺手”“刚到”“小赚”，不自证不解释怎么抢的；别人直接回复你上一条消息，也算在跟你说话，要接；这类打招呼和玩笑不是质疑脚本，别用否认的口吻回；"
+    "三、别人之间的对话、别人被质疑、泛泛感叹、问别人：一律不接。"
+    "说话像手机临时打字，每次3至10个字，最多一句。不提金额，不@人，不感谢发红包的。"
+    "不用“卧槽”“圆梦”“终于中了”“已收到”“感谢理解”“作为”这类夸张或客服措辞。"
+    "不要每句都带语气词，标点可省，只输出聊天内容。"
+)
+
+
 DEFAULT_REGISTRATION_AI_FLOCK_PROMPT = (
-    "你是刚抢到注册码的普通群友。只在别人明显接你的话、问你或质疑你时回复；普通闲聊、感叹、问别人、"
-    "“人呢”“还得优化”等不要接，应该沉默时只输出NO_REPLY。回复像手机临时打字，每次6至18个字，口语、"
-    "随意，不写完整说明文，不复述问题。刚抢到时只表达一次开心，可用“卧槽真中了”“终于抢到了”“圆梦了”，"
-    "不要反复感谢。第一次被质疑脚本时轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；再次质疑不要重复理由，"
-    "可说“真不是，不信也没办法”；第三次仍追问就结束话题。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”"
-    "“作为”“纯靠单身手速”等客服或AI措辞；“老板”“xxlb”“圆梦”各最多出现一次。不要长篇自证，不主动找话题，"
-    "不每条都回。结束语只出现一次：工作日工作时间说“先忙去了”，饭点说“吃饭去了”，凌晨说“圆梦了睡觉”，"
-    "其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容或NO_REPLY。"
+    "你是刚抢到注册码的普通群友。说话像手机临时打字，随意、简短，每次6至18个字，不写完整说明文，不用客服腔，不复述对方的话。"
+    "禁止回复速度过快，要模拟一个打字的过程。只处理三类消息，其余一律输出NO_REPLY："
+    "一、有人明确质疑你是脚本或手速不正常（如“是不是脚本”“怎么每次都是你”“机器吧”），轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；"
+    "二、有人@你、回复你或点名你，但内容是打招呼、玩笑、调侃（如“大佬也在啊”“大佬手真快”“又来抢”），可以自然接一句，别自证别解释怎么抢的；别人直接回复你上一条消息，也算在跟你说话，要接；打招呼、玩笑、调侃是善意的，不是质疑脚本，别用自证或否认的口吻回；"
+    "三、别人之间的对话、别人被质疑、普通闲聊、感叹、问别人、“人呢”“还得优化”等内容不要接话。"
+    "第一次被质疑脚本时轻松否认一句；再次被质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题，不再争论。"
+    "越解释越像脚本，不要长篇自证，不要连续重复“纯手速”。"
+    "禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞。“老板”“xxlb”“圆梦”各最多出现一次。"
+    "允许偶尔省略标点、使用“哈哈”“啊”“吧”，但不要每句都有语气词。"
+    "结束语只出现一次：北京时间工作日9点至18点说“先忙去了”；饭点说“吃饭去了”；凌晨0点至6点说“圆梦了睡觉”；其他休息时间说“追剧去了”。"
+    "不要链接、命令、@、Markdown或引号，只输出聊天内容。"
 )
 
 
@@ -1092,6 +1111,8 @@ def _flock_reply(value, registration=False):
         raise ValueError("模型返回空正文")
     if len(text) > limit:
         raise ValueError("模型回复有 %s 字，超过水群 %s 字限制" % (len(text), limit))
+    if re.fullmatch(r"[\d\s\W_]{1,6}", text):
+        raise ValueError("模型只输出了数字或符号，不是可读的回复")
     if (text.startswith("/") or "<think>" in text.lower() or
             re.search(r"https?://|t\.me/|@[A-Za-z0-9_]", text, re.I)):
         raise ValueError("模型回复含命令、链接、@提及或未分离的思考内容")
@@ -2382,15 +2403,45 @@ def _ai_flock_source(chat_id):
     return None
 
 
+async def _redpacket_after_success(a, chat_id, popup=""):
+    """抢到红包后:通知 + 回群关键词(水群关闭时) + AI 水群观察窗口"""
+    try:
+        line = re.sub(r"\s+", " ", str(popup or "")).strip()[:120]
+        send_notify("🧧 %s（%s）" % (a["name"], get_current_account_label()),
+                    "抢到红包：" + (line or "已领取"))
+    except Exception:
+        log.exception("红包通知失败")
+    if a["ai_flock_enabled"]:
+        try:
+            _start_registration_ai_flock(a, chat_id)
+        except Exception as error:
+            log.warning("红包水群启动失败: %s", _safe_ai_error(error))
+    elif a["success_reply_enabled"] and str(a["success_reply_text"] or "").strip():
+        try:
+            delay = max(0, min(int(a["success_reply_delay"] or 0), 600))
+            if delay:
+                await asyncio.sleep(delay)
+            await _send_generated_message(chat_id, a["success_reply_text"], parse_mode=None)
+        except Exception:
+            log.exception("红包回群失败")
+
+
 def _start_registration_ai_flock(task, chat_id):
     if not task["ai_flock_enabled"] or chat_id is None:
         return False
     provider_ids = str(task["ai_flock_provider_ids"] or "")
     if not _has_ai_providers(provider_ids):
         raise ValueError("请先在设置中添加并启用 AI API")
-    minutes = max(1, min(int(task["ai_flock_minutes"] or 5), 60))
-    expires = int(time.time()) + minutes * 60
-    prompt = str(task["ai_flock_prompt"] or DEFAULT_REGISTRATION_AI_FLOCK_PROMPT).strip()
+    is_redpacket = str(task["type"] or "") == "redpacket" if "type" in task.keys() else False
+    if is_redpacket:
+        seconds = max(10, min(int(task["success_window_seconds"] or 40), 600))
+        expires = int(time.time()) + seconds
+        default_prompt = DEFAULT_REDPACKET_AI_FLOCK_PROMPT
+    else:
+        minutes = max(1, min(int(task["ai_flock_minutes"] or 5), 60))
+        expires = int(time.time()) + minutes * 60
+        default_prompt = DEFAULT_REGISTRATION_AI_FLOCK_PROMPT
+    prompt = str(task["ai_flock_prompt"] or default_prompt).strip()
     reaction = str(task["ai_flock_reaction"] or "")
     budgets = (task["ai_flock_context_messages"], task["ai_flock_message_chars"],
                task["ai_flock_skill_chars"], task["ai_flock_max_tokens"], task["ai_flock_knowledge_chars"],
@@ -3463,7 +3514,10 @@ async def _learn_ai_flock_locked(force=False):
             blocks = [b for b in _study_blocks(study)
                       if str(b["meta"].get("chat_id", "")) == group_key
                       and str(b["meta"].get("source", "")) != "correction"]
-            if len(blocks) > STUDY_PER_GROUP_MAX:
+            if len(blocks) >= STUDY_PER_GROUP_MAX:
+                # 满仓即合并：用 > 判断时写入端已把组压到上限内，分支几乎不可达，
+                # 表现出来就是"只淘汰不蒸馏"。
+
                 # 整组合并成 1 条：只压超出部分的话，块数永远降不到上限以下。
                 excess = blocks
                 try:
@@ -4444,15 +4498,13 @@ async def on_auto_event(event):
         elif chat not in watched:
             continue
 
-        # 红包消息可无文本(带按钮/贴纸);抢注必须有文本
+        # 红包只看按钮特征:纯图片消息没有文本,触发关键词已废弃
         if a["type"] == "grabcodes" and not match_keywords(a["keywords"], text):
             continue
-        if a["type"] == "redpacket":
-            if text and not match_keywords(a["keywords"], text):
-                continue
 
         key = (chat, a["id"])
-        cd = int(a["cooldown"] or 30)
+        cd = 0 if ("cooldown_unlimited" in a.keys() and a["cooldown_unlimited"]) else max(
+            0, int(a["cooldown"] if a["cooldown"] is not None else 30))
         if now - get_runtime().auto_last_ts.get(key, -1e9) < cd:
             continue
         get_runtime().auto_last_ts[key] = now
@@ -4479,24 +4531,19 @@ async def on_auto_event(event):
             else:
                 reply_desc = ""
                 buttons = await event.get_buttons()
-                # 红包只点回调按钮:链接/跳转类按钮一律不点,避免盗号钓鱼
-                safe_buttons = _callback_buttons(buttons)
-                blocked = sum(len(row) for row in (buttons or [])) - sum(len(row) for row in safe_buttons)
-                target_btn = None
-                if safe_buttons:
-                    target_btn = await _select_btn_mode(
-                        safe_buttons, "打开,领取,收下,拆,红包,领", "🎁", a["button_mode"],
-                        "领取当前红包或礼物")
-                    if not target_btn and a["button_mode"] == "script" and safe_buttons[0]:
-                        target_btn = safe_buttons[0][0]
+                target_btn = _red_envelope_button(_callback_buttons(buttons))
+                popup = ""
                 if target_btn:
                     btn_label = (str(getattr(target_btn, "text", "") or "").strip() or "无文字")[:24]
-                    reply_desc = "点击按钮「%s」" % btn_label
-                    await target_btn.click()
-                    log.info("抢红包 群=%s 任务=%s 按钮=%s", chat, a["name"], btn_label)
-                elif blocked:
-                    reply_desc = "跳过:按钮是外部链接,已拒绝点击"
-                    log.warning("抢红包 跳过链接按钮 群=%s 任务=%s 屏蔽=%s", chat, a["name"], blocked)
+                    answer = await target_btn.click()
+                    popup = str(getattr(answer, "message", answer if isinstance(answer, str) else "") or "")
+                    outcome = _redpacket_result(popup)
+                    reply_desc = "点击按钮「%s」→ %s" % (btn_label, outcome)
+                    log.info("抢红包 群=%s 任务=%s 按钮=%s 结果=%s", chat, a["name"], btn_label, outcome)
+                    if outcome == "success":
+                        await _redpacket_after_success(a, event.chat_id, popup)
+                else:
+                    log.info("抢红包 未识别到红包按钮,已跳过 群=%s 任务=%s", chat, a["name"])
             add_hit(a["type"], True, chat_id=chat, rule_id=-a["id"], msg_id=event.id,
                     content=text, reply=reply_desc, grp_name=grp_name, sender=sender_name,
                     detail={"kind": a["type"], "task": a["name"], "group": grp_name or str(chat),
@@ -4731,6 +4778,29 @@ def render_placeholders(s):
 
 def _norm_emoji(x):
     return str(x or "").replace("\ufe0f", "").replace("\ufe0e", "").strip()
+
+
+def _red_envelope_button(btns):
+    """只认红包按钮:回调 data 以已知红包前缀开头,其余按钮一律不点"""
+    prefixes = (b"red_envelope", b"red_packet", b"redpacket", b"hongbao")
+    for row in (btns or []):
+        for btn in row:
+            data = getattr(btn, "data", None) or b""
+            if isinstance(data, bytes) and data.startswith(prefixes):
+                return btn
+    return None
+
+
+def _redpacket_result(popup):
+    """解析红包弹窗:success=抢到, repeat=已领过, expired=抢光, unknown=其他"""
+    text = str(popup or "")
+    if "恭喜" in text or "领取到了" in text:
+        return "success"
+    if "已经领取" in text or "领过了" in text:
+        return "repeat"
+    if "抢光" in text or "来晚了" in text:
+        return "expired"
+    return "unknown"
 
 
 def _callback_buttons(btns):
@@ -7421,6 +7491,8 @@ class AutoIn(BaseModel):
     custom_trigger: str = '{"mode":"manual"}'
     chain_retry: int = 1          # custom: 链级重试
     cooldown: int = 30
+    cooldown_unlimited: int = 0
+    success_window_seconds: int = 40
     enabled: int = 1
     scheduled_at: str = ""         # scheduled_register: YYYY-MM-DDTHH:MM:SS in panel timezone
     history_first: int = 0          # scheduled_register: click latest matching button before command
@@ -7608,7 +7680,7 @@ def _valid_auto(body: AutoIn):
 
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
-              "groups,keywords,action,reply_text,poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,button_mode,popup_success_kw,popup_fail_kw,signin_independent,signin_second_enabled,signin_second_start,signin_second_end,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
+              "groups,keywords,action,reply_text,poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,cooldown_unlimited,success_window_seconds,enabled,command_delay,button_delay,refresh_buttons,button_mode,popup_success_kw,popup_fail_kw,signin_independent,signin_second_enabled,signin_second_start,signin_second_end,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
               "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars,ai_flock_knowledge_on_demand")
 
 
@@ -7623,7 +7695,8 @@ def _auto_vals(body: AutoIn, extra=None):
         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
         body.poll_interval, canonical_steps(body.custom_steps) if body.type == "custom" else body.custom_steps.strip(),
         canonical_trigger(body.custom_trigger) if body.type == "custom" else body.custom_trigger.strip(), body.chain_retry,
-        body.cooldown, body.enabled, body.command_delay, body.button_delay, body.refresh_buttons, body.button_mode,
+        body.cooldown, body.cooldown_unlimited, body.success_window_seconds,
+        body.enabled, body.command_delay, body.button_delay, body.refresh_buttons, body.button_mode,
         body.popup_success_kw.strip(), body.popup_fail_kw.strip(), body.signin_independent,
         body.signin_second_enabled, body.signin_second_start.strip(), body.signin_second_end.strip(), body.icon_url.strip(),
         body.result_delay, body.result_timeout, body.scheduled_at.strip(), body.history_first,

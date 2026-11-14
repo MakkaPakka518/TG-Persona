@@ -35,7 +35,7 @@ def load_model_callbacks():
         hour, minute = map(int, value.split(":"))
         return hour * 60 + minute
     source = ast.parse((ROOT / "main.py").read_text())
-    wanted = {"AutoIn", "_valid_auto", "_auto_vals", "_callback_buttons", "_csv", "_budget_value", "_valid_provider_ids", "_valid_reaction"}
+    wanted = {"AutoIn", "_valid_auto", "_auto_vals", "_callback_buttons", "_red_envelope_button", "_redpacket_result", "_csv", "_budget_value", "_valid_provider_ids", "_valid_reaction"}
     assignments = [node for node in source.body if isinstance(node, ast.Assign)
                    and any(isinstance(target, ast.Name) and target.id in ("_AUTO_COLS", "DEFAULT_SIGNIN_IMAGE_PROMPT", "DEFAULT_AI_FLOCK_PROMPT", "DEFAULT_REGISTRATION_AI_FLOCK_PROMPT", "AI_FLOCK_CONTEXT_MESSAGES", "AI_FLOCK_MESSAGE_CHARS", "AI_FLOCK_SKILL_CHARS", "AI_FLOCK_MAX_TOKENS", "AI_FLOCK_KNOWLEDGE_CHARS", "KNOWLEDGE_MAX_BYTES", "AI_FLOCK_BUDGET_RANGES") for target in node.targets)]
     nodes = assignments + [node for node in source.body if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in wanted]
@@ -159,6 +159,26 @@ class TaskManagementTests(unittest.TestCase):
     def snapshot(self, account="default"):
         return tuple(tuple(self.dbs[account].execute("SELECT * FROM " + table + " ORDER BY 1"))
                      for table in ("automations", "rules", "watched_groups", "settings", "hits"))
+
+    def test_redpacket_ignores_button_text_and_uses_data(self):
+        class Btn:
+            def __init__(self, text, data=None, url=None):
+                self.text, self.data, self.url = text, data, url
+        pick = FIXTURE["_red_envelope_button"]
+        # 同名红包在不同群文案不同，但 data 前缀一致，仍然要认出
+        for label, data in (("👆🏻 好運連連", b"red_envelope-DLXli"),
+                            ("🖕 吉运连连", b"red_envelope-4s9B3"),
+                            ("👆 好運連連", b"red_envelope-qAcOs")):
+            self.assertEqual(pick([[Btn(label, data=data)]]).text, label)
+        self.assertIsNone(pick([[Btn("1 🎻", data=b"play7de19866")]]))
+        self.assertIsNone(pick([[Btn("点击领奖", url="https://evil.example")]]))
+
+    def test_redpacket_popup_result_parsing(self):
+        parse = FIXTURE["_redpacket_result"]
+        self.assertEqual(parse("🧧恭喜，你领取到了\n𝙈𝙖𝙠𝙠𝙖 ℙ𝕒𝕜𝕜𝕒 の 5积分"), "success")
+        self.assertEqual(parse("ʕ•̫͡•ʔ 你已经领取过红包了。不许贪吃"), "repeat")
+        self.assertEqual(parse("/(ㄒoㄒ)/~~ \n\n来晚了，红包已经被抢光啦。"), "expired")
+        self.assertEqual(parse(""), "unknown")
 
     def test_redpacket_only_clicks_callback_buttons(self):
         class Btn:

@@ -354,12 +354,12 @@ class OwnerAITests(unittest.IsolatedAsyncioTestCase):
         limit = self.b['KNOWLEDGE_MAX_BYTES']
         self.b['KNOWLEDGE_MAX_BYTES'] = len(content.encode()) + 350
         try:
-            content = self.b['_append_study'](content, 'OLD' * 40)
-            content = self.b['_append_study'](content, 'NEW' * 40)
+            content = self.b['_append_study'](content, '旧' * 40)
+            content = self.b['_append_study'](content, '新' * 40)
         finally:
             self.b['KNOWLEDGE_MAX_BYTES'] = limit
         self.assertIn('必须保留的纠正', content)
-        self.assertNotIn('OLD' * 40, content)
+        self.assertNotIn('旧' * 40, content)
 
     async def test_reply_log_records_exact_reference_snapshot(self):
         provider = await self.provider()

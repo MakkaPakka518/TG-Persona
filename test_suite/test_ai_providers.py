@@ -132,7 +132,7 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
         trace = {}
         reply = await self.b['_call_ai_any']('聊聊天', provider_ids=first+','+second, feature='ai_flock',
                                             validate=self.b['_flock_reply'], trace=trace)
-        self.assertEqual(reply, '正常回复')
+        self.assertEqual(self.b['_flock_split'](reply)[2], '正常回复')
         self.assertEqual(calls, [first, second])
         self.assertIn('超时', trace['failures'][0])
         self.b['_ai_rr'].clear()
@@ -140,10 +140,11 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
         calls.clear()
         async def invalid(cfg, *_args):
             calls.append(cfg['id'])
-            return '长' * 100 if cfg['id'] == first else '简短\n回复'
+            return '长' * 900 if cfg['id'] == first else '简短\n回复'
         self.b['_call_ai'] = invalid
-        self.assertEqual(await self.b['_call_ai_any']('聊聊天', provider_ids=first+','+second,
-            feature='ai_flock', validate=self.b['_flock_reply']), '简短 回复')
+        got = await self.b['_call_ai_any']('聊聊天', provider_ids=first+','+second,
+            feature='ai_flock', validate=self.b['_flock_reply'])
+        self.assertEqual(self.b['_flock_split'](got)[2], '简短 回复')
         self.assertEqual(calls, [first, second])
         calls.clear()
         with self.assertRaisesRegex(RuntimeError, '没有可切换的备用线路'):
@@ -181,14 +182,16 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
             return '' if cfg['id'] == bad else '正常回复'
         self.b['_call_ai'] = request
         for _ in range(3):
-            self.assertEqual(await self.b['_call_ai_any']('聊天', provider_ids=bad+','+good,
-                feature='ai_flock', validate=self.b['_flock_reply']), '正常回复')
+            got = await self.b['_call_ai_any']('聊天', provider_ids=bad+','+good,
+                feature='ai_flock', validate=self.b['_flock_reply'])
+            self.assertEqual(self.b['_flock_split'](got)[2], '正常回复')
         self.assertEqual(calls, [bad, good, good, good])
         self.b['get_runtime']().ai_flock_provider_retry_at[bad] = 0
         self.b['_ai_rr'].clear()
         self.b['_call_ai'] = AsyncMock(return_value='恢复后的回复')
-        self.assertEqual(await self.b['_call_ai_any']('聊天', provider_ids=bad+','+good,
-            feature='ai_flock', validate=self.b['_flock_reply']), '恢复后的回复')
+        got = await self.b['_call_ai_any']('聊天', provider_ids=bad+','+good,
+            feature='ai_flock', validate=self.b['_flock_reply'])
+        self.assertEqual(self.b['_flock_split'](got)[2], '恢复后的回复')
         self.assertEqual(self.b['_call_ai'].await_args.args[0]['id'], bad)
         self.assertNotIn(bad, self.b['get_runtime']().ai_flock_provider_retry_at)
 
@@ -197,8 +200,15 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
         second = (await self.b['create_ai_provider'](self.body(note='备用')))['provider']['id']
         self.b['_call_ai'] = AsyncMock(return_value='NO_REPLY')
         result = await self.b['_call_ai_any']('聊聊天', provider_ids=first+','+second, feature='ai_flock', validate=self.b['_flock_reply'])
-        self.assertEqual(result, 'NO_REPLY')
+        self.assertTrue(result.startswith('NO_REPLY'))
         self.b['_call_ai'].assert_awaited_once()
+
+    def test_flock_reply_rejects_bare_numbers_and_symbols(self):
+        for bad in ('8', '98', '?!', '🧧'):
+            with self.assertRaises(ValueError):
+                self.b['_flock_reply'](bad)
+        self.assertEqual(self.b['_flock_split'](self.b['_flock_reply']('嗯 行'))[2], '嗯 行')
+        self.assertEqual(self.b['_flock_split'](self.b['_flock_reply']('8|晚点说'))[2], '晚点说')
 
     async def test_all_fail_error_is_redacted_and_provider_limit_validates(self):
         await self.b['create_ai_provider'](self.body())

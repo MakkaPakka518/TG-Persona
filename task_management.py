@@ -32,7 +32,7 @@ MAX_BYTES = 2 * 1024 * 1024
 SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
-    "poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,enabled,command_delay,button_delay,refresh_buttons,button_mode,popup_success_kw,popup_fail_kw,signin_independent,signin_second_enabled,signin_second_start,signin_second_end,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
+    "poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,cooldown_unlimited,success_window_seconds,enabled,command_delay,button_delay,refresh_buttons,button_mode,popup_success_kw,popup_fail_kw,signin_independent,signin_second_enabled,signin_second_start,signin_second_end,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
     "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars,ai_flock_knowledge_on_demand"
 ).split(","))
 # Credentials are stored per-account in settings, never in task rows/exports.
@@ -40,7 +40,8 @@ INTEGER_LIMITS = {
     "click_btn": (0, 1), "is_chat": (0, 1), "signin_captcha": (0, 1),
     "enabled": (0, 1), "refresh_buttons": (0, 1), "click_times": (1, 20),
     "click_interval": (50, 3000), "retries": (0, 5), "chain_retry": (1, 5),
-    "cooldown": (0, 86400), "poll_interval": (0, 90 * 86400), "result_timeout": (1, 300),
+    "cooldown": (0, 86400), "cooldown_unlimited": (0, 1), "success_window_seconds": (10, 600),
+    "poll_interval": (0, 90 * 86400), "result_timeout": (1, 300),
     "history_first": (0, 1), "link_mode": (0, 1), "link_limit": (2, 4), "link_wait": (2, 15),
     "success_reply_enabled": (0, 1), "success_reply_delay": (0, 300),
     "ai_flock_enabled": (0, 1), "ai_flock_minutes": (1, 60),
@@ -66,8 +67,9 @@ APPLICABILITY = {
     "cooldown": {"keepalive", "grabcodes", "redpacket"},
     "retries": {"signin", "custom", "keepalive"}, "chain_retry": {"custom"},
     "link_mode": {"link_register", "code_register"}, "link_limit": {"link_register", "code_register"}, "link_wait": {"link_register", "code_register"},
-    "existing_kw": {"link_register", "button_register", "code_register"}, "success_reply_enabled": {"link_register", "button_register", "code_register"},
-    "success_reply_text": {"link_register", "button_register", "code_register"}, "success_reply_delay": {"link_register", "button_register", "code_register"},
+    "existing_kw": {"link_register", "button_register", "code_register"}, "success_reply_enabled": {"link_register", "button_register", "code_register", "redpacket"},
+    "cooldown_unlimited": {"keepalive", "grabcodes", "redpacket"}, "success_window_seconds": {"redpacket"},
+    "success_reply_text": {"link_register", "button_register", "code_register", "redpacket"}, "success_reply_delay": {"link_register", "button_register", "code_register", "redpacket"},
     "ai_provider_ids": {"signin"},
     "ai_flock_provider_ids": {"link_register", "button_register", "code_register"},
     "ai_flock_reaction": {"link_register", "button_register", "code_register"},

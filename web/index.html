@@ -779,7 +779,8 @@ section.act,.fold.open .fold-b{animation:none}
               <div class="hint">可按模型能力和费用手动调小或调大，不同任务可分别设置。</div>
               <label>使用的 AI API（可多选）</label><div id="lkAiFlockProviders" class="grp-pick"></div>
               <div class="hint">不选择表示使用全部已启用 API；多选后按所选列表轮询。</div>
-              <label for="lkAiFlockPrompt">人格提示词</label><textarea id="lkAiFlockPrompt" maxlength="1000" rows="4">你是刚抢到注册码的普通群友。只在别人明显接你的话、问你或质疑你时回复；普通闲聊、感叹、问别人、“人呢”“还得优化”等不要接，应该沉默时只输出NO_REPLY。回复像手机临时打字，每次6至18个字，口语、随意，不写完整说明文，不复述问题。刚抢到时只表达一次开心，可用“卧槽真中了”“终于抢到了”“圆梦了”，不要反复感谢。第一次被质疑脚本时轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；再次质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞；“老板”“xxlb”“圆梦”各最多出现一次。不要长篇自证，不主动找话题，不每条都回。结束语只出现一次：工作日工作时间说“先忙去了”，饭点说“吃饭去了”，凌晨说“圆梦了睡觉”，其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容或NO_REPLY。</textarea>
+              <label for="lkAiFlockPrompt">人格提示词</label><textarea id="lkAiFlockPrompt" maxlength="1000" rows="4">你是刚抢到注册码的普通群友。说话像手机临时打字，随意、简短，每次6至18个字，不写完整说明文，不用客服腔，不复述对方的话。禁止回复速度过快，要模拟一个打字的过程。只处理三类消息，其余一律输出NO_REPLY：一、有人明确质疑你是脚本或手速不正常（如“是不是脚本”“怎么每次都是你”“机器吧”），轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；二、有人@你、回复你或点名你，但内容是打招呼、玩笑、调侃（如“大佬也在啊”“大佬手真快”“又来抢”），可以自然接一句，别自证别解释怎么抢的；三、别人之间的对话、别人被质疑、普通闲聊、感叹、问别人、“人呢”“还得优化”等内容不要接话。第一次被质疑脚本时轻松否认一句；再次被质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题，不再争论。越解释越像脚本，不要长篇自证，不要连续重复“纯手速”。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞。“老板”“xxlb”“圆梦”各最多出现一次。允许偶尔省略标点、使用“哈哈”“啊”“吧”，但不要每句都有语气词。结束语只出现一次：北京时间工作日9点至18点说“先忙去了”；饭点说“吃饭去了”；凌晨0点至6点说“圆梦了睡觉”；其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容。</textarea>
+              <button class="ghost" type="button" onclick="resetRegistrationPrompt('lkAiFlockPrompt')">恢复默认人格</button>
               <label for="lkAiFlockReaction">可选表情回应</label><input type="text" id="lkAiFlockReaction" list="aiFlockReactionOptions" maxlength="16" placeholder="留空不点表情"><div class="ai-flock-emojis" id="lkAiFlockReactionPicker" data-reaction-field="lkAiFlockReaction"></div>
             </div>
             <label for="lkTimeout">每步最长等待（秒）</label>
@@ -832,7 +833,8 @@ section.act,.fold.open .fold-b{animation:none}
               <div class="hint">可按模型能力和费用手动调小或调大，不同任务可分别设置。</div>
               <label>使用的 AI API（可多选）</label><div id="crAiFlockProviders" class="grp-pick"></div>
               <div class="hint">不选择表示使用全部已启用 API；多选后按所选列表轮询。</div>
-              <label for="crAiFlockPrompt">人格提示词</label><textarea id="crAiFlockPrompt" maxlength="1000" rows="4">你是刚抢到注册码的普通群友。只在别人明显接你的话、问你或质疑你时回复；普通闲聊、感叹、问别人、“人呢”“还得优化”等不要接，应该沉默时只输出NO_REPLY。回复像手机临时打字，每次6至18个字，口语、随意，不写完整说明文，不复述问题。刚抢到时只表达一次开心，可用“卧槽真中了”“终于抢到了”“圆梦了”，不要反复感谢。第一次被质疑脚本时轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；再次质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞；“老板”“xxlb”“圆梦”各最多出现一次。不要长篇自证，不主动找话题，不每条都回。结束语只出现一次：工作日工作时间说“先忙去了”，饭点说“吃饭去了”，凌晨说“圆梦了睡觉”，其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容或NO_REPLY。</textarea>
+              <label for="crAiFlockPrompt">人格提示词</label><textarea id="crAiFlockPrompt" maxlength="1000" rows="4">你是刚抢到注册码的普通群友。说话像手机临时打字，随意、简短，每次6至18个字，不写完整说明文，不用客服腔，不复述对方的话。禁止回复速度过快，要模拟一个打字的过程。只处理三类消息，其余一律输出NO_REPLY：一、有人明确质疑你是脚本或手速不正常（如“是不是脚本”“怎么每次都是你”“机器吧”），轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；二、有人@你、回复你或点名你，但内容是打招呼、玩笑、调侃（如“大佬也在啊”“大佬手真快”“又来抢”），可以自然接一句，别自证别解释怎么抢的；三、别人之间的对话、别人被质疑、普通闲聊、感叹、问别人、“人呢”“还得优化”等内容不要接话。第一次被质疑脚本时轻松否认一句；再次被质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题，不再争论。越解释越像脚本，不要长篇自证，不要连续重复“纯手速”。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞。“老板”“xxlb”“圆梦”各最多出现一次。允许偶尔省略标点、使用“哈哈”“啊”“吧”，但不要每句都有语气词。结束语只出现一次：北京时间工作日9点至18点说“先忙去了”；饭点说“吃饭去了”；凌晨0点至6点说“圆梦了睡觉”；其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容。</textarea>
+              <button class="ghost" type="button" onclick="resetRegistrationPrompt('crAiFlockPrompt')">恢复默认人格</button>
               <label for="crAiFlockReaction">可选表情回应</label><input type="text" id="crAiFlockReaction" list="aiFlockReactionOptions" maxlength="16" placeholder="留空不点表情"><div class="ai-flock-emojis" id="crAiFlockReactionPicker" data-reaction-field="crAiFlockReaction"></div>
             </div>
             <div class="hint">仅成功推送通知。新任务保存后请手动启用，即可持续监听所选群。</div>
@@ -880,7 +882,8 @@ section.act,.fold.open .fold-b{animation:none}
               <div class="hint">可按模型能力和费用手动调小或调大，不同任务可分别设置。</div>
               <label>使用的 AI API（可多选）</label><div id="brAiFlockProviders" class="grp-pick"></div>
               <div class="hint">不选择表示使用全部已启用 API；多选后按所选列表轮询。</div>
-              <label for="brAiFlockPrompt">人格提示词</label><textarea id="brAiFlockPrompt" maxlength="1000" rows="4">你是刚抢到注册码的普通群友。只在别人明显接你的话、问你或质疑你时回复；普通闲聊、感叹、问别人、“人呢”“还得优化”等不要接，应该沉默时只输出NO_REPLY。回复像手机临时打字，每次6至18个字，口语、随意，不写完整说明文，不复述问题。刚抢到时只表达一次开心，可用“卧槽真中了”“终于抢到了”“圆梦了”，不要反复感谢。第一次被质疑脚本时轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；再次质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞；“老板”“xxlb”“圆梦”各最多出现一次。不要长篇自证，不主动找话题，不每条都回。结束语只出现一次：工作日工作时间说“先忙去了”，饭点说“吃饭去了”，凌晨说“圆梦了睡觉”，其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容或NO_REPLY。</textarea>
+              <label for="brAiFlockPrompt">人格提示词</label><textarea id="brAiFlockPrompt" maxlength="1000" rows="4">你是刚抢到注册码的普通群友。说话像手机临时打字，随意、简短，每次6至18个字，不写完整说明文，不用客服腔，不复述对方的话。禁止回复速度过快，要模拟一个打字的过程。只处理三类消息，其余一律输出NO_REPLY：一、有人明确质疑你是脚本或手速不正常（如“是不是脚本”“怎么每次都是你”“机器吧”），轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；二、有人@你、回复你或点名你，但内容是打招呼、玩笑、调侃（如“大佬也在啊”“大佬手真快”“又来抢”），可以自然接一句，别自证别解释怎么抢的；三、别人之间的对话、别人被质疑、普通闲聊、感叹、问别人、“人呢”“还得优化”等内容不要接话。第一次被质疑脚本时轻松否认一句；再次被质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题，不再争论。越解释越像脚本，不要长篇自证，不要连续重复“纯手速”。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞。“老板”“xxlb”“圆梦”各最多出现一次。允许偶尔省略标点、使用“哈哈”“啊”“吧”，但不要每句都有语气词。结束语只出现一次：北京时间工作日9点至18点说“先忙去了”；饭点说“吃饭去了”；凌晨0点至6点说“圆梦了睡觉”；其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容。</textarea>
+              <button class="ghost" type="button" onclick="resetRegistrationPrompt('brAiFlockPrompt')">恢复默认人格</button>
               <label for="brAiFlockReaction">可选表情回应</label><input type="text" id="brAiFlockReaction" list="aiFlockReactionOptions" maxlength="16" placeholder="留空不点表情"><div class="ai-flock-emojis" id="brAiFlockReactionPicker" data-reaction-field="brAiFlockReaction"></div>
             </div>
             <div class="hint">长期监听，只有注册成功才推送通知。新任务保存后请手动启用。</div>
@@ -1291,10 +1294,30 @@ section.act,.fold.open .fold-b{animation:none}
           <label>监控群</label>
           <div class="hint" style="margin:0 0 8px">不勾 = 全部监听群</div>
           <div id="pGroups" class="grp-pick"></div>
-          <label>触发关键词(逗号分隔,消息文本含其中任意词即抢)</label>
-          <input type="text" id="pKeywords" placeholder="🎁,红包,领红包" value="🎁,红包">
-          <label for="pButtonMode">按钮处理模式</label><select id="pButtonMode"><option value="script">脚本模式（默认）</option><option value="ai">AI 模式</option><option value="fallback">AI 兜底</option></select>
-          <div class="hint">只点击红包自身的回调按钮；链接类、跳转类按钮一律不点（群里可能夹带盗号钓鱼链接）。点击成功后在记录里能看到实际点中的按钮文字。</div>
+          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pSuccessReply" style="width:auto" onchange="toggleRedpacketReply()"> 抢到后回群发一条</label>
+          <div id="pSuccessReplyBox" class="hidden">
+            <div class="flex">
+              <div><label>延时(秒)</label><input type="number" id="pSuccessDelay" value="40" min="0" max="600"></div>
+            </div>
+            <label for="pSuccessText">回复内容</label>
+            <input type="text" id="pSuccessText" placeholder="如: 领到了">
+            <div class="hint">AI 水群开启时不发这条，避免同一件事说两遍。</div>
+          </div>
+          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pAiFlock" style="width:auto" onchange="toggleRedpacketFlock()"> 抢到后 AI 观察群聊</label>
+          <div id="pAiFlockBox" class="hidden">
+            <div class="flex">
+              <div><label>观察窗口(秒)</label><input type="number" id="pAiWindow" value="40" min="10" max="600"></div>
+            </div>
+            <label for="pAiPrompt">人格提示词</label>
+            <textarea id="pAiPrompt" rows="7" placeholder="留空使用内置红包人格"></textarea>
+            <button class="ghost" type="button" onclick="resetRedpacketPrompt()">恢复默认人格</button>
+            <div class="hint">窗口内按聊天内容判断：明确质疑才否认，打招呼可轻回一句，闲聊不接。</div>
+          </div>
+          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pCdUnlimited" style="width:auto"> 冷却不限制</label>
+          <div class="flex">
+            <div><label>同群冷却(秒)</label><input type="number" id="pCd" value="5" min="0"></div>
+          </div>
+          <div class="hint">只点击红包自身的回调按钮（data 以 red_envelope 开头）；链接类、跳转类按钮一律不点（群里可能夹带盗号钓鱼链接）。按钮文案会变，所以不按文字识别。</div>
           <div class="flex">
             <div><label>同群冷却(秒)</label><input type="number" id="pCd" value="5" min="0"></div>
           </div>
@@ -1762,7 +1785,7 @@ let state={tg:{},logged_in:false,running:true};
 const EMOJIS=["👍","👎","❤","🔥","🥰","👏","😁","🤔","🤯","😱","🤬","😢","🎉","🤩","🤮","💩","🙏","👌","🤡","🥱","🥴","😍","🐳","🌚","🌭","🍌","🍎","😘","😎","🆒","🆕","🏆","✌","🍾","🖖","😭","😅","🥳","🎃","🙃","🤝","🗿","🛸","🤗","😴","😂","💅","🎊","🥂","😈"];
 const DEFAULT_SIGNIN_IMAGE_PROMPT='你是一个高精度的验证码与图像识别助手。请仔细观察图片中的核心事物、场景、服装或物品，并根据机器人题目说明给出最匹配的名称。必须且只能输出答案本身，严禁输出任何多余字符、标点符号、解释、理由或思考过程！';
 const DEFAULT_AI_FLOCK_PROMPT='你是群聊中的普通成员。结合最近聊天自然回复一句简短中文，不要解释身份，不要使用链接、命令、@提及或 Markdown，不要连续刷屏。';
-const DEFAULT_REGISTRATION_AI_FLOCK_PROMPT='你是刚抢到注册码的普通群友。只在别人明显接你的话、问你或质疑你时回复；普通闲聊、感叹、问别人、“人呢”“还得优化”等不要接，应该沉默时只输出NO_REPLY。回复像手机临时打字，每次6至18个字，口语、随意，不写完整说明文，不复述问题。刚抢到时只表达一次开心，可用“卧槽真中了”“终于抢到了”“圆梦了”，不要反复感谢。第一次被质疑脚本时轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；再次质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞；“老板”“xxlb”“圆梦”各最多出现一次。不要长篇自证，不主动找话题，不每条都回。结束语只出现一次：工作日工作时间说“先忙去了”，饭点说“吃饭去了”，凌晨说“圆梦了睡觉”，其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容或NO_REPLY。';
+const DEFAULT_REGISTRATION_AI_FLOCK_PROMPT='你是刚抢到注册码的普通群友。说话像手机临时打字，随意、简短，每次6至18个字，不写完整说明文，不用客服腔，不复述对方的话。禁止回复速度过快，要模拟一个打字的过程。只处理三类消息，其余一律输出NO_REPLY：一、有人明确质疑你是脚本或手速不正常（如“是不是脚本”“怎么每次都是你”“机器吧”），轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；二、有人@你、回复你或点名你，但内容是打招呼、玩笑、调侃（如“大佬也在啊”“大佬手真快”“又来抢”），可以自然接一句，别自证别解释怎么抢的；别人直接回复你上一条消息，也算在跟你说话，要接；打招呼、玩笑、调侃是善意的，不是质疑脚本，别用自证或否认的口吻回；三、别人之间的对话、别人被质疑、普通闲聊、感叹、问别人、“人呢”“还得优化”等内容不要接话。第一次被质疑脚本时轻松否认一句；再次被质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题，不再争论。越解释越像脚本，不要长篇自证，不要连续重复“纯手速”。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞。“老板”“xxlb”“圆梦”各最多出现一次。允许偶尔省略标点、使用“哈哈”“啊”“吧”，但不要每句都有语气词。结束语只出现一次：北京时间工作日9点至18点说“先忙去了”；饭点说“吃饭去了”；凌晨0点至6点说“圆梦了睡觉”；其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容。';
 function toast(msg,err){if(!msg)return;const t=$('#toast');t.textContent=msg;t.classList.add('show');t.classList.toggle('err',!!err);setTimeout(()=>t.classList.remove('show'),2600)}
 // ---------- 账号请求范围 ----------
 let selectedAccount='default', accountEpoch=0;
@@ -2465,7 +2488,7 @@ function editAutoItem(id){
     $('#kUnit').value=String(unit);$('#kEvery').value=Math.max(1,Math.round(iv/unit));
     $('#kDel').value=a.cooldown||0;$('#kCancel').style.display='inline-block';
   }else{
-    $('#pName').value=a.name;setAutoGroups('redpacket',a.groups);$('#pKeywords').value=a.keywords;$('#pButtonMode').value=a.button_mode||'script';
+    $('#pName').value=a.name;setAutoGroups('redpacket',a.groups);$('#pSuccessReply').checked=!!a.success_reply_enabled;$('#pSuccessDelay').value=a.success_reply_delay??40;$('#pSuccessText').value=a.success_reply_text||'';$('#pAiFlock').checked=!!a.ai_flock_enabled;$('#pAiWindow').value=a.success_window_seconds??40;$('#pAiPrompt').value=a.ai_flock_prompt||'';$('#pCdUnlimited').checked=!!a.cooldown_unlimited;$('#pCd').value=a.cooldown??5;toggleRedpacketReply();toggleRedpacketFlock();
     $('#pCd').value=a.cooldown;$('#pCancel').style.display='inline-block';
   }
   openAutoForm(editAuto.type);
@@ -2482,7 +2505,7 @@ function cancelAutoEdit(t){
     custom:()=>{$('#cName').value='';$('#cTarget').value='';setCustomTrigger('{"mode":"manual"}');setVisualSteps('[]');$('#cUser').value='';$('#cSecret').value='';$('#stepAdvanced').open=false;$('#cRetry').value=1;$('#cRetries').value=2;$('#cCancel').style.display='none'},
     code_register:()=>{$('#crName').value='';$('#crGroup').value='';$('#crBot').value='';$('#crButton').value='注册';$('#crButtonMode').value='script';$('#crReady').value='已进入注册状态';$('#crExisting').value='无法启用续期功能';$('#crUser').value='';$('#crSecret').value='';$('#crMode').value='1';$('#crLimit').value=4;$('#crWait').value=3;$('#crSuccess').value='成功';$('#crFail').value='';$('#crTimeout').value=30;$('#crGroupReply').checked=false;$('#crReplyText').value='';$('#crReplyDelay').value=5;$('#crReplyFields').classList.add('hidden');$('#crAiFlock').checked=false;$('#crAiFlockMinutes').value=5;$('#crAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('cr','','');setIntegerFields('crAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#crAiFlockKnowledgeOnDemand').checked=false;$('#crAiFlockFields').classList.add('hidden');$('#crCancel').style.display='none'},
     button_register:()=>{$('#brName').value='';setAutoGroups('button_register','');$('#brAnnouncement').value='定时注册';$('#brAnnouncementButton').value='点击注册';$('#brCommand').value='/start';$('#brButton').value='创建';$('#brButtonMode').value='script';$('#brReady').value='注册状态';$('#brExisting').value='';$('#brUser').value='';$('#brSecret').value='';$('#brSuccess').value='成功';$('#brFail').value='';$('#brTimeout').value=30;$('#brGroupReply').checked=true;$('#brReplyText').value='拿下！';$('#brReplyDelay').value=5;$('#brGroupReplyFields').classList.remove('hidden');$('#brAiFlock').checked=false;$('#brAiFlockMinutes').value=5;$('#brAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('br','','');setIntegerFields('brAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#brAiFlockKnowledgeOnDemand').checked=false;$('#brAiFlockFields').classList.add('hidden');$('#brCancel').style.display='none'},
-    redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pKeywords').value='🎁,红包';$('#pButtonMode').value='script';$('#pCd').value='5';$('#pCancel').style.display='none'},
+    redpacket:()=>{$('#pName').value='';setAutoGroups('redpacket','');$('#pSuccessReply').checked=false;$('#pSuccessDelay').value='40';$('#pSuccessText').value='';$('#pAiFlock').checked=false;$('#pAiWindow').value='40';$('#pAiPrompt').value='';$('#pCdUnlimited').checked=false;$('#pCd').value='5';toggleRedpacketReply();toggleRedpacketFlock();$('#pCancel').style.display='none'},
     keepalive:()=>{$('#kName').value='';$('#kTarget').value='';$('#kText').value='';$('#kEvery').value=7;$('#kUnit').value='86400';$('#kDel').value=10;$('#kCancel').style.display='none'}})[t]();
 }
 function pickGrabAct(v){
@@ -2728,6 +2751,20 @@ function renderCodeGroupOptions(value=$('#crGroup').value){
   $('#crGroup').innerHTML='<option value="">请选择监听群</option>'+groups.map(g=>`<option value="${esc(String(g.chat_id))}">${esc(g.name||String(g.chat_id))}</option>`).join('');
   $('#crGroup').value=valid?selected:'';
 }
+const REGISTRATION_DEFAULT_PROMPT=`你是刚抢到注册码的普通群友。说话像手机临时打字，随意、简短，每次6至18个字，不写完整说明文，不用客服腔，不复述对方的话。禁止回复速度过快，要模拟一个打字的过程。只处理三类消息，其余一律输出NO_REPLY：一、有人明确质疑你是脚本或手速不正常（如“是不是脚本”“怎么每次都是你”“机器吧”），轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；二、有人@你、回复你或点名你，但内容是打招呼、玩笑、调侃（如“大佬也在啊”“大佬手真快”“又来抢”），可以自然接一句，别自证别解释怎么抢的；三、别人之间的对话、别人被质疑、普通闲聊、感叹、问别人、“人呢”“还得优化”等内容不要接话。第一次被质疑脚本时轻松否认一句；再次被质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题，不再争论。越解释越像脚本，不要长篇自证，不要连续重复“纯手速”。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞。“老板”“xxlb”“圆梦”各最多出现一次。允许偶尔省略标点、使用“哈哈”“啊”“吧”，但不要每句都有语气词。结束语只出现一次：北京时间工作日9点至18点说“先忙去了”；饭点说“吃饭去了”；凌晨0点至6点说“圆梦了睡觉”；其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容。`;
+function resetRegistrationPrompt(id){const el=document.getElementById(id);if(!el)return;el.value=REGISTRATION_DEFAULT_PROMPT;toast('已恢复内置抢注人格');}
+const REDPACKET_DEFAULT_PROMPT=`你是刚在群里随手领到红包的普通群友。抢红包是顺手的事，不值得激动。
+只处理三类消息，其余一律输出NO_REPLY，不要为了显得像活人而插话：
+一、有人明确质疑你是脚本、机器人、手速不正常、怎么每次都是你：轻松否认一句，如“手快而已”“刚好在看手机”，不解释第二遍，对方追问就沉默；
+二、有人@你、回复你或点名你，但内容是打招呼、玩笑、调侃（如“大佬也在啊”“大佬手真快”“又来抢”）：可以轻回一句，如“顺手”“刚到”“小赚”，不自证不解释怎么抢的；
+三、别人之间的对话、别人被质疑、泛泛感叹、问别人：一律不接。
+说话像手机临时打字，每次3至10个字，最多一句。不提金额，不@人，不感谢发红包的。
+不用“卧槽”“圆梦”“终于中了”“已收到”“感谢理解”“作为”这类夸张或客服措辞。
+不要每句都带语气词，标点可省，只输出聊天内容。`;
+function toggleRedpacketReply(){$('#pSuccessReplyBox').classList.toggle('hidden',!$('#pSuccessReply').checked);}
+function toggleRedpacketFlock(){$('#pAiFlockBox').classList.toggle('hidden',!$('#pAiFlock').checked);}
+function resetRedpacketPrompt(){$('#pAiPrompt').value=REDPACKET_DEFAULT_PROMPT;toast('已恢复内置红包人格');}
+
 function openAutoForm(type){
   const el=document.getElementById('af-'+type);
   if(!el)return;
@@ -2879,12 +2916,20 @@ async function saveAuto(type){
     if(!body.reply_text)return toast('请填写要发送的内容',1);
     if(iv<60)return toast('间隔最少 1 分钟',1);
   }else{
-    body={type,name:$('#pName').value.trim(),groups:getAutoGroups('redpacket'),keywords:$('#pKeywords').value.trim(),button_mode:$('#pButtonMode').value,
-      cooldown:+$('#pCd').value||5};
+    body={type,name:$('#pName').value.trim(),groups:getAutoGroups('redpacket'),
+      success_reply_enabled:$('#pSuccessReply').checked?1:0,
+      success_reply_delay:Number($('#pSuccessDelay').value)||0,
+      success_reply_text:$('#pSuccessText').value.trim(),
+      ai_flock_enabled:$('#pAiFlock').checked?1:0,
+      ai_flock_prompt:$('#pAiPrompt').value.trim(),
+      success_window_seconds:Number($('#pAiWindow').value)||40,
+      cooldown_unlimited:$('#pCdUnlimited').checked?1:0,
+      cooldown:Number($('#pCd').value)||0};
     if(!body.name)return toast('请填写任务名称',1);
   }
   const aiButtonMode=(body.button_mode&&body.button_mode!=='script')||(type==='custom'&&parseSteps(body.custom_steps).some(step=>step.t==='click'&&step.mode!=='script'));
   if(aiButtonMode&&!aiProviders.some(provider=>provider.enabled))return toast('AI 按钮模式需要先在设置中添加并启用 AI API',1);
+  if(type==='redpacket'&&body.ai_flock_enabled&&!aiProviders.some(provider=>provider.enabled))return toast('请先到设置添加并启用 AI API',1);
   if(['link_register','button_register','code_register'].includes(type)&&!selectedAIProvidersEnabled(body.ai_flock_provider_ids))return toast('水群任务只能选择已启用的 AI API',1);
   if(['link_register','button_register','code_register'].includes(type)&&body.ai_flock_enabled){
     if(!aiProviders.some(provider=>provider.enabled))return toast('请先到设置添加并启用 AI API',1);

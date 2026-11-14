@@ -352,7 +352,7 @@ class AITest(unittest.IsolatedAsyncioTestCase):
         trace = {}
         result = await self.b['_call_ai_any']('聊聊天', provider_ids=','.join(ids), feature='ai_flock',
                                              validate=self.b['_flock_reply'], trace=trace)
-        self.assertEqual(result, '测试成功')
+        self.assertEqual(self.b['_flock_split'](result)[2], '测试成功')
         self.assertEqual(len(self.calls), 2)
         self.assertEqual(trace['provider_id'], ids[1])
         self.assertIn('没有最终正文', trace['failures'][0])

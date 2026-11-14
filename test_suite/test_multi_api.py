@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import site
 import tempfile
 import unittest
 
@@ -15,6 +16,8 @@ class MultiAccountAPITests(unittest.TestCase):
     def test_accounts_and_task_config_are_isolated(self):
         with tempfile.TemporaryDirectory(prefix='multi-api-env-') as home:
             env={'PATH':os.environ.get('PATH','/usr/bin:/bin'),'HOME':home,
+                 # 子进程 HOME 指到临时目录后用户级 site-packages 会失效，显式补回。
+                 'PYTHONPATH':os.environ.get('PYTHONPATH','')+':'+site.getusersitepackages(),
                  'LD_LIBRARY_PATH':str(Path(sys.executable).resolve().parent.parent/'lib'),
                  'PANEL_PASSWORD':'Panel-fixture-password-123','TRUSTED_PROXIES':''}
             result=subprocess.run([sys.executable,str(Path(__file__).resolve()),'--probe'],env=env,
