@@ -35,7 +35,7 @@ def load_model_callbacks():
         hour, minute = map(int, value.split(":"))
         return hour * 60 + minute
     source = ast.parse((ROOT / "main.py").read_text())
-    wanted = {"AutoIn", "_valid_auto", "_auto_vals", "_csv", "_budget_value", "_valid_provider_ids", "_valid_reaction"}
+    wanted = {"AutoIn", "_valid_auto", "_auto_vals", "_callback_buttons", "_csv", "_budget_value", "_valid_provider_ids", "_valid_reaction"}
     assignments = [node for node in source.body if isinstance(node, ast.Assign)
                    and any(isinstance(target, ast.Name) and target.id in ("_AUTO_COLS", "DEFAULT_SIGNIN_IMAGE_PROMPT", "DEFAULT_AI_FLOCK_PROMPT", "DEFAULT_REGISTRATION_AI_FLOCK_PROMPT", "AI_FLOCK_CONTEXT_MESSAGES", "AI_FLOCK_MESSAGE_CHARS", "AI_FLOCK_SKILL_CHARS", "AI_FLOCK_MAX_TOKENS", "AI_FLOCK_KNOWLEDGE_CHARS", "KNOWLEDGE_MAX_BYTES", "AI_FLOCK_BUDGET_RANGES") for target in node.targets)]
     nodes = assignments + [node for node in source.body if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in wanted]
@@ -159,6 +159,18 @@ class TaskManagementTests(unittest.TestCase):
     def snapshot(self, account="default"):
         return tuple(tuple(self.dbs[account].execute("SELECT * FROM " + table + " ORDER BY 1"))
                      for table in ("automations", "rules", "watched_groups", "settings", "hits"))
+
+    def test_redpacket_only_clicks_callback_buttons(self):
+        class Btn:
+            def __init__(self, text, data=None, url=None):
+                self.text, self.data, self.url = text, data, url
+        safe = FIXTURE["_callback_buttons"]([
+            [Btn("👆 好運連連", data=b"claim"), Btn("领取记录", url="https://evil.example/steal")],
+            [Btn("查看排行榜", url="tg://resolve?domain=scam")],
+        ])
+        self.assertEqual([[b.text for b in row] for row in safe], [["👆 好運連連"]])
+        self.assertEqual(FIXTURE["_callback_buttons"]([[Btn("开", url="https://x.y")]]), [])
+        self.assertEqual(FIXTURE["_callback_buttons"](None), [])
 
     def test_batch_preview_is_read_only(self):
         aid = self.add()

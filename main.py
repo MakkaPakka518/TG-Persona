@@ -4479,17 +4479,24 @@ async def on_auto_event(event):
             else:
                 reply_desc = ""
                 buttons = await event.get_buttons()
-                target_btn = await _select_btn_mode(
-                    buttons, "打开,领取,收下,拆,红包,领", "🎁", a["button_mode"],
-                    "领取当前红包或礼物")
-                if not target_btn and a["button_mode"] == "script" and buttons and buttons[0]:
-                    target_btn = buttons[0][0]
-                    reply_desc = "点击第一个按钮"
-                elif target_btn:
-                    reply_desc = "按%s模式点击按钮" % a["button_mode"]
+                # 红包只点回调按钮:链接/跳转类按钮一律不点,避免盗号钓鱼
+                safe_buttons = _callback_buttons(buttons)
+                blocked = sum(len(row) for row in (buttons or [])) - sum(len(row) for row in safe_buttons)
+                target_btn = None
+                if safe_buttons:
+                    target_btn = await _select_btn_mode(
+                        safe_buttons, "打开,领取,收下,拆,红包,领", "🎁", a["button_mode"],
+                        "领取当前红包或礼物")
+                    if not target_btn and a["button_mode"] == "script" and safe_buttons[0]:
+                        target_btn = safe_buttons[0][0]
                 if target_btn:
+                    btn_label = (str(getattr(target_btn, "text", "") or "").strip() or "无文字")[:24]
+                    reply_desc = "点击按钮「%s」" % btn_label
                     await target_btn.click()
-                    log.info("抢红包 群=%s 任务=%s", chat, a["name"])
+                    log.info("抢红包 群=%s 任务=%s 按钮=%s", chat, a["name"], btn_label)
+                elif blocked:
+                    reply_desc = "跳过:按钮是外部链接,已拒绝点击"
+                    log.warning("抢红包 跳过链接按钮 群=%s 任务=%s 屏蔽=%s", chat, a["name"], blocked)
             add_hit(a["type"], True, chat_id=chat, rule_id=-a["id"], msg_id=event.id,
                     content=text, reply=reply_desc, grp_name=grp_name, sender=sender_name,
                     detail={"kind": a["type"], "task": a["name"], "group": grp_name or str(chat),
@@ -4724,6 +4731,12 @@ def render_placeholders(s):
 
 def _norm_emoji(x):
     return str(x or "").replace("\ufe0f", "").replace("\ufe0e", "").strip()
+
+
+def _callback_buttons(btns):
+    """只保留回调按钮:链接/跳转按钮一律丢弃,防止点到群里的盗号钓鱼链接"""
+    safe = [[b for b in row if getattr(b, "data", None) is not None] for row in (btns or [])]
+    return [row for row in safe if row]
 
 
 def _find_btn(btns, btn_text, btn_emoji=""):

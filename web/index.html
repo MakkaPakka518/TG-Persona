@@ -1294,6 +1294,7 @@ section.act,.fold.open .fold-b{animation:none}
           <label>触发关键词(逗号分隔,消息文本含其中任意词即抢)</label>
           <input type="text" id="pKeywords" placeholder="🎁,红包,领红包" value="🎁,红包">
           <label for="pButtonMode">按钮处理模式</label><select id="pButtonMode"><option value="script">脚本模式（默认）</option><option value="ai">AI 模式</option><option value="fallback">AI 兜底</option></select>
+          <div class="hint">只点击红包自身的回调按钮；链接类、跳转类按钮一律不点（群里可能夹带盗号钓鱼链接）。点击成功后在记录里能看到实际点中的按钮文字。</div>
           <div class="flex">
             <div><label>同群冷却(秒)</label><input type="number" id="pCd" value="5" min="0"></div>
           </div>
