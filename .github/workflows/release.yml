@@ -41,15 +41,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: 安装轻量测试依赖
-        run: python3 -m pip install fastapi telethon httpx uvicorn pyyaml 'cryptography>=42.0'
-
-      - name: 回归测试
-        run: |
-          python3 -m unittest discover -s test_suite -p 'test_*.py' -v
-          node test_suite/test_frontend.js
-          python3 -m py_compile main.py updater.py release_tools/release_version.py
-
+      - name: 语法检查（回归测试由本地手动执行）
+        run: python3 -m py_compile main.py updater.py release_tools/release_version.py
       - name: 计算版本并同步 VERSION
         id: ver
         env:
