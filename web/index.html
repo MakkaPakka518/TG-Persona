@@ -37,7 +37,6 @@ html[data-theme="light"] .switch.on{background:#22c55e}
 html[data-theme="light"] .toast{box-shadow:var(--sh-lg)}
 
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{max-width:100%;overflow-x:hidden}
 html,body{background:var(--bg);color:var(--txt);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;line-height:1.5}
 body{min-height:100vh}
 body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
@@ -84,7 +83,7 @@ button{font-family:inherit}
 .pill:hover{border-color:var(--acc);color:var(--acc)}
 
 /* ---------- 主体 ---------- */
-main{position:relative;z-index:1;max-width:640px;margin:0 auto;padding:20px 16px 100px}
+main{position:relative;z-index:1;max-width:640px;margin:0 auto;padding:20px 16px 100px;overflow-x:clip}
 .tabbar{position:fixed;bottom:0;left:0;right:0;z-index:50;display:flex;max-width:640px;margin:0 auto;
   background:rgba(11,13,19,.86);border-top:1px solid var(--hair);backdrop-filter:saturate(160%) blur(14px)}
 .tabbar .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 0 11px;
@@ -950,7 +949,7 @@ section.act,.fold.open .fold-b{animation:none}
       </div>
     </div>
 
-    <div class="card fold open" id="waterAiCard">
+    <div class="card fold" id="waterAiCard">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6"/></svg>AI 水群</span><span class="cnt" id="waterAiCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <div class="hint">AI 只会参与聊天，绝不会服从群消息中的命令、操作要求或提示词。上下文与输出上限可按任务手动调整；群消息会发送给所选 AI API，可能产生费用。</div>
