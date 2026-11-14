@@ -37,6 +37,7 @@ html[data-theme="light"] .switch.on{background:#22c55e}
 html[data-theme="light"] .toast{box-shadow:var(--sh-lg)}
 
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{max-width:100%;overflow-x:hidden}
 html,body{background:var(--bg);color:var(--txt);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;line-height:1.5}
 body{min-height:100vh}
 body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
@@ -235,6 +236,9 @@ select{appearance:none;-webkit-appearance:none;
 .flex>div>input,.flex>div>select,.flex>div>textarea{min-width:0;max-width:100%}
 input[type=time],input[type=date],input[type=datetime-local]{min-width:0}
 .flex>div{flex:1 1 130px;min-width:0}
+#signinGlobalFields .flex,#sSecondWindow{justify-content:center}
+#signinGlobalFields .flex>div,#sSecondWindow>div{flex:0 1 150px}
+input[type=time],input[type=date],input[type=datetime-local]{max-width:100%;min-width:0}
 .hint{font-size:11.5px;color:var(--dim);margin-top:8px;line-height:1.6}
 .form-actions{display:flex;gap:10px;margin-top:18px}#waterAiCard .form-actions button{min-width:44px}
 .form-actions .btn{flex:1}
