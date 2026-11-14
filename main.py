@@ -1923,6 +1923,29 @@ def _promote_knowledge_auto(item_id, every=False):
     return len(found)
 
 
+def _delete_knowledge_auto(item_id):
+    """删掉号主不想要的那条自动知识，其它条目原样保留。"""
+    content = _read_knowledge_auto()
+    pattern = re.compile(
+        r"<!--\s*tg-persona-auto:(\{.*?\})\s*-->(.*?)<!--\s*/tg-persona-auto\s*-->", re.S)
+    removed = []
+
+    def replace(match):
+        body = match.group(2).strip()
+        target = "k" + hashlib.sha1(body[:120].encode("utf-8")).hexdigest()[:9]
+        if target != item_id:
+            return match.group(0)
+        removed.append(True)
+        return ""
+
+    updated = pattern.sub(replace, content)
+    if not removed:
+        return False
+    updated = re.sub(r"\n{3,}", "\n\n", updated).strip()
+    _write_knowledge_auto(updated)
+    return True
+
+
 def _split_study_knowledge(text):
     """把学习结果按“- 群 / - 识”分成群记忆和可复用知识；没标的一律按群记忆处理。"""
     study_lines, knowledge_items = [], []
@@ -8708,6 +8731,10 @@ class KnowledgeAutoPromote(BaseModel):
     all: int = Field(0, ge=0, le=1)
 
 
+class KnowledgeAutoDelete(BaseModel):
+    id: str = Field(..., min_length=1, max_length=32)
+
+
 @app.get("/api/ai/flock/knowledge/auto")
 async def get_flock_knowledge_auto():
     try:
@@ -8763,6 +8790,17 @@ async def promote_flock_knowledge_auto(body: KnowledgeAutoPromote):
             if not _promote_knowledge_auto(body.id):
                 raise HTTPException(404, "没有这条自动知识")
         return {"ok": True, "promoted": 1}
+    except (ValueError, OSError) as error:
+        raise HTTPException(400, str(error)) from None
+
+
+@app.post("/api/ai/flock/knowledge/auto/delete")
+async def delete_flock_knowledge_auto(body: KnowledgeAutoDelete):
+    try:
+        async with get_runtime().knowledge_lock:
+            if not _delete_knowledge_auto(body.id):
+                raise HTTPException(404, "没有这条自动知识")
+        return {"ok": True}
     except (ValueError, OSError) as error:
         raise HTTPException(400, str(error)) from None
 

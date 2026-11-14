@@ -3682,22 +3682,31 @@ function renderKnowledgeAutoEntries(){
     text.style.cssText='flex:1;min-width:0;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word;opacity:.92';
     text.textContent=(e.body||'')+(e.truncated?'…':'');
     row.appendChild(text);
+    const actions=document.createElement('div');
+    actions.style.cssText='flex:0 0 auto;display:flex;flex-direction:column;gap:6px;align-items:stretch';
     if(e.verified){
       const tag=document.createElement('span');
-      tag.style.cssText='flex:0 0 auto;color:#a8e05f;font-size:12px;padding-top:2px';
+      tag.style.cssText='color:#a8e05f;font-size:12px;text-align:center';
       tag.textContent='✔ 已验证';
-      row.appendChild(tag);
+      actions.appendChild(tag);
     }else{
       const btn=document.createElement('button');
-      btn.type='button';btn.className='ghost';btn.style.cssText='flex:0 0 auto';
+      btn.type='button';btn.className='ghost';
       btn.textContent='标为已验证';
       btn.onclick=()=>promoteKnowledgeAuto(e.id,btn);
-      row.appendChild(btn);
+      actions.appendChild(btn);
     }
+    const del=document.createElement('button');
+    del.type='button';del.className='ghost';del.style.cssText='color:#ffb4a2';
+    del.textContent='删除';
+    del.onclick=()=>deleteKnowledgeAuto(e.id,del);
+    actions.appendChild(del);
+    row.appendChild(actions);
     box.appendChild(row);
   }
 }
 async function promoteKnowledgeAuto(id,btn){const c=accountContext();if(btn){btn.disabled=true;btn.textContent='确认中…'}try{await api('/api/ai/flock/knowledge/auto/promote',{method:'POST',body:JSON.stringify({id}),_account:c});toast('已标为已验证');loadKnowledgeAuto()}catch(e){if(btn){btn.disabled=false;btn.textContent='标为已验证'}toast('确认失败：'+e.message,1)}}
+async function deleteKnowledgeAuto(id,btn){const c=accountContext();if(btn){btn.disabled=true;btn.textContent='删除中…'}try{await api('/api/ai/flock/knowledge/auto/delete',{method:'POST',body:JSON.stringify({id}),_account:c});toast('已删除这条自动知识');loadKnowledgeAuto()}catch(e){if(btn){btn.disabled=false;btn.textContent='删除'}toast('删除失败：'+e.message,1)}}
 async function promoteAllKnowledgeAuto(){const c=accountContext();const pending=(knowledgeAutoEntries||[]).filter(e=>!e.verified).length;if(!pending){toast('没有待确认的条目');return}try{const d=await api('/api/ai/flock/knowledge/auto/promote',{method:'POST',body:JSON.stringify({all:1}),_account:c});toast('已确认 '+((d&&d.promoted)||pending)+' 条');loadKnowledgeAuto()}catch(e){toast('确认失败：'+e.message,1)}}
 async function saveKnowledgeAutoToggle(){const c=accountContext(),enabled=$('#knowledgeAutoEnabled').checked?1:0;try{await api('/api/ai/flock/knowledge/auto',{method:'PUT',body:JSON.stringify({content:'',enabled}),_account:c});toast(enabled?'已开启 AI 自动积累知识':'已关闭 AI 自动积累知识，已有内容保留但不再引用')}catch(e){$('#knowledgeAutoEnabled').checked=!enabled;toast('保存失败：'+e.message,1)}}
 async function saveKnowledgeAuto(){const c=accountContext(),content=$('#knowledgeAutoEditor').value;try{await api('/api/ai/flock/knowledge/auto',{method:'PUT',body:JSON.stringify({content,enabled:-1}),_account:c});toast('自动知识已保存');loadKnowledgeAuto()}catch(e){toast('保存失败：'+e.message,1)}}

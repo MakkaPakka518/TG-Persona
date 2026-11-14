@@ -33,6 +33,23 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         return (await self.b['create_ai_provider'](self.b['AIProviderInput'](
             note='测试', base='https://example.invalid/v1', key='fixture-key', model='test')))['provider']['id']
 
+    async def test_auto_knowledge_delete_keeps_others(self):
+        """验证之后自然要能删：删一条不能牵连同批其它条目。"""
+        type(self.runtime).knowledge_lock = asyncio.Lock()
+        text = ('<!-- tg-persona-auto:{"created_at":1,"chat_id":"-1","verified":0} -->\n'
+                '甲群常聊把源码丢给我改\n<!-- /tg-persona-auto -->\n'
+                '<!-- tg-persona-auto:{"created_at":2,"chat_id":"-1","verified":0} -->\n'
+                '乙群常聊拿现成插件问能不能装\n<!-- /tg-persona-auto -->')
+        self.b['_write_knowledge_auto'](text)
+        listing = await self.b['get_flock_knowledge_auto']()
+        self.assertEqual(listing['items'], 2)
+        target = listing['entries'][0]['id']
+        self.assertTrue(self.b['_delete_knowledge_auto'](target))
+        after = await self.b['get_flock_knowledge_auto']()
+        self.assertEqual(after['items'], 1)
+        self.assertEqual(after['entries'][0]['body'], '乙群常聊拿现成插件问能不能装')
+        self.assertFalse(self.b['_delete_knowledge_auto'](target))
+
     async def test_auto_knowledge_promote_one_and_all(self):
         """面板没有入口时这条链路等于不存在：单条确认、批量确认、计数都要能跑通。"""
         type(self.runtime).knowledge_lock = asyncio.Lock()
