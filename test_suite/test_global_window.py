@@ -105,5 +105,16 @@ class GlobalWindowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(listed['uses_global_window'])
         self.assertEqual(listed['effective_windows'],[('08:00','09:00'),('13:00','14:00')])
 
+    async def test_adding_second_window_preserves_first_success_and_reopens_summary(self):
+        aid=await self.create()
+        today=self.now.strftime('%Y-%m-%d')
+        self.b['conn'].execute("UPDATE automations SET last_at=?,signin_success_mask=1 WHERE id=?",(today,aid));self.b['conn'].commit()
+        self.b['set_setting']('signin_summary_day',today)
+        await self.b['update_auto'](aid,self.b['AutoIn'](name='fixture',target='@dummy',command='/sign',
+            signin_second_enabled=1,signin_second_start='12:09',signin_second_end='12:28'))
+        row=self.row(aid)
+        self.assertEqual((row['last_at'],row['signin_success_mask']),(today,1))
+        self.assertEqual(self.b['get_setting']('signin_summary_day'),'')
+
 
 if __name__=='__main__':unittest.main()

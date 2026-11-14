@@ -7193,6 +7193,14 @@ async def update_auto(aid: int, body: AutoIn):
         ("scheduled_at", body.scheduled_at.strip()), ("btn_text", body.btn_text.strip()),
         ("keywords", body.keywords.strip()), ("success_kw", body.success_kw.strip()),
         ("history_first", body.history_first)))
+    schedule_changed = body.type == "signin" and any(previous[key] != value for key, value in (
+        ("win_start", body.win_start.strip()), ("win_end", body.win_end.strip()),
+        ("signin_independent", body.signin_independent),
+        ("signin_second_enabled", body.signin_second_enabled),
+        ("signin_second_start", body.signin_second_start.strip()),
+        ("signin_second_end", body.signin_second_end.strip())))
+    if schedule_changed:
+        set_setting("signin_summary_day", "")
     _reset_auto_schedule(aid, clear_success=changed)
     return {"ok": True}
 
