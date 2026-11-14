@@ -438,6 +438,19 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((first['loaded'],first['samples'],second['loaded']),(True,2,False));runtime.client.get_messages.assert_awaited_once_with('-1',limit=200)
         self.assertEqual({row[0] for row in db.execute('SELECT role FROM ai_learning_samples')},{'owner','group'})
 
+    async def test_deep_learning_skips_group_that_cannot_be_resolved(self):
+        provider=await self.provider();runtime=self.b['get_runtime']();db=self.b['conn']
+        db.execute("INSERT INTO watched_groups VALUES('-1','群A',0)");db.execute("INSERT INTO watched_groups VALUES('-2','群B',0)");db.commit()
+        for key,value in {'flock_learning_groups':'-1,-2','flock_learning_provider_ids':provider,'flock_deep_learning_enabled':'1','flock_deep_learning_start':'2026-10-30T17:00','flock_deep_learning_end':'2026-10-30T19:00'}.items():self.b['set_setting'](key,value)
+        history=[SimpleNamespace(is_group=True,chat_id=-2,id=9,raw_text='群友说了挺长的一段话用来学习',out=False,via_bot_id=None,fwd_from=None,post=False,date=None,get_sender=AsyncMock(return_value=SimpleNamespace(bot=False)))]
+        async def get_messages(group,limit=200):
+            if group=='-1':raise ValueError('Cannot find any entity corresponding to "-1"')
+            return history
+        runtime.client=SimpleNamespace(get_messages=AsyncMock(side_effect=get_messages));runtime.tg_state={'phase':'ready'}
+        result=await self.b['_bootstrap_deep_learning']()
+        self.assertTrue(result['loaded'])
+        self.assertEqual(result['samples'],1)
+
     async def test_ordinary_learning_collects_group_and_separates_outputs(self):
         provider=await self.provider();runtime=self.b['get_runtime']();db=self.b['conn'];db.execute("INSERT INTO watched_groups VALUES('-1','群',0)");db.commit()
         for key,value in {'flock_learning_enabled':'1','flock_learning_groups':'-1','flock_learning_start':'17:00','flock_learning_end':'19:00','flock_learning_provider_ids':provider}.items():self.b['set_setting'](key,value)

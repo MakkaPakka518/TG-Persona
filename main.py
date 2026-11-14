@@ -3329,7 +3329,12 @@ async def _bootstrap_deep_learning():
     records = []
     watched = {row[0] for row in get_account_db().execute("SELECT chat_id FROM watched_groups")}
     for group in (item for item in _csv(get_setting("flock_learning_groups", "")) if item in watched):
-        messages = await runtime.client.get_messages(group, limit=200)
+        try:
+            messages = await runtime.client.get_messages(group, limit=200)
+        except Exception as error:
+            # 当前账号看不到这个群（不在群/换号/ID 失效）时跳过，别让一个群拖垮整轮采集。
+            log.info("深度学习 跳过无法读取的群 %s: %s", group, _safe_ai_error(error))
+            continue
         for message in messages or []:
             role = "owner" if getattr(message, "out", False) else "group"
             if role == "owner":
@@ -3657,6 +3662,7 @@ async def ai_learning_loop():
             await asyncio.sleep(max(1, error.seconds))
         except Exception as error:
             log.warning("AI 风格学习循环异常: %s", _safe_ai_error(error))
+            log.debug("AI 风格学习循环异常堆栈", exc_info=True)
         await asyncio.sleep(60)
 
 
