@@ -286,7 +286,7 @@ input[type=time],input[type=date],input[type=datetime-local]{max-width:100%;min-
 /* ---------- 折叠 ---------- */
 .fold .fold-h{display:flex;align-items:center;gap:9px;cursor:pointer;user-select:none;padding:0}
 .fold .arrow{margin-left:auto;width:17px;height:17px;flex:none;color:var(--dim);transition:transform .2s}
-.fold.open .fold-h .arrow{transform:rotate(90deg)}
+.fold.open>.fold-h .arrow{transform:rotate(90deg)}
 .fold>.fold-b{display:none;margin-top:15px}
 .sub-fold{border:1px solid var(--hair);border-radius:12px;padding:12px;margin-bottom:9px}
 .sub-fold:last-child{margin-bottom:0}
@@ -692,7 +692,7 @@ section.act,.fold.open .fold-b{animation:none}
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>抢注</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b" id="registerHubBody">
       <div class="fold sub-fold">
-        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2M8 3l-2-2M16 3l2-2"/></svg>定时抢注</span><span class="cnt" id="aCntTimed">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2M8 3l-2-2M16 3l2-2"/></svg>群定时抢注</span><span class="cnt" id="aCntTimed">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
         <div class="fold-b">
           <div class="hint" style="margin-bottom:10px">在指定秒执行一次，完成后自动停用。</div>
           <button class="btn addtask" type="button" onclick="openAutoForm('scheduled_register')">＋ 添加定时抢注任务</button>
@@ -814,7 +814,7 @@ section.act,.fold.open .fold-b{animation:none}
         </div>
       </div>
       <div class="fold sub-fold" id="codeRegisterCard">
-        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="m8 5-6 7 6 7m8-14 6 7-6 7m-3-16-2 18"/></svg>群兑换码抢注</span><span class="cnt" id="aCntCodeReg">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="m8 5-6 7 6 7m8-14 6 7-6 7m-3-16-2 18"/></svg>兑换码抢注</span><span class="cnt" id="aCntCodeReg">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
         <div class="fold-b">
           <button class="btn addtask" type="button" onclick="openAutoForm('code_register')">＋ 添加群兑换码抢注</button>
           <div id="aListCodeReg"></div><div class="empty" id="aEmptyCodeReg">暂无群兑换码抢注任务</div>
@@ -861,8 +861,56 @@ section.act,.fold.open .fold-b{animation:none}
           </form></div></div>
         </div>
       </div>
+      <div class="fold sub-fold" id="buttonRegisterCard">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4zM8 8h8M8 12h5"/></svg>群按钮抢注</span><span class="cnt" id="aCntButtonReg">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <button class="btn addtask" type="button" onclick="openAutoForm('button_register')">＋ 添加群按钮开注</button>
+          <div id="aListButtonReg"></div>
+          <div class="empty" id="aEmptyButtonReg">暂无群按钮开注任务</div>
+          <div class="autof" id="af-button_register"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑群按钮开注</b><button class="ghost" type="button" onclick="closeAutoForm('button_register')">关闭</button></div><form onsubmit="saveAuto('button_register');return false">
+            <label for="brName">任务名称</label><input type="text" id="brName" required placeholder="如：群公告开注">
+            <label>监听群</label><div class="hint">不勾选则使用全部监听群，包括 Bot 发布的公告</div><div id="brGroups" class="grp-pick"></div>
+            <label for="brAnnouncement">群开注关键词（逗号分隔）</label><input type="text" id="brAnnouncement" maxlength="1000" value="定时注册" required>
+            <label for="brAnnouncementButton">群 URL 按钮文字（逗号分隔）</label><input type="text" id="brAnnouncementButton" maxlength="1000" value="点击注册" required>
+            <label for="brCommand">私聊首条指令</label><input type="text" id="brCommand" maxlength="1000" value="/start" placeholder="/start">
+            <div class="hint">从按钮链接自动识别机器人，忽略链接的 start 参数，发送上方指令。</div>
+            <label for="brButton">Bot 注册按钮关键词</label><input type="text" id="brButton" value="创建" required>
+            <label for="brButtonMode">按钮处理模式</label><select id="brButtonMode"><option value="script">脚本模式（默认）</option><option value="ai">AI 模式</option><option value="fallback">AI 兜底</option></select>
+            <label for="brReady">进入注册状态关键词</label><input type="text" id="brReady" value="注册状态" required>
+            <label for="brExisting">已有号关键词（选填，整句匹配）</label><textarea id="brExisting" rows="2" maxlength="1000"></textarea>
+            <label for="brUser">注册用户名</label><input type="text" id="brUser" autocomplete="off" placeholder="编辑时留空沿用">
+            <label for="brSecret">安全码</label><input id="brSecret" type="password" autocomplete="new-password" placeholder="编辑时留空沿用">
+            <label for="brSuccess">成功关键词（逗号分隔）</label><input type="text" id="brSuccess" value="成功" required>
+            <label for="brFail">失败关键词（逗号分隔）</label><input type="text" id="brFail" placeholder="如：注册失败,注册已关闭">
+            <label for="brTimeout">每步最长等待（秒）</label><input id="brTimeout" type="number" value="30" min="1" max="300" step="1" inputmode="numeric" required>
+            <label class="button-reply-toggle"><input type="checkbox" id="brGroupReply" checked onchange="document.getElementById('brGroupReplyFields').classList.toggle('hidden',!this.checked)"> 注册成功后回原群发送消息</label>
+            <div id="brGroupReplyFields">
+              <label for="brReplyText">群内发送内容</label><input type="text" id="brReplyText" maxlength="1000" value="拿下！">
+              <label for="brReplyDelay">延迟发送（秒）</label><input id="brReplyDelay" type="number" value="5" min="0" max="300" step="1" inputmode="numeric">
+            </div>
+            <label class="button-reply-toggle"><input type="checkbox" id="brAiFlock"> 注册成功后开启 AI 水群</label>
+            <div id="brAiFlockFields" class="hidden">
+              <label for="brAiFlockMinutes">持续分钟</label><input id="brAiFlockMinutes" type="number" value="5" min="1" max="60" step="1" inputmode="numeric">
+              <div class="water-ai-limits">
+                <div><label for="brAiFlockContextMessages">上下文消息数</label><input id="brAiFlockContextMessages" type="number" value="15" min="1" max="50" step="1" inputmode="numeric"></div>
+                <div><label for="brAiFlockMessageChars">单条消息字数</label><input id="brAiFlockMessageChars" type="number" value="400" min="40" max="2000" step="1" inputmode="numeric"></div>
+                <div><label for="brAiFlockSkillChars">skill 引用预算</label><input id="brAiFlockSkillChars" type="number" value="8000" min="0" max="200000" step="1" inputmode="numeric"></div>
+                <div><label for="brAiFlockMaxTokens">最大输出 Token</label><input id="brAiFlockMaxTokens" type="number" value="600" min="50" max="8192" step="1" inputmode="numeric"></div>
+                <div><label for="brAiFlockKnowledgeChars">study.md + knowledge.md 引用预算（0 不引用）</label><input id="brAiFlockKnowledgeChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="brAiFlockKnowledgeUnlimited" onchange="syncKnowledgeLimit('brAiFlock')"> 两份文件引用无上限</label><label class="button-reply-toggle"><input type="checkbox" id="brAiFlockKnowledgeOnDemand"> 按需引用两份文件</label></div>
+              </div>
+              <div class="hint">可按模型能力和费用手动调小或调大，不同任务可分别设置。</div>
+              <label>使用的 AI API（可多选）</label><div id="brAiFlockProviders" class="grp-pick"></div>
+              <div class="hint">不选择表示使用全部已启用 API；多选后按所选列表轮询。</div>
+              <label for="brAiFlockPrompt">人格提示词</label><textarea id="brAiFlockPrompt" maxlength="1000" rows="4">你是刚抢到注册码的普通群友。只在别人明显接你的话、问你或质疑你时回复；普通闲聊、感叹、问别人、“人呢”“还得优化”等不要接，应该沉默时只输出NO_REPLY。回复像手机临时打字，每次6至18个字，口语、随意，不写完整说明文，不复述问题。刚抢到时只表达一次开心，可用“卧槽真中了”“终于抢到了”“圆梦了”，不要反复感谢。第一次被质疑脚本时轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；再次质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞；“老板”“xxlb”“圆梦”各最多出现一次。不要长篇自证，不主动找话题，不每条都回。结束语只出现一次：工作日工作时间说“先忙去了”，饭点说“吃饭去了”，凌晨说“圆梦了睡觉”，其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容或NO_REPLY。</textarea>
+              <label for="brAiFlockReaction">可选表情回应</label><input type="text" id="brAiFlockReaction" list="aiFlockReactionOptions" maxlength="16" placeholder="留空不点表情"><div class="ai-flock-emojis" id="brAiFlockReactionPicker" data-reaction-field="brAiFlockReaction"></div>
+            </div>
+            <div class="hint">长期监听，只有注册成功才推送通知。新任务保存后请手动启用。</div>
+            <div class="flex" style="margin-top:14px"><button class="btn" type="submit">保存</button><button class="ghost" type="button" id="brCancel" style="display:none" onclick="cancelAutoEdit('button_register')">取消编辑</button></div>
+          </form></div></div>
+        </div>
+      </div>
       <div class="fold sub-fold">
-        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 20h5v-2a3 3 0 0 0-5.36-1.65M5 20H0v-2a3 3 0 0 1 5.36-1.65M12 20H7a3 3 0 0 1 5.36-1.65"/><circle cx="16" cy="8" r="3"/><path d="M19 4a3 3 0 1 1-3-3 3 3 0 0 1 3 3z"/></svg>抢注监控</span><span class="cnt" id="aCntGrab">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 20h5v-2a3 3 0 0 0-5.36-1.65M5 20H0v-2a3 3 0 0 1 5.36-1.65M12 20H7a3 3 0 0 1 5.36-1.65"/><circle cx="16" cy="8" r="3"/><path d="M19 4a3 3 0 1 1-3-3 3 3 0 0 1 3 3z"/></svg>群抢注监控</span><span class="cnt" id="aCntGrab">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
         <div class="fold-b">
           <button class="btn addtask" type="button" onclick="openAutoForm('grabcodes')">＋ 添加抢注任务</button>
           <div id="aListGrab"></div>
@@ -905,54 +953,6 @@ section.act,.fold.open .fold-b{animation:none}
       </div>
     </div>
 
-    <div class="card fold" id="buttonRegisterCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4zM8 8h8M8 12h5"/></svg>群按钮开注</span><span class="cnt" id="aCntButtonReg">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <button class="btn addtask" type="button" onclick="openAutoForm('button_register')">＋ 添加群按钮开注</button>
-        <div id="aListButtonReg"></div>
-        <div class="empty" id="aEmptyButtonReg">暂无群按钮开注任务</div>
-        <div class="autof" id="af-button_register"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑群按钮开注</b><button class="ghost" type="button" onclick="closeAutoForm('button_register')">关闭</button></div><form onsubmit="saveAuto('button_register');return false">
-          <label for="brName">任务名称</label><input type="text" id="brName" required placeholder="如：群公告开注">
-          <label>监听群</label><div class="hint">不勾选则使用全部监听群，包括 Bot 发布的公告</div><div id="brGroups" class="grp-pick"></div>
-          <label for="brAnnouncement">群开注关键词（逗号分隔）</label><input type="text" id="brAnnouncement" maxlength="1000" value="定时注册" required>
-          <label for="brAnnouncementButton">群 URL 按钮文字（逗号分隔）</label><input type="text" id="brAnnouncementButton" maxlength="1000" value="点击注册" required>
-          <label for="brCommand">私聊首条指令</label><input type="text" id="brCommand" maxlength="1000" value="/start" placeholder="/start">
-          <div class="hint">从按钮链接自动识别机器人，忽略链接的 start 参数，发送上方指令。</div>
-          <label for="brButton">Bot 注册按钮关键词</label><input type="text" id="brButton" value="创建" required>
-          <label for="brButtonMode">按钮处理模式</label><select id="brButtonMode"><option value="script">脚本模式（默认）</option><option value="ai">AI 模式</option><option value="fallback">AI 兜底</option></select>
-          <label for="brReady">进入注册状态关键词</label><input type="text" id="brReady" value="注册状态" required>
-          <label for="brExisting">已有号关键词（选填，整句匹配）</label><textarea id="brExisting" rows="2" maxlength="1000"></textarea>
-          <label for="brUser">注册用户名</label><input type="text" id="brUser" autocomplete="off" placeholder="编辑时留空沿用">
-          <label for="brSecret">安全码</label><input id="brSecret" type="password" autocomplete="new-password" placeholder="编辑时留空沿用">
-          <label for="brSuccess">成功关键词（逗号分隔）</label><input type="text" id="brSuccess" value="成功" required>
-          <label for="brFail">失败关键词（逗号分隔）</label><input type="text" id="brFail" placeholder="如：注册失败,注册已关闭">
-          <label for="brTimeout">每步最长等待（秒）</label><input id="brTimeout" type="number" value="30" min="1" max="300" step="1" inputmode="numeric" required>
-          <label class="button-reply-toggle"><input type="checkbox" id="brGroupReply" checked onchange="document.getElementById('brGroupReplyFields').classList.toggle('hidden',!this.checked)"> 注册成功后回原群发送消息</label>
-          <div id="brGroupReplyFields">
-            <label for="brReplyText">群内发送内容</label><input type="text" id="brReplyText" maxlength="1000" value="拿下！">
-            <label for="brReplyDelay">延迟发送（秒）</label><input id="brReplyDelay" type="number" value="5" min="0" max="300" step="1" inputmode="numeric">
-          </div>
-          <label class="button-reply-toggle"><input type="checkbox" id="brAiFlock"> 注册成功后开启 AI 水群</label>
-          <div id="brAiFlockFields" class="hidden">
-            <label for="brAiFlockMinutes">持续分钟</label><input id="brAiFlockMinutes" type="number" value="5" min="1" max="60" step="1" inputmode="numeric">
-            <div class="water-ai-limits">
-              <div><label for="brAiFlockContextMessages">上下文消息数</label><input id="brAiFlockContextMessages" type="number" value="15" min="1" max="50" step="1" inputmode="numeric"></div>
-              <div><label for="brAiFlockMessageChars">单条消息字数</label><input id="brAiFlockMessageChars" type="number" value="400" min="40" max="2000" step="1" inputmode="numeric"></div>
-              <div><label for="brAiFlockSkillChars">skill 引用预算</label><input id="brAiFlockSkillChars" type="number" value="8000" min="0" max="200000" step="1" inputmode="numeric"></div>
-              <div><label for="brAiFlockMaxTokens">最大输出 Token</label><input id="brAiFlockMaxTokens" type="number" value="600" min="50" max="8192" step="1" inputmode="numeric"></div>
-              <div><label for="brAiFlockKnowledgeChars">study.md + knowledge.md 引用预算（0 不引用）</label><input id="brAiFlockKnowledgeChars" type="number" value="2000" min="0" max="5242880" step="1" inputmode="numeric"><label class="button-reply-toggle"><input type="checkbox" id="brAiFlockKnowledgeUnlimited" onchange="syncKnowledgeLimit('brAiFlock')"> 两份文件引用无上限</label><label class="button-reply-toggle"><input type="checkbox" id="brAiFlockKnowledgeOnDemand"> 按需引用两份文件</label></div>
-            </div>
-            <div class="hint">可按模型能力和费用手动调小或调大，不同任务可分别设置。</div>
-            <label>使用的 AI API（可多选）</label><div id="brAiFlockProviders" class="grp-pick"></div>
-            <div class="hint">不选择表示使用全部已启用 API；多选后按所选列表轮询。</div>
-            <label for="brAiFlockPrompt">人格提示词</label><textarea id="brAiFlockPrompt" maxlength="1000" rows="4">你是刚抢到注册码的普通群友。只在别人明显接你的话、问你或质疑你时回复；普通闲聊、感叹、问别人、“人呢”“还得优化”等不要接，应该沉默时只输出NO_REPLY。回复像手机临时打字，每次6至18个字，口语、随意，不写完整说明文，不复述问题。刚抢到时只表达一次开心，可用“卧槽真中了”“终于抢到了”“圆梦了”，不要反复感谢。第一次被质疑脚本时轻松否认一句，如“哈哈真手点的”“正好一直盯着呢”；再次质疑不要重复理由，可说“真不是，不信也没办法”；第三次仍追问就结束话题。禁止使用“已收到”“正在优化”“感谢理解”“确实如此”“作为”“纯靠单身手速”等客服或AI措辞；“老板”“xxlb”“圆梦”各最多出现一次。不要长篇自证，不主动找话题，不每条都回。结束语只出现一次：工作日工作时间说“先忙去了”，饭点说“吃饭去了”，凌晨说“圆梦了睡觉”，其他休息时间说“追剧去了”。不要链接、命令、@、Markdown或引号，只输出聊天内容或NO_REPLY。</textarea>
-            <label for="brAiFlockReaction">可选表情回应</label><input type="text" id="brAiFlockReaction" list="aiFlockReactionOptions" maxlength="16" placeholder="留空不点表情"><div class="ai-flock-emojis" id="brAiFlockReactionPicker" data-reaction-field="brAiFlockReaction"></div>
-          </div>
-          <div class="hint">长期监听，只有注册成功才推送通知。新任务保存后请手动启用。</div>
-          <div class="flex" style="margin-top:14px"><button class="btn" type="submit">保存</button><button class="ghost" type="button" id="brCancel" style="display:none" onclick="cancelAutoEdit('button_register')">取消编辑</button></div>
-        </form></div></div>
-      </div>
-    </div>
 
 
 
