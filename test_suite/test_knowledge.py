@@ -33,6 +33,27 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         return (await self.b['create_ai_provider'](self.b['AIProviderInput'](
             note='测试', base='https://example.invalid/v1', key='fixture-key', model='test')))['provider']['id']
 
+    async def test_preview_reports_whether_auto_knowledge_is_used(self):
+        """水群预览要能说清自动知识到底参不参与：条数、已验证数、本轮实际引用几条。"""
+        type(self.runtime).knowledge_lock = asyncio.Lock()
+        (self.base / 'account-knowledge.md').write_text('手写知识：代理要开 TUN', encoding='utf-8')
+        (self.base / 'study.md').write_text('', encoding='utf-8')
+        self.b['_write_knowledge_auto'](
+            '<!-- tg-persona-auto:{"created_at":1,"chat_id":"-1","verified":0} -->\n'
+            '海外免费 eSIM 保号窗口极短\n<!-- /tg-persona-auto -->')
+        model = self.b['KnowledgePreviewInput']
+        data = await self.b['preview_flock_knowledge'](model(text='eSIM 怎么保号', knowledge_chars=2000,
+                                                            knowledge_on_demand=1))
+        self.assertEqual(data['knowledge_auto']['enabled'], 1)
+        self.assertEqual(data['knowledge_auto']['items'], 1)
+        self.assertEqual(data['knowledge_auto']['verified'], 0)
+        self.assertGreaterEqual(data['knowledge_auto']['used'], 0)
+        self.b['set_setting']('ai_flock_knowledge_auto', '0')
+        closed = await self.b['preview_flock_knowledge'](model(text='eSIM 怎么保号', knowledge_chars=2000,
+                                                                knowledge_on_demand=1))
+        self.assertEqual(closed['knowledge_auto']['enabled'], 0)
+        self.assertEqual(closed['knowledge_auto']['items'], 0)
+
     async def test_auto_knowledge_delete_keeps_others(self):
         """验证之后自然要能删：删一条不能牵连同批其它条目。"""
         type(self.runtime).knowledge_lock = asyncio.Lock()

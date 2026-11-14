@@ -8861,7 +8861,14 @@ async def preview_flock_knowledge(body: KnowledgePreviewInput):
         take = _reference_markdown(limit)
     else:
         take = _reference_markdown(1200 if limit == -1 else min(1200, limit))
+    auto = (_knowledge_auto_entries(_read_knowledge_auto(), _topic_terms(body.text or ""))
+            if _knowledge_auto_enabled() else [])
+    used = sum(1 for entry in auto if entry["body"].strip()[:30] and entry["body"].strip()[:30] in take)
     return {"mode": mode, "chars": len(take), "preview": take,
+            "knowledge_auto": {"enabled": 1 if _knowledge_auto_enabled() else 0,
+                               "items": len(auto),
+                               "verified": sum(1 for entry in auto if entry["meta"]["verified"]),
+                               "used": used},
             "reason": {"full": "每轮引用全部配置字数", "relevant": "提问或求助，引用约 "
                        + str(len(take)) + " 字", "chat": "普通闲聊，仅低概率补充"}[mode]}
 
