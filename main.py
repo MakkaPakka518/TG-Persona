@@ -67,6 +67,8 @@ from pydantic import BaseModel, Field
 
 import updater
 import data_migration
+import persona_store
+import persona_features
 from custom_workflow import (canonical_steps, canonical_trigger, group_matches,
                              parse_steps, parse_trigger, redact as redact_custom,
                              render_template, search_pattern, uses_credentials,
@@ -404,13 +406,14 @@ def db_init(database=None):
     conn.execute("DELETE FROM ai_flock_sessions WHERE source_task_id NOT IN (SELECT id FROM automations)")
     _migrate_legacy_ai_flock(conn)
     conn.commit()
+    persona_store.init(conn)
 
 
 def add_hit(action, ok, *, chat_id="", rule_id=0, msg_id=0, content="", reply="",
             grp_name="", sender="", detail=None):
     """统一写命中日志:kind(动作) + 成败 + 结构化详情(前端展开用)"""
     try:
-        detail_json = json.dumps(detail or {}, ensure_ascii=False)[:2000]
+        detail_json = persona_store.json_text(detail or {})
     except Exception:
         detail_json = "{}"
     cursor = get_account_db().execute(
@@ -420,6 +423,7 @@ def add_hit(action, ok, *, chat_id="", rule_id=0, msg_id=0, content="", reply=""
          str(reply)[:500], str(grp_name)[:100], 1 if ok else 0, str(sender)[:80], detail_json),
     )
     get_account_db().commit()
+    persona_store.event(get_account_db(), "result", {"action": action, "ok": bool(ok), "hit_id": cursor.lastrowid})
     return cursor.lastrowid
 
 
@@ -642,7 +646,7 @@ def _legacy_ai_config():
             "model": str(get_setting("ai_model", "") or "").strip()}
 
 
-AI_REASONING_EFFORTS = ("default", "none", "low", "medium", "high", "xhigh", "max")
+AI_REASONING_EFFORTS = ("default", "none", "minimal", "low", "medium", "high", "xhigh", "max")
 AI_CLIENT_PROFILES = ("none", "opencode", "codex", "claude")
 
 
@@ -933,6 +937,15 @@ def _ai_reasoning_params(cfg, assistant_mode=False):
     effort = cfg.get("reasoning_effort", "default")
     if effort not in AI_REASONING_EFFORTS:
         raise ValueError("思考强度须为模型默认、关闭、低、中、高、极高或最高")
+    capability = cfg.get("_profile", {})
+    if capability.get("reasoning_levels") and effort not in capability["reasoning_levels"] and effort != "default":
+        raise ValueError("当前能力档案不支持此思考强度")
+    if capability.get("reasoning_parameter") == "omit":
+        return {}
+    if capability.get("reasoning_parameter") == "reasoning_effort":
+        return {} if effort == "default" else {"reasoning_effort": effort}
+    if capability.get("reasoning_parameter") == "thinking":
+        return {} if effort == "default" else {"thinking": {"type": "disabled" if effort == "none" else "enabled"}}
     model = str(cfg.get("model", "")).strip().rsplit("/", 1)[-1].lower()
     glm53 = bool(re.fullmatch(r"glm-5\.3(?:-flashx?)?", model))
     if glm53 and effort not in ("default", "low", "high", "max"):
@@ -1017,12 +1030,19 @@ def _record_ai_health(cfg, elapsed_ms, error=None):
 
 async def _call_ai_observed(cfg, content, max_tokens, assistant_mode, feature):
     started = time.monotonic()
+    caller_cfg = cfg
+    cfg = dict(cfg)
+    cfg["_usage"] = {}
+    cfg["_profile"] = persona_store.profile(get_root_db(), cfg.get("id", ""))
+    ok = False
+    persona_store.event(get_account_db(), "ai_start", {"provider_id": cfg.get("id", ""), "model": cfg.get("model", ""), "feature": feature})
     try:
         result = await _call_ai_request(cfg, content, max_tokens, assistant_mode, feature)
         if cfg.get("_validate"):
             result = cfg["_validate"](result)
+        ok = True
     except asyncio.CancelledError:
-        if cfg.get("_provider_timeout"):
+        if caller_cfg.get("_provider_timeout"):
             _record_ai_health(cfg, round((time.monotonic() - started) * 1000), RuntimeError("线路等待超时，没有可用正文"))
         raise
     except Exception as error:
@@ -1030,6 +1050,10 @@ async def _call_ai_observed(cfg, content, max_tokens, assistant_mode, feature):
         if not isinstance(trace, dict) or trace.get("stage") not in ("budget_queue", "learning_queue"):
             _record_ai_health(cfg, round((time.monotonic() - started) * 1000), error)
         raise
+    finally:
+        elapsed = round((time.monotonic() - started) * 1000)
+        persona_store.measure(get_account_db(), cfg, feature, elapsed, ok, cfg["_usage"], cfg["_profile"])
+        persona_store.event(get_account_db(), "ai_done", {"ok": ok, "elapsed_ms": elapsed, "provider_id": cfg.get("id", "")})
     _record_ai_health(cfg, round((time.monotonic() - started) * 1000))
     return result
 
@@ -1041,12 +1065,18 @@ async def _call_ai_request(cfg, content, max_tokens=512, assistant_mode=False, f
     if httpx is None:
         raise RuntimeError("服务器未安装 httpx，请重新安装项目依赖")
     reasoning_params = _ai_reasoning_params(cfg, assistant_mode)
+    capability = cfg.get("_profile", {})
+    if capability.get("vision") is False and isinstance(content, list) and any(item.get("type") == "image_url" for item in content if isinstance(item, dict)):
+        raise ValueError("该线路能力档案已关闭图片输入")
     model = str(cfg["model"]).strip().rsplit("/", 1)[-1].lower()
     if max_tokens is not None and assistant_mode and re.fullmatch(r"glm-5\.3(?:-flashx?)?", model) and reasoning_params:
         max_tokens = max(max_tokens, 8192)
     payload = {"model": cfg["model"], "messages": [{"role": "user", "content": content}], **reasoning_params}
+    if max_tokens is None and capability.get("max_output_tokens"):
+        max_tokens = capability["max_output_tokens"]
     if max_tokens is not None:
-        payload["max_tokens"] = max_tokens
+        max_tokens = min(max_tokens, capability["max_output_tokens"]) if capability.get("max_output_tokens") else max_tokens
+        payload[capability.get("token_parameter", "max_tokens")] = max_tokens
     thinking = (reasoning_params.get("thinking", {}).get("type") == "enabled"
                 or reasoning_params.get("reasoning_effort") not in (None, "none"))
     started = time.monotonic()
@@ -1069,6 +1099,7 @@ async def _call_ai_request(cfg, content, max_tokens=512, assistant_mode=False, f
             message = error.get("message", "") if isinstance(error, dict) else str(error)
             raise RuntimeError("AI API 错误（HTTP " + str(response.status_code) + "）：" + (message or "请求被拒绝"))
         _record_ai_usage(cfg.get("id"), data.get("usage"), feature)
+        cfg["_usage"] = data.get("usage") or {}
         if isinstance(cfg.get("_trace"), dict):
             usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
             cfg["_trace"].update({"provider_id": cfg.get("id", ""), "provider": cfg.get("note", ""),
@@ -1293,6 +1324,10 @@ def _write_markdown(content, path, max_bytes):
     runtime.check_live()
     if path.is_symlink() or (path.exists() and not path.is_file()):
         raise ValueError(path.name + " 必须是普通文件")
+    tracked = path.name in ("skill.md", "study.md", "knowledge.md", "knowledge-auto.md")
+    if tracked:
+        previous = path.read_text(encoding="utf-8") if path.exists() else ""
+        persona_store.remember(get_account_db(), path.name, previous, "修改前")
     temporary = path.with_name("." + path.stem + "-" + secrets.token_hex(8) + ".tmp")
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -1302,6 +1337,8 @@ def _write_markdown(content, path, max_bytes):
             os.fsync(handle.fileno())
         os.replace(temporary, path)
         os.chmod(path, 0o600)
+        if tracked:
+            persona_store.remember(get_account_db(), path.name, str(content), "更新")
     finally:
         try:
             temporary.unlink()
@@ -1947,21 +1984,26 @@ def _knowledge_sentences(text):
 
 
 def _merge_knowledge_text(old, new):
-    """用字符级 diff 把新条目里真正的补充片段接到旧条目后面；没有新内容时返回 None。"""
+    """保留完整的新句子，不用字符片段拼接事实。"""
     old_text = str(old or "").strip()
     new_text = str(new or "").strip().rstrip("。！？")
     if not old_text or not new_text:
         return None
-    extra = []
-    for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(None, old_text, new_text).get_opcodes():
-        # 只留成句的补充，零碎的两三个字（"相关""时"）并进去只会让句子更啰嗦。
-        if tag in ("insert", "replace") and (j2 - j1) >= 6:
-            fragment = new_text[j1:j2].strip("，。；,.;、 ")
-            if fragment:
-                extra.append(fragment)
-    if not extra:
+    if _knowledge_normalized(old_text) == _knowledge_normalized(new_text):
         return None
-    return (old_text.rstrip("。！？") + "；" + "；".join(extra) + "。")[:300]
+    if len(new_text) >= len(old_text) * .85:
+        return new_text + "。"
+    return None
+
+
+def _knowledge_normalized(text):
+    return re.sub(r"[\s，。！？；、,!?;]+", "", str(text).casefold())
+
+
+def _knowledge_conflicting(old, new):
+    # 数字、版本、时间和否定不是可忽略的措辞差异。
+    pattern = r"\d+(?:[.:/-]\d+)*|不|无|未|禁止|取消|停止|支持|允许|启用|关闭|开启"
+    return re.findall(pattern, old.casefold()) != re.findall(pattern, new.casefold())
 
 
 def _replace_knowledge_auto_body(content, old_body, new_body):
@@ -1980,6 +2022,11 @@ def _replace_knowledge_auto_body(content, old_body, new_body):
         if not isinstance(meta, dict):
             meta = {}
         meta["updated_at"] = int(time.time())
+        meta["verified"] = 0
+        source = persona_store.memory_change.get().get("source", {})
+        if source:
+            meta["previous_source"] = {key: meta.get(key) for key in ("chat_id", "source_msg_ids")}
+            meta.update(source)
         replaced.append(True)
         return "<!-- tg-persona-auto:%s -->\n%s\n<!-- /tg-persona-auto -->" % (
             json.dumps(meta, ensure_ascii=False), str(new_body).strip())
@@ -1992,7 +2039,8 @@ def _append_knowledge_auto(items, chat_id, msg_ids=(), samples=()):
     content = _read_knowledge_auto()
     existing = [entry["body"] for entry in _knowledge_auto_entries(content)]
     now = int(time.time())
-    blocks, merged = [], 0
+    added, merged = 0, 0
+    source = {"chat_id": str(chat_id), "source_msg_ids": [int(value) for value in list(msg_ids)[:5]]}
     for item in items:
         body = _safe_knowledge_item(item)
         if not body:
@@ -2005,35 +2053,45 @@ def _append_knowledge_auto(items, chat_id, msg_ids=(), samples=()):
             if similarity > best_sim:
                 best, best_sim = old, similarity
         if best:
-            if best_sim >= 0.95:
+            if _knowledge_normalized(body) == _knowledge_normalized(best):
                 continue
             # 新条目把旧条目大半内容包住时，也算同一条：补充细节而不是另开一条。
             covered = _overlap(best, body, 2)
             if best_sim >= 0.80 or covered >= 0.70 or _overlap(body, best, 3) > 0.55:
+                if _knowledge_conflicting(best, body):
+                    persona_store.conflict(get_account_db(), best, body, source)
+                    continue
                 update = _merge_knowledge_text(best, body)
                 if not update:
                     continue
-                content, changed = _replace_knowledge_auto_body(content, best, update)
+                token = persona_store.memory_change.set({"reason": "自动学习", "source": source})
+                try:
+                    content, changed = _replace_knowledge_auto_body(content, best, update)
+                finally:
+                    persona_store.memory_change.reset(token)
                 if changed:
                     existing[existing.index(best)] = update
                     merged += 1
                 continue
         meta = {"created_at": now, "chat_id": chat_id, "verified": 0,
                 "source_msg_ids": [int(value) for value in list(msg_ids)[:5]]}
-        blocks.append("<!-- tg-persona-auto:%s -->\n%s\n<!-- /tg-persona-auto -->"
-                      % (json.dumps(meta, ensure_ascii=False), body))
+        block = "<!-- tg-persona-auto:%s -->\n%s\n<!-- /tg-persona-auto -->" % (json.dumps(meta, ensure_ascii=False), body)
+        content = content.rstrip() + ("\n\n" if content.strip() else "") + block
+        added += 1
         existing.append(body)
-    if not blocks and not merged:
+    if not added and not merged:
         return 0
     full = content.rstrip()
-    if blocks:
-        full = (full + "\n\n" if full else "") + "\n\n".join(blocks)
     try:
-        _trim_knowledge_auto(full + "\n")
+        token = persona_store.memory_change.set({"reason": "自动学习", "source": source})
+        try:
+            _trim_knowledge_auto(full + "\n")
+        finally:
+            persona_store.memory_change.reset(token)
     except (ValueError, OSError):
         # 自动知识写盘失败不能连累群记忆落盘。
         return 0
-    return len(blocks) + merged
+    return added + merged
 
 
 def _promote_knowledge_auto(item_id, every=False):
@@ -2512,7 +2570,7 @@ def _ai_flock_source(chat_id):
             continue
         spans = _flock_time_spans(job["start_time"], job["end_time"], job["end_next_day"])
         if any(start <= minute < end for start, end in spans):
-            return {"kind": "scheduled", "task_id": 0, "job_id": job["id"],
+            return {"kind": "scheduled", "task_id": 0, "job_id": job["id"], "name": job["name"],
                     "prompt": job["prompt"], "expires_at": 0, "replies": 0,
                     "provider_ids": job["provider_ids"], "reaction": job["reaction"],
                     "context_messages": job["context_messages"], "message_chars": job["message_chars"],
@@ -2600,6 +2658,7 @@ def _ai_flock_test_source(job_id, chat_id):
 
 def _flock_stage(progress, stage, reason=""):
     progress.update(stage=stage, reason=reason, updated_at=time.time())
+    persona_store.event(get_account_db(), stage, {"reason": reason})
 
 
 def _flock_hourly_count(source, chat_id):
@@ -2679,6 +2738,23 @@ def _flock_frequency_ready(chat_id, direct_to_self=False):
 
 
 async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False, *, test_job_id=None, progress=None):
+    db = get_account_db()
+    run = persona_store.start_run(db, kind="ai_flock", name="AI 水群", chat_id=chat_id)
+    state = progress if progress is not None else {}
+    with persona_store.scope(run_id=run, chat_id=str(chat_id), task_id=0, task_kind="ai_flock"):
+        try:
+            result = await _run_ai_flock_body(chat_id, trigger_text, direct_to_self, test_job_id=test_job_id, progress=state)
+        except asyncio.CancelledError:
+            persona_store.finish_run(db, run, "interrupted")
+            raise
+        except Exception:
+            persona_store.finish_run(db, run, "failed")
+            raise
+        persona_store.finish_run(db, run, state.get("stage", "skipped"), {"reason": state.get("reason", "")})
+        return result
+
+
+async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, test_job_id=None, progress=None):
     runtime = get_runtime()
     key = str(chat_id)
     testing = test_job_id is not None
@@ -2702,6 +2778,14 @@ async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False, *, test_job
     source = _ai_flock_test_source(test_job_id, key) if testing else _ai_flock_source(key)
     if not source or not _has_ai_providers(source["provider_ids"]):
         return
+    if persona_store.execution.get():
+        active = persona_store.execution.get()
+        task_id = source.get("task_id") or source.get("job_id") or 0
+        task_kind = "automation" if source.get("task_id") else "ai_flock"
+        persona_store.execution.set({**active, "task_id": task_id, "task_kind": task_kind})
+        get_account_db().execute("UPDATE execution_runs SET task_id=?,name=? WHERE id=?",
+                                 (task_id, source.get("name") or "AI 水群", active["run_id"]))
+        get_account_db().commit()
     if (not source.get("inactive_mode") and source["hourly_limit"] > 0
             and _flock_hourly_count(source, key) >= source["hourly_limit"]):
         if testing:
@@ -3146,27 +3230,67 @@ def _is_generated_message(chat_id, message_id=None, text="", ts=None):
     now = int(time.time() if ts is None else ts)
     text_key = hashlib.sha256(str(text).encode("utf-8")).hexdigest() if text else ""
     return bool(text_key and db.execute(
-        "SELECT 1 FROM generated_messages WHERE chat_id IN (?, '*') AND text=? "
+        "SELECT 1 FROM generated_messages WHERE chat_id=? AND text=? "
         "AND ts BETWEEN ? AND ? LIMIT 1", (key, text_key, now - 30, now + 30)).fetchone())
 
 
 def _track_generated_intent(chat_id, text, parse_mode=()):
+    from types import SimpleNamespace
     values = [str(text or "")]
     if parse_mode is not None:
         try:
             values.append(telethon_markdown.parse(values[0])[0])
         except Exception:
             pass
+    ids = []
     for value in dict.fromkeys(values):
-        _track_generated_message(None, chat_id, value)
+        mid = -(secrets.randbits(63) or 1)
+        _track_generated_message(SimpleNamespace(id=mid, chat_id=chat_id), chat_id, value, "intent")
+        ids.append(mid)
+    return ids
+
+
+def _clear_generated_intents(chat_id, ids):
+    get_runtime().generated_message_ids.difference_update((str(chat_id), mid) for mid in ids)
+    get_account_db().executemany("DELETE FROM generated_messages WHERE chat_id=? AND message_id=?",
+                                 [(str(chat_id), mid) for mid in ids])
+    get_account_db().commit()
+
+
+async def _generated_chat_key(entity):
+    if isinstance(entity, int) or isinstance(entity, str) and entity.lstrip('-').isdigit():
+        return str(entity)
+    try:
+        from telethon.utils import get_peer_id
+        resolved = await get_runtime().client.get_input_entity(entity) if isinstance(entity, str) else entity
+        return str(get_peer_id(resolved))
+    except (AttributeError, TypeError, ValueError):
+        return str(entity)
+
+
+def _telegram_rejected(error):
+    """Only explicit client rejection proves an operation did not complete."""
+    return isinstance(error, errors.FloodWaitError) or (
+        isinstance(error, errors.RPCError) and 400 <= (getattr(error, "code", 0) or 0) < 500)
 
 
 async def _send_generated_message(entity, text, **kwargs):
     runtime = get_runtime()
     kind = kwargs.pop("generated_kind", "automation")
-    _track_generated_intent("*", text, kwargs.get("parse_mode", ()))
-    sent = await runtime.client.send_message(entity, text, **kwargs)
-    return _track_generated_message(sent, entity, text, kind)
+    key = await _generated_chat_key(entity)
+    intents = _track_generated_intent(key, text, kwargs.get("parse_mode", ()))
+    persona_store.event(get_account_db(), "sending", {"chat_id": key, "characters": len(text)})
+    try:
+        sent = await runtime.client.send_message(entity, text, **kwargs)
+        persona_store.event(get_account_db(), "sent", {"chat_id": key, "message_id": getattr(sent, "id", None)})
+        result = _track_generated_message(sent, key, text, kind)
+    except errors.RPCError as error:
+        if _telegram_rejected(error):
+            _clear_generated_intents(key, intents)
+        raise
+    else:
+        _clear_generated_intents(key, intents)
+        return result
 
 
 def _sent_recently(chat_id, text, seconds=SENT_DEDUPE_SECONDS):
@@ -3176,7 +3300,7 @@ def _sent_recently(chat_id, text, seconds=SENT_DEDUPE_SECONDS):
         return False
     try:
         row = get_account_db().execute(
-            "SELECT 1 FROM generated_messages WHERE chat_id IN (?, '*') AND text=? AND ts>=? LIMIT 1",
+            "SELECT 1 FROM generated_messages WHERE chat_id=? AND message_id>0 AND text=? AND ts>=? LIMIT 1",
             (str(chat_id), hashed, int(time.time()) - max(1, int(seconds)))).fetchone()
         return bool(row)
     except Exception:
@@ -3235,20 +3359,50 @@ async def _send_bubbled_reply(entity, chat_id, text, kind="automation", ratio=BU
     parts = _bubble_parts(text, ratio, rng)
     if not parts:
         return None, 0
+    if dedupe and not persona_store.reserve_reply(get_account_db(), chat_id, text):
+        return None, 0
     sent = None
-    for index, part in enumerate(parts):
-        if index:
-            await _bubble_pause(entity, part)
-        sent = await _send_generated_message(entity, part, parse_mode=None, generated_kind=kind)
-    return sent, len(parts)
+    count, status = 0, "failed"
+    try:
+        for index, part in enumerate(parts):
+            if index:
+                await _bubble_pause(entity, part)
+            if kind == "ai_flock" and _flock_owner_paused(chat_id):
+                status = "paused"
+                break
+            status = "unknown"
+            sent = await _send_generated_message(entity, part, parse_mode=None, generated_kind=kind)
+            count += 1
+            status = "partial"
+        else:
+            status = "success"
+        return sent, count
+    except errors.FloodWaitError:
+        status = "partial" if count else "failed"
+        raise
+    except Exception as error:
+        if _telegram_rejected(error):
+            status = "partial" if count else "failed"
+        raise
+    finally:
+        if dedupe:
+            persona_store.finish_reply(get_account_db(), chat_id, text, status, count)
 
 
 async def _event_generated_message(event, method, text, **kwargs):
     chat_id = getattr(event, "chat_id", "")
     kind = kwargs.pop("generated_kind", "automation")
-    _track_generated_intent(chat_id, text, kwargs.get("parse_mode", ()))
-    sent = await getattr(event, method)(text, **kwargs)
-    return _track_generated_message(sent, chat_id, text, kind)
+    intents = _track_generated_intent(chat_id, text, kwargs.get("parse_mode", ()))
+    try:
+        sent = await getattr(event, method)(text, **kwargs)
+        result = _track_generated_message(sent, chat_id, text, kind)
+    except errors.RPCError as error:
+        if _telegram_rejected(error):
+            _clear_generated_intents(chat_id, intents)
+        raise
+    else:
+        _clear_generated_intents(chat_id, intents)
+        return result
 
 
 async def _event_bubbled_reply(event, method, chat_id, text, kind="automation",
@@ -3257,13 +3411,30 @@ async def _event_bubbled_reply(event, method, chat_id, text, kind="automation",
     if dedupe and _sent_recently(chat_id, text):
         log.info("发送去重命中，跳过重复内容 群=%s", chat_id)
         return 0
-    count = 0
-    for index, part in enumerate(_bubble_parts(text, ratio, rng)):
-        if index:
-            await _bubble_pause(chat_id, part)
-        await _event_generated_message(event, method, part, parse_mode=None, generated_kind=kind)
-        count += 1
-    return count
+    if dedupe and not persona_store.reserve_reply(get_account_db(), chat_id, text):
+        return 0
+    count, status = 0, "failed"
+    try:
+        for index, part in enumerate(_bubble_parts(text, ratio, rng)):
+            if index:
+                await _bubble_pause(chat_id, part)
+            if kind == "ai_flock" and _flock_owner_paused(chat_id):
+                status = "paused"
+                break
+            status = "unknown"
+            await _event_generated_message(event, method, part, parse_mode=None, generated_kind=kind)
+            count += 1
+            status = "partial"
+        else:
+            status = "success"
+        return count
+    except Exception as error:
+        if _telegram_rejected(error):
+            status = "partial" if count else "failed"
+        raise
+    finally:
+        if dedupe:
+            persona_store.finish_reply(get_account_db(), chat_id, text, status, count)
 
 
 def _learning_metric(role, collected=0, learned=0):
@@ -4775,6 +4946,7 @@ async def on_auto_event(event):
         if now - get_runtime().auto_last_ts.get(key, -1e9) < cd:
             continue
 
+        run, run_token, run_status = None, None, "failed"
         try:
             outcome = "success"
             grp_name = ""
@@ -4789,6 +4961,9 @@ async def on_auto_event(event):
                 rt = str(a["reply_text"] or "").replace("{code}", code)
                 if not rt:
                     continue
+                run = persona_store.start_run(get_account_db(), a["id"], a["type"], a["name"], chat)
+                run_token = persona_store.execution.set({"run_id": run, "task_id": a["id"], "chat_id": chat})
+                persona_store.event(get_account_db(), "trigger", {"message_id": event.id})
                 await _event_bubbled_reply(event, "respond" if a["action"] == "send" else "reply",
                                            chat, rt, "grabcodes", BUBBLE_SPLIT_RATIO_AFTER_GRAB)
                 get_runtime().auto_last_ts[key] = now
@@ -4803,6 +4978,9 @@ async def on_auto_event(event):
                     # 普通群消息没有红包按钮，不是红包事件：不占冷却、不写日志。
                     log.info("抢红包 未识别到红包按钮,已跳过 群=%s 任务=%s", chat, a["name"])
                     continue
+                run = persona_store.start_run(get_account_db(), a["id"], a["type"], a["name"], chat)
+                run_token = persona_store.execution.set({"run_id": run, "task_id": a["id"], "chat_id": chat})
+                persona_store.event(get_account_db(), "click", {"message_id": event.id})
                 get_runtime().auto_last_ts[key] = now
                 btn_label = (str(getattr(target_btn, "text", "") or "").strip() or "无文字")[:24]
                 answer = await target_btn.click()
@@ -4812,12 +4990,16 @@ async def on_auto_event(event):
                 log.info("抢红包 群=%s 任务=%s 按钮=%s 结果=%s", chat, a["name"], btn_label, outcome)
                 if outcome == "success":
                     await _redpacket_after_success(a, event.chat_id, popup)
+            run_status = "success" if a["type"] != "redpacket" else outcome
             add_hit(a["type"], a["type"] != "redpacket" or outcome == "success",
                     chat_id=chat, rule_id=-a["id"], msg_id=event.id,
                     content=text, reply=reply_desc, grp_name=grp_name, sender=sender_name,
                     detail={"kind": a["type"], "task": a["name"], "group": grp_name or str(chat),
                             "sender": sender_name, "message": text, "reply": reply_desc,
                             "action": "回复消息" if a["action"] != "send" else "群内发送"})
+        except asyncio.CancelledError:
+            run_status = "interrupted"
+            raise
         except errors.FloodWaitError as e:
             log.warning("自动化触发限流,等待 %ss", e.seconds)
             await asyncio.sleep(e.seconds + 1)
@@ -4825,6 +5007,12 @@ async def on_auto_event(event):
             log.warning("自动化操作失败(群=%s): %s", chat, e)
         except Exception:
             log.exception("自动化执行异常")
+        finally:
+            if run_token is not None:
+                try:
+                    persona_store.finish_run(get_account_db(), run, run_status)
+                finally:
+                    persona_store.execution.reset(run_token)
 
 
 async def _on_custom_group_event(event):
@@ -4981,6 +5169,10 @@ async def on_link_event(event):
 
 
 async def _run_link_event(aid, links, source_chat=None):
+    return await _observe_automation(aid, _run_link_event_body(aid, links, source_chat), source_chat)
+
+
+async def _run_link_event_body(aid, links, source_chat=None):
     try:
         a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
         if a is None or not a["enabled"]:
@@ -6055,12 +6247,36 @@ async def run_custom(a, trigger_context=None):
         return _task_failure(a, "任务引用了凭据变量，但未保存用户名和安全码")
     chain = max(1, min(int(a["chain_retry"] or 1), 5))
     final_desc, final_ok = "", False
+    signature = persona_store.digest(json.dumps([steps, target_template], ensure_ascii=False))
+    saved = persona_store.load_checkpoint(get_account_db(), a["id"], credential)
+    if saved and saved["state"] != "complete" and saved["signature"] != signature:
+        return _task_unconfirmed(a, "流程已修改，旧检查点尚未完成，请在执行中心核对并清除后重试")
+    if (saved and saved["state"] != "complete" and trigger_context and any(
+            str(saved["context"].get("context", {}).get("trigger", {}).get(key, "")) != str(trigger_context.get(key, ""))
+            for key in ("chat_id", "message_id"))):
+        return _task_unconfirmed(a, "上一次触发尚未完成，请先在执行中心处理恢复检查点")
 
     for _attempt in range(chain):
         context = _custom_context(trigger_context, credential)
         watermarks, baselines, entities, reply_messages = {}, {}, {}, {}
         last_destination = ""
         log_desc, ok = [], True
+        saved = persona_store.load_checkpoint(get_account_db(), a["id"], credential)
+        start_step, intent, reply_ids = 0, None, {}
+        if saved and saved["state"] != "complete":
+            data = saved["context"]
+            context.update(data.get("context", {}))
+            watermarks.update(data.get("watermarks", {}))
+            baselines.update({dest: None if items is None else {int(mid): tuple(sig) for mid, sig in items.items()}
+                              for dest, items in data.get("baselines", {}).items()})
+            last_destination = data.get("last_destination", "")
+            reply_ids = data.get("reply_ids", {})
+            start_step, intent = saved["step"], data.get("intent")
+
+        def checkpoint(index, state="ready", pending=None):
+            persona_store.save_checkpoint(get_account_db(), a["id"], signature, index, state,
+                {"context": context, "watermarks": watermarks, "baselines": baselines,
+                 "last_destination": last_destination, "reply_ids": reply_ids, "intent": pending}, credential)
 
         async def destination(raw):
             rendered = _custom_value(raw, context).strip()
@@ -6077,22 +6293,48 @@ async def run_custom(a, trigger_context=None):
                     raise ValueError("目标解析失败")
                 entities[rendered] = entity
                 recent = await get_runtime().client.get_messages(entity, limit=1)
-                watermarks[rendered] = max((m.id for m in recent), default=0)
-                baselines[rendered] = None
+                watermarks.setdefault(rendered, max((m.id for m in recent), default=0))
+                baselines.setdefault(rendered, None)
+                if rendered in reply_ids:
+                    previous = await get_runtime().client.get_messages(entity, ids=reply_ids[rendered])
+                    if previous:
+                        reply_messages[rendered] = previous
             return rendered, entities[rendered], is_source
 
+        index = start_step
         try:
-            for step in steps:
+            if intent:
+                dest, entity, _ = await destination(intent["dest"])
+                recent = await get_runtime().client.get_messages(entity, limit=100)
+                sent = next((m for m in recent if getattr(m, "out", False) and m.id > intent["min_id"]
+                             and persona_store.digest(getattr(m, "raw_text", "")) == intent.get("digest")), None)
+                if intent["kind"] != "send" or sent is None:
+                    return _task_unconfirmed(a, "第 %s 步结果未知，请在执行中心核对消息后选择已完成或重新执行" % (start_step + 1))
+                watermarks[dest], baselines[dest] = sent.id, None
+                reply_ids.pop(dest, None)
+                reply_messages.pop(dest, None)
+                start_step += 1
+                intent = None
+                checkpoint(start_step, "complete" if start_step >= len(steps) else "ready")
+                persona_store.event(get_account_db(), "recovered", {"step": start_step, "message_id": sent.id})
+            for index, step in enumerate(steps):
+                if index < start_step:
+                    continue
                 kind = step["t"]
+                checkpoint(index)
+                persona_store.event(get_account_db(), "step_start", {"step": index + 1, "kind": kind})
                 if kind == "send":
                     dest, entity, is_source = await destination(step["to"])
                     text = _custom_value(step["text"], context)
                     kwargs = {}
                     if is_source and step["reply"] and context["trigger"].get("message_id"):
                         kwargs["reply_to"] = int(context["trigger"]["message_id"])
+                    checkpoint(index, "pending", {"kind": "send", "dest": dest, "min_id": watermarks[dest],
+                                                   "digest": persona_store.digest(text)})
                     sent = await _send_generated_message(entity, text, parse_mode=None, **kwargs)
                     watermarks[dest], baselines[dest] = sent.id, None
                     reply_messages.pop(dest, None)
+                    reply_ids.pop(dest, None)
                     log_desc.append("send: ok")
                 elif kind == "wait":
                     await asyncio.sleep(step["ms"] / 1000)
@@ -6132,6 +6374,7 @@ async def run_custom(a, trigger_context=None):
                         raise ValueError("等待匹配按钮超时")
                     baselines[dest] = await _message_snapshot(entity)
                     watermarks[dest] = max([watermarks[dest], message.id] + list(baselines[dest]))
+                    checkpoint(index, "pending", {"kind": "click", "dest": dest, "min_id": watermarks[dest]})
                     await selected.click()
                     log_desc.append("click: ok")
                 elif kind == "wait_reply":
@@ -6149,6 +6392,7 @@ async def run_custom(a, trigger_context=None):
                                 reply = candidate
                                 context["last"]["text"] = text
                                 reply_messages[dest] = candidate
+                                reply_ids[dest] = candidate.id
                                 if step["save"]:
                                     context["var"][step["save"]] = text
                                 last_destination = dest
@@ -6195,13 +6439,22 @@ async def run_custom(a, trigger_context=None):
                     watermarks[dest] = max(watermarks[dest], captcha_message.id)
                     if step["template"]:
                         send_dest, send_entity, _ = await destination(step["send_to"])
+                        captcha_text = _custom_value(step["template"], context)
+                        checkpoint(index, "pending", {"kind": "send", "dest": send_dest, "min_id": watermarks[send_dest],
+                                                       "digest": persona_store.digest(captcha_text)})
                         sent = await _send_generated_message(
-                            send_entity, _custom_value(step["template"], context), parse_mode=None)
+                            send_entity, captcha_text, parse_mode=None)
                         watermarks[send_dest], baselines[send_dest] = sent.id, None
                     log_desc.append("captcha: ok")
+                checkpoint(index + 1, "complete" if index + 1 == len(steps) else "ready")
+                persona_store.event(get_account_db(), "step_done", {"step": index + 1, "kind": kind})
         except errors.FloodWaitError as error:
+            if not intent:
+                checkpoint(index)
             raise _RetryLater(error.seconds) from error
         except Exception as error:
+            if not intent and _telegram_rejected(error):
+                checkpoint(index)
             ok = False
             log_desc.append("failed: " + redact_custom(error, credential)[:160])
         final_desc = " -> ".join(log_desc)
@@ -6211,6 +6464,9 @@ async def run_custom(a, trigger_context=None):
 
     target = str(a["target"] or context["trigger"].get("chat_id") or "")
     summary = final_desc[:200] or "执行完成"
+    pending = get_account_db().execute("SELECT state FROM workflow_checkpoints WHERE task_id=?", (a["id"],)).fetchone()
+    if not final_ok and pending and pending[0] == "pending":
+        return _task_unconfirmed(a, "发送或点击结果未知；已保存检查点，请在执行中心核对后恢复")
     add_hit("custom", final_ok, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
             content=f"自定义任务: {a['name']}", reply=summary,
             detail={"kind": "custom", "task": a["name"], "steps": summary, "ok": final_ok})
@@ -6220,6 +6476,20 @@ async def run_custom(a, trigger_context=None):
         _notify_task_failure(a, summary)
     log.info("自定义任务%s 任务=%s", "成功" if final_ok else "失败", a["name"])
     return final_ok
+
+
+async def _recover_workflows():
+    db = get_account_db()
+    for row in db.execute("SELECT a.*,c.state,c.signature FROM workflow_checkpoints c JOIN automations a ON a.id=c.task_id "
+                          "WHERE a.enabled=1 AND a.type='custom' AND a.last_status IN ('running','interrupted')").fetchall():
+        signature = persona_store.digest(json.dumps([parse_steps(row["custom_steps"]), str(row["target"] or "")], ensure_ascii=False))
+        if row["state"] == "complete" and row["signature"] == signature:
+            scheduled = parse_trigger(row["custom_trigger"])["mode"] == "schedule"
+            db.execute("UPDATE automations SET last_status='success',next_run_at=0,retry_count=0,last_at=?,enabled=? WHERE id=?",
+                       (str(int(time.time())), 0 if scheduled else row["enabled"], row["id"]))
+            db.commit()
+        elif row["state"] != "complete":
+            _queue_auto(row["id"], manual=True)
 
 
 # 抢注轮询(开注探测):每间隔给机器人发探测命令,回复含开注关键词即注册
@@ -6256,15 +6526,44 @@ async def run_keepalive(a, reason="定时"):
                  f"已在 {target} 发言" + (f",{delay} 秒后删除" if delay else " (不删除)"))
     log.info("保号发言 群=%s 任务=%s 删除=%ss", target, a["name"], delay)
     if delay:
-        async def _del(group_ent=ent, mid=msg.id, name=a["name"]):
-            await asyncio.sleep(delay)
-            try:
-                await get_runtime().client.delete_messages(group_ent, [mid])
-                log.info("保号消息已删除 群=%s 任务=%s", target, name)
-            except Exception as e:
-                log.warning("删除保号消息失败: %s", e)
-        get_runtime().spawn(_del())
+        key = await _generated_chat_key(ent)
+        get_account_db().execute("INSERT OR REPLACE INTO pending_deletions(chat_id,message_id,due) VALUES(?,?,?)",
+                                 (key, msg.id, time.time() + delay))
+        get_account_db().commit()
     return True
+
+
+async def _delete_pending_messages():
+    runtime, db = get_runtime(), get_account_db()
+    if runtime.client is None or runtime.tg_state["phase"] != "ready":
+        return
+    for row in db.execute("SELECT * FROM pending_deletions WHERE due<=? ORDER BY due LIMIT 30", (time.time(),)).fetchall():
+        try:
+            entity = await resolve_entity(row["chat_id"])
+            if entity is None:
+                raise ValueError("删除目标暂时无法解析")
+            await runtime.client.delete_messages(entity, [row["message_id"]])
+        except Exception as error:
+            seconds = max(30, int(getattr(error, "seconds", 0)), min(3600, 30 * 2 ** min(row["attempts"], 7)))
+            db.execute("UPDATE pending_deletions SET attempts=attempts+1,due=?,error=? WHERE chat_id=? AND message_id=?",
+                       (time.time() + seconds, _safe_ai_error(error), row["chat_id"], row["message_id"]))
+        else:
+            db.execute("DELETE FROM pending_deletions WHERE chat_id=? AND message_id=?", (row["chat_id"], row["message_id"]))
+        db.commit()
+
+
+async def durable_tasks_loop():
+    await _recover_workflows()
+    while True:
+        try:
+            await _delete_pending_messages()
+        except Exception as error:
+            log.warning("持久任务处理失败: %s", _safe_ai_error(error))
+        await asyncio.sleep(1)
+
+
+async def summary_loop():
+    await persona_features.summary_loop(globals())
 
 
 # AccountRuntime.auto_tasks: synchronous reservation shared by manual/scheduled runs.
@@ -6596,6 +6895,32 @@ async def _auto_dispatcher():
 
 
 async def _execute_auto(aid, manual=False, trigger_context=None):
+    return await _observe_automation(aid, _execute_auto_body(aid, manual, trigger_context))
+
+
+async def _observe_automation(aid, coroutine, chat_id=None):
+    db = get_account_db()
+    row = db.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    if row is None:
+        coroutine.close()
+        return {"retry": False, "next_at": 0}
+    run = persona_store.start_run(db, aid, row["type"], row["name"], chat_id or row["target"])
+    with persona_store.scope(run_id=run, task_id=aid, task_kind="automation", chat_id=str(chat_id or row["target"])):
+        persona_store.event(db, "started")
+        try:
+            result = await coroutine
+        except asyncio.CancelledError:
+            persona_store.finish_run(db, run, "interrupted")
+            raise
+        except Exception:
+            persona_store.finish_run(db, run, "failed")
+            raise
+        outcome = db.execute("SELECT last_status FROM automations WHERE id=?", (aid,)).fetchone()
+        persona_store.finish_run(db, run, (outcome[0] if outcome else "") or "skipped")
+        return result
+
+
+async def _execute_auto_body(aid, manual=False, trigger_context=None):
     """Execute one attempt; the dispatcher alone decides coordinated retries."""
     a = None
     result = {"retry": False, "next_at": 0}
@@ -6714,7 +7039,7 @@ async def _execute_auto(aid, manual=False, trigger_context=None):
             retry = (not manual and not ok and status == "failed" and not exhausted and
                      (a["type"] in ("signin", "keepalive") or (a["type"] == "custom" and retry_later))
                      and aid not in _auto_runtime_state().auto_stop_requested)
-            if a["type"] == "scheduled_register" or (custom_schedule and not retry):
+            if a["type"] == "scheduled_register" or (custom_schedule and not retry and status != "interrupted"):
                 get_account_db().execute("UPDATE automations SET enabled=0,next_run_at=0 WHERE id=?", (aid,))
             get_account_db().commit()
             if not ok and status not in ("interrupted", "stopped") and (exhausted or status == "unconfirmed" or manual):
@@ -7067,6 +7392,7 @@ async def housekeeping_loop():
     while True:
         try:
             purge_hits()
+            persona_store.cleanup(get_account_db())
             if get_current_account_id() == "default":
                 purge_sessions()
                 _auth_cache_gc(time.time())
@@ -7543,7 +7869,8 @@ async def finish_login(me=None):
                        ("scheduled_task", scheduled_register_loop),
                        ("poll_task", poll_loop), ("keepalive_task", keepalive_loop),
                         ("housekeeping_task", housekeeping_loop), ("health_task", health_loop),
-                        ("ai_learning_task", ai_learning_loop)):
+                        ("ai_learning_task", ai_learning_loop), ("durable_task", durable_tasks_loop),
+                        ("summary_task", summary_loop)):
         task = getattr(runtime, name)
         if task is None or task.done():
             setattr(runtime, name, runtime.spawn(loop()))
@@ -9783,6 +10110,10 @@ def _provider_references(provider_id, include_disabled=False):
         if provider_id in summary_ids or (not summary_ids and summary_active):
             if include_disabled or summary_active:
                 references.append(f"{label} / 号主群聊总结")
+        for job in db.execute("SELECT name,provider_ids,enabled FROM summary_jobs"):
+            ids = json.loads(job["provider_ids"])
+            if (provider_id in ids or not ids and job["enabled"]) and (include_disabled or job["enabled"]):
+                references.append(f"{label} / 定时摘要 {job['name']}")
         ids = _csv(settings.get("flock_learning_provider_ids", ""))
         active = any(settings.get(key) == "1" for key in (
             "flock_learning_enabled", "flock_learning_unlimited", "flock_deep_learning_enabled",
@@ -9803,6 +10134,14 @@ def _reconcile_provider_ids(valid_ids=None):
         if runtime.db is None or runtime.storage_error:
             continue
         db, runtime_changed = runtime.db, 0
+        for job in db.execute("SELECT id,provider_ids,enabled FROM summary_jobs").fetchall():
+            original = json.loads(job["provider_ids"])
+            filtered = [pid for pid in original if pid in valid_ids]
+            disabled = bool(original and not filtered or not valid_ids)
+            if filtered != original or disabled and job["enabled"]:
+                db.execute("UPDATE summary_jobs SET provider_ids=?,enabled=?,updated=? WHERE id=?",
+                           (json.dumps(filtered), 0 if disabled else job["enabled"], time.time(), job["id"]))
+                runtime_changed += 1
         for row in db.execute("SELECT rowid AS _rid,provider_ids,enabled FROM ai_flock_jobs").fetchall():
             original = _csv(row["provider_ids"])
             filtered = [item for item in original if item in valid_ids]
@@ -9947,6 +10286,7 @@ async def delete_ai_provider(provider_id: str):
     configurations_changed = _reconcile_provider_ids({row["id"] for row in kept})
     _save_ai_providers(kept)
     get_root_db().execute("DELETE FROM ai_provider_health WHERE provider_id=?", (provider_id,))
+    get_root_db().execute("DELETE FROM provider_profiles WHERE provider_id=?", (provider_id,))
     get_root_db().commit()
     registry = globals().get("account_registry")
     if registry is not None:
@@ -10826,6 +11166,7 @@ def root_set_setting(key, value):
 
 
 app.include_router(build_icon_router(root_get_setting, root_set_setting))
+app.include_router(persona_features.build_persona_router(globals()))
 
 from ai_assistant import build_ai_assistant_router
 

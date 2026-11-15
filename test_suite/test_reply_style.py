@@ -79,10 +79,10 @@ class ReplyStyleTests(unittest.IsolatedAsyncioTestCase):
             ['我遇到版本相关问题时，会先核实发行渠道和版本号，再判断是否需要重新安装，另外要看看签名是否一致。'],
             'chat', (1,), ())
         text = path.read_text(encoding='utf-8')
-        # 近似条目不再新增一块，而是并进原块，已验证状态保留。
+        # 新正文需要重新验证，同时保留可追溯的旧版本。
         self.assertEqual(text.count('<!-- tg-persona-auto:'), 1)
         self.assertIn('签名是否一致', text)
-        self.assertIn('"verified": 1', text)
+        self.assertIn('"verified": 0', text)
         self.assertGreaterEqual(count, 1)
 
     async def test_knowledge_auto_exact_duplicate_is_ignored(self):

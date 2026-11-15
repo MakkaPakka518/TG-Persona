@@ -1721,5 +1721,38 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     ex("selectedAccount='summary-unlimited';accountEpoch++;resetOwnerAIUI()");q('#ownerSummaryUnlimitedEnabled').checked=true;let body;app.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true}};await ex('saveOwnerAISettings()');assert.strictEqual(body.flock_summary_unlimited,1);
     ex('resetOwnerAIUI()');assert(!q('#ownerSummaryUnlimitedEnabled').checked);app.api=async()=>({settings:{flock_summary_unlimited:'1'}});await ex('loadOwnerAISettings()');assert(q('#ownerSummaryUnlimitedEnabled').checked);
   });
+  const personaNodes=(node=q('#personaBody'))=>[node,...node.children.flatMap(child=>personaNodes(child))];
+  const personaBtn=label=>personaNodes().find(n=>n.textContent===label&&n.type==='button');
+  const personaInput=label=>personaNodes().find(n=>n.textContent===label&&n.children.length)?.children[0];
+  const personaSummaryData={items:[],runs:[],timezone:'UTC+08:00'};
+  function personaAPI(requests=[]){app.api=async(p,o={})=>{requests.push([p,o]);if(p==='/api/watched')return {groups:[{chat_id:'123',name:'<img src=x>'}]};if(p==='/api/persona/profiles')return {items:[]};if(p==='/api/persona/summaries')return o.method?{ok:true}:personaSummaryData;return {items:[]}};return requests}
+  await test('定时摘要默认关闭且保存监听群主题时段和冻结账号',async()=>{
+    ex("selectedAccount='persona-a';accountEpoch++;resetPersonaCenter()");const requests=personaAPI();await ex("loadPersona('summaries')");
+    assert.strictEqual(personaInput('启用定时摘要').checked,false);personaInput('名称').value='每日摘要';personaInput('<img src=x>').checked=true;personaInput('关注主题').value='版本发布';
+    await personaBtn('保存').onclick();const saved=requests.find(([p,o])=>o.method==='POST');assert(saved);assert.strictEqual(saved[1]._account.id,'persona-a');
+    assert.deepStrictEqual(JSON.parse(saved[1].body),{name:'每日摘要',enabled:false,groups:['123'],at:'21:00',hours:24,message_limit:200,topics:'版本发布',provider_ids:[]});
+  });
+  await test('摘要保存中重复点击只提交一次且旧按钮不能写入新账号',async()=>{
+    ex("selectedAccount='persona-a';accountEpoch++;resetPersonaCenter()");personaAPI();await ex("loadPersona('summaries')");const save=personaBtn('保存');let done;const requests=[];app.api=(p,o)=>{requests.push([p,o]);return new Promise(r=>done=r)};
+    const pending=save.onclick();await save.onclick();assert.strictEqual(requests.length,1);ex("selectedAccount='persona-b';accountEpoch++;resetPersonaCenter()");done({ok:true});await pending;await save.onclick();assert.strictEqual(requests.length,1);assert.strictEqual(q('#personaBody').children.length,0);
+  });
+  await test('执行中心账号A到B到A的迟到数据和错误均不能回填',async()=>{
+    ex("selectedAccount='persona-a';accountEpoch++;resetPersonaCenter()");const waits=[];app.api=()=>new Promise((resolve,reject)=>waits.push({resolve,reject}));const pending=ex("loadPersona('runs')");
+    ex("selectedAccount='persona-b';accountEpoch++;resetPersonaCenter();selectedAccount='persona-a';accountEpoch++;resetPersonaCenter()");waits[0].resolve({items:[{id:'secret',name:'private'}]});waits[1].resolve({checkpoints:[],deletions:[]});await pending;assert.strictEqual(q('#personaBody').children.length,0);
+    const failed=ex("loadPersona('profiles')");ex("selectedAccount='persona-b';accountEpoch++;resetPersonaCenter()");waits[2].reject(new Error('old private error'));await failed;assert(!q('#personaStatus').textContent.includes('private'));
+  });
+  await test('历史回放按钮只采集或比较快照且结果纯文本显示',async()=>{
+    ex("selectedAccount='persona-a';accountEpoch++;resetPersonaCenter()");const requests=[];app.api=async(p,o={})=>{requests.push([p,o]);if(p==='/api/autos')return {autos:[{id:3,name:'test'}]};if(p==='/api/persona/replays')return {items:[{id:8,name:'<script>x</script>',created:1}]};return {changed:true,notice:'<img src=x>'}};
+    await ex("loadPersona('replays')");await personaBtn('对比采集时与当前配置').onclick();assert(requests.some(([p,o])=>p==='/api/persona/replays/8/compare'&&o.method==='POST'));assert(q('#personaDetail').textContent.includes('<img src=x>'));assert(!requests.some(([p])=>/\/run$/.test(p)));
+  });
+  await test('记忆恢复按钮带查看差异时的摘要且冲突选择精确提交',async()=>{
+    const requests=[];app.api=async(p,o={})=>{requests.push([p,o]);if(p.includes('versions?'))return {items:[{id:5,created:1,reason:'旧版本',source:{}}]};if(p.endsWith('/conflicts'))return {items:[{id:9,old_body:'允许',new_body:'不允许',source:{}}]};if(p.endsWith('/versions/5'))return {diff:'-当前\n+旧版',digest:'current-digest'};return {ok:true}};
+    await ex("loadPersona('memory')");await personaBtn('查看差异 / 恢复').onclick();await personaBtn('恢复此版本').onclick();const restore=requests.find(([p])=>p.endsWith('/restore'));assert.deepStrictEqual(JSON.parse(restore[1].body),{digest:'current-digest'});await personaBtn('采用新说法').onclick();const conflict=requests.find(([p,o])=>p.endsWith('/conflicts/9')&&o.method==='POST');assert.deepStrictEqual(JSON.parse(conflict[1].body),{choice:'new'});
+  });
+  await test('模型能力档案保存精确参数并通过按钮探测',async()=>{
+    const requests=[];app.api=async(p,o={})=>{requests.push([p,o]);if(p==='/api/persona/profiles')return {items:[{id:'p1',note:'test',model:'m',profile:{}}]};return {ok:true}};await ex("loadPersona('profiles')");
+    personaInput('思考参数').value='reasoning_effort';personaInput('支持的思考档位（逗号分隔，留空不限制）').value='minimal,high';personaInput('输出额度参数').value='max_completion_tokens';personaInput('最大输出 Token（留空不限制）').value='2048';personaInput('输入价格').value='2';
+    await personaBtn('保存档案').onclick();const request=requests.find(([p,o])=>o.method==='PUT');const body=JSON.parse(request[1].body);assert.strictEqual(body.max_output_tokens,2048);assert.strictEqual(body.input_price,2);assert.deepStrictEqual(body.reasoning_levels,['minimal','high']);assert.strictEqual(body.vision,null);await personaBtn('探测已保存的参数').onclick();assert(requests.some(([p,o])=>p.endsWith('/p1/probe')&&o.method==='POST'));
+  });
   console.log(`前端回归 ${count} 项全部通过`);
 })().catch(e=>{console.error(e);process.exitCode=1});
