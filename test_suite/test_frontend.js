@@ -652,6 +652,25 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(txt.includes('古诗答案：西')&&txt.includes('本地 OCR')&&txt.includes('301 ms')&&txt.includes('OCR 原文'));
     run("setAITestMode('captcha')");element('#sOcrOn').checked=false;
   });
+  await test('能力测试按模式提示通道优先顺序',async()=>{
+    run("setAITestMode('captcha')");
+    assert(element('#aiTestChannelHint').textContent.includes('AI 优先'));
+    run("setAITestMode('poem')");
+    assert(element('#aiTestChannelHint').textContent.includes('OCR 优先'));
+    assert(element('#aiTestChannelHint').textContent.includes('AI 兜底'));
+    run("setAITestMode('image')");
+    assert(element('#aiTestChannelHint').classList.contains('hidden'));
+    run("setAITestMode('captcha')");
+  });
+  await test('能力测试提示词可一键恢复默认且默认含古诗填空',async()=>{
+    run("setAITestMode('image')");
+    element('#aiTestImagePrompt').value='被改坏的提示词';
+    run('applyDefaultImagePrompt()');
+    assert.strictEqual(element('#aiTestImagePrompt').value,run('DEFAULT_SIGNIN_IMAGE_PROMPT'));
+    assert(run('DEFAULT_SIGNIN_IMAGE_PROMPT').includes('古诗填空'));
+    assert(html.includes('onclick="applyDefaultImagePrompt()"'));
+    run("setAITestMode('captcha')");
+  });
   await test('群游戏卡片含古诗填空任务与可信出题人配置',async()=>{
     assert(html.includes('id="gameCard"')&&html.includes('自动识别被遮住的字'));
     for(const id of ['gChat','gKeyword','gSender','gDelay','gPrompt','gDefend','gEnabled'])assert(html.includes('id="'+id+'"'));
