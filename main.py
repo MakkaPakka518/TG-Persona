@@ -3314,6 +3314,15 @@ def _learning_filter_record(keep, reason, tag, chat, text):
     _learning_filter_flush()
 
 
+def _learning_filter_public():
+    """学习信号过滤的可观测快照，供面板展示。"""
+    try:
+        stats = json.loads(get_setting("flock_learning_filter_stats", "{}") or "{}")
+    except Exception:
+        return {}
+    return stats if isinstance(stats, dict) else {}
+
+
 def _learning_filter_flush(force=False):
     global _LE_FLUSH_AT
     if not force and time.monotonic() - _LE_FLUSH_AT < 30:
@@ -10015,7 +10024,7 @@ async def list_ai_memory(file: str = "study", q: str = "", offset: int = 0):
         offset = max(0, int(offset))
         names = {str(row[0]): row[1] for row in get_account_db().execute("SELECT chat_id,name FROM watched_groups")}
         return {"file": file, "version": _memory_version(path), "bytes": len(content.encode("utf-8")),
-                "total": len(wanted), "offset": offset, "items": [
+                "total": len(wanted), "offset": offset, "filter": _learning_filter_public(), "items": [
                     {"start": entry["start"], "body": entry["body"], "pinned": bool(entry["meta"].get("pinned")),
                      "created_at": entry["meta"].get("created_at", 0),
                      "source": entry["meta"].get("source", entry["meta"].get("stage", "legacy")),
