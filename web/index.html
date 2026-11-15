@@ -1180,18 +1180,18 @@ section.act,.fold.open .fold-b{animation:none}
         <div class="fold sub-fold open">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">WEB 签到（账号密码站）</span><span class="cnt" id="aCntWeb">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <div class="hint">适用于有网页版登录入口的站点（如叶子emby）。后台自动登录 → 取算术验证码 → 算答案 → 提交签到。点「执行」可立即试跑一次，结果显示在下方和日志里。</div>
+        <div class="hint">适用于有网页版登录入口的站点。后台自动登录 → 取算术验证码 → 算答案 → 提交签到。点「执行」可立即试跑一次，结果显示在下方和日志里。</div><div class="hint" style="border-left:2px solid var(--accent,#e6a45f);padding-left:8px"><b>当前阶段仅支持「叶子 emby」这类站点</b>（账号密码登录 + 算术题验证码）。登录、验证码、签到三类接口路径和返回字段是按这类站写死的，其他站点大概率跑不通；遇到新站请先反馈站点信息，不要直接配上去。</div>
         <button class="btn addtask" type="button" onclick="openWebForm()">＋ 添加网页签到</button>
         <div id="aListWeb"></div>
         <div class="empty" id="aEmptyWeb">暂无网页签到任务,点上面按钮添加</div>
         <div class="autof" id="af-web"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑网页签到</b><button class="ghost" type="button" onclick="closeWebForm()">关闭</button></div><form onsubmit="saveWebSignin();return false">
           <label for="wName">任务名称</label><input type="text" id="wName" maxlength="100" placeholder="如: 叶子emby">
-          <label for="wSite">站点地址</label><input type="text" id="wSite" maxlength="300" placeholder="https://xjg.lyezi.cc" required>
+          <label for="wSite">站点地址</label><input type="text" id="wSite" maxlength="300" placeholder="https://example.com" required>
           <label for="wUser">用户名</label><input type="text" id="wUser" maxlength="100" required>
           <label for="wPass">密码</label><input type="password" id="wPass" maxlength="300" required>
           <label for="wRunAt">执行窗口 · 开始（HH:MM）</label><input type="text" id="wRunAt" maxlength="5" value="08:30" required>
           <label for="wRunEnd">执行窗口 · 结束（HH:MM，留空 = 开始后 30 分钟）</label><input type="text" id="wRunEnd" maxlength="5" placeholder="08:30">
-          <div class="hint">每天在窗口内随机一个时刻执行（同一天固定，重启不漂移），跟 BOT 签到一样不踩固定的整点。当天签成功后不再重复；失败自动重试一次。账号密码仅存在本地数据库，不会外传。</div>
+          <div class="hint">每天在窗口内随机一个时刻执行（同一天固定，重启不漂移），跟 BOT 签到一样不踩固定的整点。当天签成功后不再重复；失败自动重试一次。账号密码仅存在本地数据库，不会外传。</div><div class="hint"><b>仅支持叶子 emby 这类站</b>（账号密码 + 算术验证码）；其他站未适配，可能直接失败。</div>
           <label class="check"><input type="checkbox" id="wEnabled" checked> 启用</label>
           <div class="flex" style="margin-top:14px">
             <button class="btn" type="submit">保存</button>
