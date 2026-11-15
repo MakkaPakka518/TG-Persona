@@ -158,6 +158,7 @@ class AccountRuntime:
     auto_queue_wakeup: object = None
     watcher_task: object = None
     signin_task: object = None
+    web_signin_task: object = None
     scheduled_task: object = None
     poll_task: object = None
     keepalive_task: object = None

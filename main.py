@@ -254,6 +254,22 @@ def db_init(database=None):
             last_at TEXT DEFAULT '',            -- 最近执行(签到存日期 YYYY-MM-DD,防当日重复)
             created_at INTEGER
         );
+        CREATE TABLE IF NOT EXISTS web_signins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT DEFAULT '',
+            site TEXT NOT NULL,
+            username TEXT NOT NULL,
+            password TEXT NOT NULL,
+            run_at TEXT DEFAULT '08:30',
+            enabled INTEGER DEFAULT 1,
+            last_day TEXT DEFAULT '',
+            last_status TEXT DEFAULT '',
+            last_detail TEXT DEFAULT '',
+            last_points INTEGER DEFAULT 0,
+            last_at TEXT DEFAULT '',
+            failures INTEGER DEFAULT 0,
+            created_at INTEGER
+        );
         """
     )
     # 兼容旧库:补充新增列
@@ -6760,6 +6776,243 @@ def _signin_tick():
     _maybe_notify_global_signin_summary()
 
 
+# ---------------- 网页签到(不走 Telethon,纯 HTTP) ----------------
+WEB_SIGNIN_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                 "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+_web_signin_busy = set()
+
+
+def _web_signin_solve(question):
+    """解析算术验证码(如 "5 + 6 = ?"),返回整数答案;无法解析返回 None。"""
+    text = str(question or "").translate(str.maketrans({"×": "*", "÷": "/", "＋": "+", "－": "-", "−": "-"}))
+    tokens = re.findall(r"\d+(?:\.\d+)?|[+\-*/]", text)
+    while tokens and tokens[0] in "+-*/":
+        tokens.pop(0)
+    while tokens and tokens[-1] in "+-*/":
+        tokens.pop()
+    if not tokens or len(tokens) % 2 == 0:
+        return None
+    expr = "".join(tokens)
+    if "**" in expr or "//" in expr or not re.fullmatch(r"[0-9.+\-*/]+", expr):
+        return None
+    try:
+        value = eval(expr, {"__builtins__": {}}, {})  # 仅含数字与四则运算符
+    except Exception:
+        return None
+    if not isinstance(value, (int, float)) or value != int(value):
+        return None
+    return int(value)
+
+
+def _web_signin_request(method, url, *, payload=None, token="", cookie=""):
+    import httpx
+    headers = {"User-Agent": WEB_SIGNIN_UA, "Accept": "application/json, text/plain, */*"}
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    if cookie:
+        headers["Cookie"] = cookie
+    try:
+        with httpx.Client(timeout=20, follow_redirects=True) as client:
+            response = client.request(method, url, json=payload, headers=headers)
+        try:
+            return response.status_code, response.json()
+        except ValueError:
+            return response.status_code, {"raw": response.text[:300]}
+    except Exception as error:
+        return 0, {"error": f"{type(error).__name__}: {error}"[:300]}
+
+
+def _web_signin_token(data):
+    if not isinstance(data, dict):
+        return ""
+    for key in ("accessToken", "access_token", "token", "jwt"):
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            return value
+    for key in ("data", "user", "result"):
+        inner = data.get(key)
+        if isinstance(inner, dict):
+            for name in ("accessToken", "access_token", "token", "jwt"):
+                value = inner.get(name)
+                if isinstance(value, str) and value:
+                    return value
+    return ""
+
+
+def _web_signin_message(data):
+    if isinstance(data, dict):
+        for key in ("message", "msg", "detail", "error"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()[:200]
+    return ""
+
+
+def _web_signin_failed(data):
+    if not isinstance(data, dict):
+        return True
+    if data.get("success") is False or data.get("ok") is False:
+        return True
+    return bool(data.get("error"))
+
+
+def _web_signin_points(data):
+    """本次获得的积分（优先 reward/todayReward），不要误取余额。"""
+    if not isinstance(data, dict):
+        return 0
+    for source in (data, data.get("data"), data.get("user"), data.get("checkin")):
+        if not isinstance(source, dict):
+            continue
+        for key in ("reward", "todayReward", "points", "score", "totalPoints", "total_points"):
+            value = source.get(key)
+            if isinstance(value, (int, float)):
+                return int(value)
+    return 0
+
+
+def _web_signin_balance(data):
+    """当前余额/总积分，仅用于展示，不当作本次获得。"""
+    if not isinstance(data, dict):
+        return 0
+    for source in (data, data.get("data"), data.get("user")):
+        if not isinstance(source, dict):
+            continue
+        for key in ("balance", "totalPoints", "total_points", "points", "score"):
+            value = source.get(key)
+            if isinstance(value, (int, float)):
+                return int(value)
+    return 0
+
+
+def _web_signin_once(row):
+    """登录 -> 取算术验证码 -> 算答案 -> 提交签到。"""
+    site = str(row["site"] or "").strip().rstrip("/")
+    username = str(row["username"] or "").strip()
+    password = str(row["password"] or "")
+    result = {"site": site, "username": username, "question": "", "answer": None,
+              "points": 0, "balance": 0, "message": "", "ok": False, "already": False,
+              "stage": "login"}
+    if not site.startswith(("http://", "https://")):
+        result["message"] = "站点地址需以 http:// 或 https:// 开头"
+        return result
+    status, data = _web_signin_request("POST", site + "/api/auth/login",
+                                       payload={"username": username, "password": password})
+    token = _web_signin_token(data)
+    if status != 200 or not token:
+        result["message"] = _web_signin_message(data) or f"登录失败(HTTP {status})"
+        return result
+    result["stage"] = "captcha"
+    status, data = _web_signin_request("GET", site + "/api/auth/me/checkin/captcha", token=token)
+    if status != 200:
+        result["message"] = _web_signin_message(data) or f"取验证码失败(HTTP {status})"
+        return result
+    question = ""
+    captcha_token = ""
+    if isinstance(data, dict):
+        question = str(data.get("question") or data.get("challenge") or data.get("expression") or "")
+        captcha_token = str(data.get("token") or data.get("captchaToken") or "")
+    result["question"] = question
+    answer = _web_signin_solve(question)
+    if answer is None:
+        result["message"] = "验证码题目无法解析: " + (question or "(空)")
+        return result
+    result["answer"] = answer
+    result["stage"] = "checkin"
+    status, data = _web_signin_request("POST", site + "/api/auth/me/checkin",
+                                       payload={"captchaToken": captcha_token,
+                                                "captchaAnswer": str(answer)}, token=token)
+    result["points"] = _web_signin_points(data)
+    result["balance"] = _web_signin_balance(data)
+    checked = data.get("checkedIn") if isinstance(data, dict) else None
+    if status != 200 or _web_signin_failed(data):
+        result["message"] = _web_signin_message(data) or f"HTTP {status}"
+    elif checked is False:
+        # 服务端明确说本次没有签到（今天已经签过），不能算成功
+        result["already"] = True
+        result["message"] = "今日已签到"
+    else:
+        result["ok"] = True
+        result["message"] = _web_signin_message(data) or "签到成功"
+    return result
+
+
+def _web_signin_record(wsid, result):
+    db = get_account_db()
+    row = db.execute("SELECT name,failures FROM web_signins WHERE id=?", (wsid,)).fetchone()
+    if row is None:
+        return
+    today = now_local().strftime("%Y-%m-%d")
+    completed = bool(result["ok"]) or bool(result.get("already"))
+    failures = 0 if completed else int(row["failures"] or 0) + 1
+    status_text = "success" if result["ok"] else ("already" if result.get("already") else "failed")
+    db.execute("UPDATE web_signins SET last_day=?, last_status=?, last_detail=?, last_points=?, "
+               "last_at=?, failures=? WHERE id=?",
+               (today if completed or failures >= 2 else "", status_text,
+                str(result.get("message") or "")[:300], int(result.get("points") or 0),
+                now_local().strftime("%Y-%m-%d %H:%M:%S"), failures, wsid))
+    db.commit()
+    add_hit("web_signin", completed, content=row["name"] or result.get("site", ""),
+            reply=str(result.get("message") or "")[:300],
+            detail={"site": result.get("site"), "user": result.get("username"),
+                    "question": result.get("question"), "answer": result.get("answer"),
+                    "stage": result.get("stage"), "points": result.get("points"),
+                    "balance": result.get("balance"), "already": bool(result.get("already"))})
+
+
+async def _web_signin_execute(wsid):
+    try:
+        row = get_account_db().execute("SELECT * FROM web_signins WHERE id=?", (wsid,)).fetchone()
+        if row is None:
+            return
+        result = await asyncio.get_running_loop().run_in_executor(None, _web_signin_once, dict(row))
+        _web_signin_record(wsid, result)
+        log.info("网页签到 %s -> %s %s", row["name"] or row["site"],
+                 "成功" if result["ok"] else "失败", result.get("message"))
+    except Exception:
+        log.exception("网页签到执行异常")
+    finally:
+        _web_signin_busy.discard(wsid)
+
+
+def web_signin_tick():
+    if get_runtime() is None:
+        return
+    current = now_local()
+    today = current.strftime("%Y-%m-%d")
+    nowm = current.hour * 60 + current.minute
+    rows = get_account_db().execute(
+        "SELECT id,run_at,last_day,last_status,failures FROM web_signins "
+        "WHERE enabled=1 ORDER BY id DESC").fetchall()
+    for row in rows:
+        if row["id"] in _web_signin_busy:
+            continue
+        if row["last_day"] == today:
+            continue
+        run_at = str(row["run_at"] or "08:30")
+        try:
+            hour, minute = [int(part) for part in run_at.split(":")[:2]]
+        except ValueError:
+            continue
+        if nowm < hour * 60 + minute:
+            continue
+        _web_signin_busy.add(row["id"])
+        try:
+            asyncio.get_running_loop().create_task(_web_signin_execute(row["id"]))
+        except RuntimeError:
+            _web_signin_busy.discard(row["id"])
+
+
+async def web_signin_loop():
+    while True:
+        try:
+            web_signin_tick()
+        except Exception:
+            log.exception("网页签到循环异常")
+        await asyncio.sleep(60)
+
+
 def _scheduled_register_tick():
     if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         return
@@ -7286,6 +7539,7 @@ async def finish_login(me=None):
         runtime.client.add_event_handler(runtime.bind_event(on_outgoing_learning, runtime.client), events.NewMessage(outgoing=True))
         runtime.handler_registered = True
     for name, loop in (("watcher_task", watcher_loop), ("signin_task", signin_loop),
+                       ("web_signin_task", web_signin_loop),
                        ("scheduled_task", scheduled_register_loop),
                        ("poll_task", poll_loop), ("keepalive_task", keepalive_loop),
                         ("housekeeping_task", housekeeping_loop), ("health_task", health_loop),
@@ -8371,6 +8625,88 @@ async def stop_all_autos(type: str = ""):
     get_account_db().commit()
     _maybe_notify_global_signin_summary()
     return {"ok": True, "stopped": ids}
+
+
+# ---------- 网页签到 ----------
+class WebSigninIn(BaseModel):
+    name: str = Field("", max_length=100)
+    site: str = Field("", max_length=300)
+    username: str = Field("", max_length=100)
+    password: str = Field("", max_length=300)
+    run_at: str = Field("08:30", max_length=5)
+    enabled: int = 1
+
+
+def _web_signin_validate(body: WebSigninIn):
+    site = body.site.strip()
+    if not site.startswith(("http://", "https://")):
+        raise HTTPException(400, "站点地址需以 http:// 或 https:// 开头")
+    if not body.username.strip() or not body.password.strip():
+        raise HTTPException(400, "用户名和密码不能为空")
+    if not re.fullmatch(r"\d{1,2}:\d{2}", body.run_at.strip()):
+        raise HTTPException(400, "签到时间格式应为 HH:MM")
+
+
+@app.get("/api/web-signins")
+async def list_web_signins():
+    rows = get_account_db().execute("SELECT * FROM web_signins ORDER BY id DESC").fetchall()
+    return {"items": [dict(row) for row in rows]}
+
+
+@app.post("/api/web-signins")
+async def create_web_signin(body: WebSigninIn):
+    _web_signin_validate(body)
+    db = get_account_db()
+    cursor = db.execute(
+        "INSERT INTO web_signins(name,site,username,password,run_at,enabled,created_at) VALUES(?,?,?,?,?,?,?)",
+        (body.name.strip(), body.site.strip().rstrip("/"), body.username.strip(), body.password.strip(),
+         body.run_at.strip(), 1 if body.enabled else 0, int(time.time())))
+    db.commit()
+    return {"id": cursor.lastrowid}
+
+
+@app.put("/api/web-signins/{wid}")
+async def update_web_signin(wid: int, body: WebSigninIn):
+    _web_signin_validate(body)
+    db = get_account_db()
+    if db.execute("SELECT 1 FROM web_signins WHERE id=?", (wid,)).fetchone() is None:
+        raise HTTPException(404, "任务不存在")
+    db.execute("UPDATE web_signins SET name=?,site=?,username=?,password=?,run_at=?,enabled=? WHERE id=?",
+               (body.name.strip(), body.site.strip().rstrip("/"), body.username.strip(),
+                body.password.strip(), body.run_at.strip(), 1 if body.enabled else 0, wid))
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/web-signins/{wid}")
+async def delete_web_signin(wid: int):
+    db = get_account_db()
+    db.execute("DELETE FROM web_signins WHERE id=?", (wid,))
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/web-signins/{wid}/toggle")
+async def toggle_web_signin(wid: int):
+    db = get_account_db()
+    row = db.execute("SELECT enabled FROM web_signins WHERE id=?", (wid,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "任务不存在")
+    enabled = 0 if row["enabled"] else 1
+    db.execute("UPDATE web_signins SET enabled=? WHERE id=?", (enabled, wid))
+    db.commit()
+    return {"ok": True, "enabled": enabled}
+
+
+@app.post("/api/web-signins/{wid}/run")
+async def run_web_signin(wid: int):
+    db = get_account_db()
+    row = db.execute("SELECT * FROM web_signins WHERE id=?", (wid,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "任务不存在")
+    result = await asyncio.get_running_loop().run_in_executor(None, _web_signin_once, dict(row))
+    _web_signin_record(wid, result)
+    return {"result": result}
 
 
 def _latest_auto_results():
