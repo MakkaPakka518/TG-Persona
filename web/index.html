@@ -4852,11 +4852,11 @@ function openGameForm(id){
   $('#gDefend').checked=!!(t&&t.defend_ai);
   $('#gEnabled').checked=t?!!t.enabled:true;
   $('#gFormResult').textContent='';
-  $('#gameForm').classList.add('open');
+  $('#gameForm').classList.add('show');
   const el=document.querySelector('#gameForm .autof-card');
   if(el)el.scrollIntoView({block:'center'});
 }
-function closeGameForm(){gameEditId=null;$('#gameForm').classList.remove('open')}
+function closeGameForm(){gameEditId=null;$('#gameForm').classList.remove('show')}
 async function saveGameTask(){
   const out=$('#gFormResult');
   const body={subtype:'poem',chat:$('#gChat').value.trim(),trigger_kw:$('#gKeyword').value.trim(),

@@ -1843,6 +1843,26 @@ def _message_clock(message):
         return ""
 
 
+async def _flock_sender_label(message):
+    """群聊记录里的身份标签：名字优先，其次 @username，取不到按「群友」。"""
+    sender = getattr(message, "sender", None)
+    if sender is None:
+        getter = getattr(message, "get_sender", None)
+        if callable(getter):
+            try:
+                sender = await getter()
+            except Exception:
+                sender = None
+    if sender is None:
+        return "群友"
+    first = str(getattr(sender, "first_name", "") or "").strip()
+    last = str(getattr(sender, "last_name", "") or "").strip()
+    name = (first + " " + last).strip() if (first or last) else ""
+    if not name:
+        name = str(getattr(sender, "username", "") or "").strip() or str(getattr(sender, "title", "") or "").strip()
+    return name[:24] or "群友"
+
+
 def _flock_rhythm_hint(source):
     """按面板配置的启用时间给一句"刚起/快睡了"的定性提示，不写死任何具体时刻。"""
     start_min = _win_minutes(source.get("start_time"))
@@ -2860,10 +2880,15 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
                         "text": str(getattr(message, "raw_text", "") or "").strip()[:message_chars]}
                        for message in usable]
         else:
-            context = [(_message_clock(message) + " " + str(getattr(message, "raw_text", "") or "").strip()[:message_chars]).strip()
-                       for message in reversed(list(messages or []))
-                       if not getattr(message, "out", False) and str(getattr(message, "raw_text", "") or "").strip()
-                       and not str(getattr(message, "raw_text", "") or "").strip().startswith("/")][-context_messages:]
+            context = []
+            for message in reversed(list(messages or [])):
+                text = str(getattr(message, "raw_text", "") or "").strip()
+                if not text or text.startswith("/") or getattr(message, "out", False):
+                    continue
+                who = await _flock_sender_label(message)
+                entry = (_message_clock(message) + " " + who + "：" + text).strip()
+                context.append(entry[:message_chars])
+            context = context[-context_messages:]
         while context and sum(len(item["text"] if isinstance(item, dict) else item) for item in context) > context_chars:
             context.pop(0)
         if not context and not testing:
@@ -2893,6 +2918,8 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
             local_t = _beijing_now()
             rhythm = _flock_rhythm_hint(source)
             instruction += (f"\n现在是北京时间 {local_t:%H:%M}。" + rhythm +
+                            "每条记录格式是「时间 发送者：内容」，发送者不同就是不同的人，"
+                            "不要把不同人的话当成同一个人说的，也不要把别人的话当成自己说的。"
                             "消息前面的时间是发送时刻，超过两小时的就别接了，那已经是旧话题。")
             if source.get("inactive_mode"):
                 last_spoke = _flock_hb_load(source.get("job_id"), key).get("last_spoke_at") if source.get("job_id") else 0

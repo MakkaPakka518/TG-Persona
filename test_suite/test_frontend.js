@@ -671,6 +671,20 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('onclick="applyDefaultImagePrompt()"'));
     run("setAITestMode('captcha')");
   });
+  await test('古诗填空任务表单可呼出、保存并关闭',async()=>{
+    context.api=async(p,o)=>{if(p==='/api/game-tasks'&&(!o||!o.method))return {items:[]};return {ok:true,id:7}};
+    await run('loadGameTasks()');
+    run('openGameForm()');
+    assert(element('#gameForm').classList.contains('show'));
+    element('#gChat').value='-1001234567890';
+    element('#gSender').value='@hsuys_bot';
+    let sent;context.api=async(p,o)=>{sent=[p,JSON.parse(o.body)];return {ok:true}};
+    await run('saveGameTask()');
+    assert.strictEqual(sent[0],'/api/game-tasks');
+    assert.strictEqual(sent[1].chat,'-1001234567890');
+    assert.strictEqual(sent[1].sender_filter,'@hsuys_bot');
+    assert(!element('#gameForm').classList.contains('show'));
+  });
   await test('群游戏卡片含古诗填空任务与可信出题人配置',async()=>{
     assert(html.includes('id="gameCard"')&&html.includes('自动识别被遮住的字'));
     for(const id of ['gChat','gKeyword','gSender','gDelay','gPrompt','gDefend','gEnabled'])assert(html.includes('id="'+id+'"'));
