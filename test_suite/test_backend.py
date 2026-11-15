@@ -34,6 +34,8 @@ from unittest.mock import AsyncMock, Mock, patch
 import uuid
 import shutil
 import zlib
+import persona_store
+import persona_features
 from telethon.extensions import markdown as telethon_markdown
 from account_runtime import AIRequestScheduler
 from custom_workflow import (canonical_steps, canonical_trigger, group_matches, parse_steps,
@@ -66,7 +68,11 @@ class Response:
         self.cookies[name] = dict(value=value, **kwargs)
 
 
-class FloodWait(Exception):
+class RPCError(Exception):
+    code = 400
+
+
+class FloodWait(RPCError):
     def __init__(self, seconds):
         self.seconds = seconds
 
@@ -107,10 +113,10 @@ def load_backend():
             selected.append(node)
     names = {name: globals()[name] for name in ('ast', 'asyncio', 'base64', 'OrderedDict', 'datetime',
              'timezone', 'timedelta', 'hashlib', 'hmac', 'ipaddress', 'json', 'math', 'random', 're',
-              'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'difflib', 'ContextVar', 'uuid', 'shutil', 'telethon_markdown')}
+               'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'difflib', 'ContextVar', 'uuid', 'shutil', 'telethon_markdown', 'persona_store', 'persona_features')}
     names.update(BaseModel=Model, Optional=Optional, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
                   HTTPException=HTTPException, JSONResponse=Response, Response=Response, os=os, io=io,
-                  log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=Exception,
+                  log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=RPCError,
                   AuthKeyUnregisteredError=Unauthorized), ZoneInfo=None,
                   SendReactionRequest=lambda **kw: SimpleNamespace(**kw),
                   ReactionEmoji=lambda **kw: SimpleNamespace(**kw),
@@ -190,7 +196,6 @@ def load_backend():
         exec(code, names)
     names['conn'] = sqlite3.connect(':memory:')
     names['conn'].row_factory = sqlite3.Row
-    names['get_root_db'] = lambda: names['conn']
     names['get_root_db'] = lambda: names['conn']
     names['db_init']()
     names['notify_event'], names['send_notify'] = Mock(), Mock()

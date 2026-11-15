@@ -612,6 +612,8 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         # media-only message. No Telegram/client network operation is performed.
         for replies, expected in [([], False), ([SimpleNamespace(id=90, out=False, raw_text='old')], False),
                                   ([SimpleNamespace(id=101, out=False, raw_text='')], True)]:
+            runtime.db.execute("DELETE FROM workflow_checkpoints WHERE task_id=1")
+            runtime.db.commit()
             runtime.client.get_messages = AsyncMock(side_effect=[[], replies])
             with patch.object(self.main.time, 'monotonic', side_effect=[0, 0, 0, 0, 2]), \
                  patch.object(asyncio, 'sleep', new=AsyncMock()):
@@ -624,6 +626,9 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
     async def test_click_until_excludes_menu_but_accepts_current_edit(self):
         runtime = self.rt()
         for edit, expected in [(False, False), (True, True)]:
+            # Each case starts a new execution; recovery is covered separately.
+            runtime.db.execute("DELETE FROM workflow_checkpoints WHERE task_id=1")
+            runtime.db.commit()
             button = SimpleNamespace(text='continue', click=AsyncMock())
             menu = SimpleNamespace(id=110, out=False, raw_text='welcome', edit_date=None, photo=None,
                                    get_buttons=AsyncMock(return_value=[[button]]))

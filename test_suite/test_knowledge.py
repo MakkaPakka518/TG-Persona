@@ -29,13 +29,14 @@ class KnowledgeTests(unittest.IsolatedAsyncioTestCase):
         self.b['data_migration'] = SimpleNamespace(create_package=lambda *args: (_ for _ in ()).throw(ValueError('not configured')))
         self.b['_migration_lock'] = asyncio.Lock()
 
-    async def test_knowledge_auto_skips_paraphrased_duplicate(self):
+    async def test_knowledge_auto_merges_paraphrased_duplicate(self):
         first = self.b['_append_knowledge_auto'](["我遇到版本问题会先核实发行渠道和版本号，再决定是否重新安装。"], "-1001")
         second = self.b['_append_knowledge_auto'](["我遇到版本相关问题时，会先核实发行渠道和版本号，再判断是否需要重新安装。"], "-1001")
         third = self.b['_append_knowledge_auto'](["搜片先换源，再核对收录和译名，最后看季集。"], "-1001")
-        self.assertEqual((first, second, third), (1, 0, 1))
+        self.assertEqual((first, second, third), (1, 1, 1))
         content = self.b['_read_knowledge_auto']()
         self.assertEqual(len(self.b['_knowledge_auto_entries'](content)), 2)
+        self.assertIn('我遇到版本相关问题时，会先核实发行渠道和版本号，再判断是否需要重新安装。', content)
 
     async def provider(self):
         return (await self.b['create_ai_provider'](self.b['AIProviderInput'](

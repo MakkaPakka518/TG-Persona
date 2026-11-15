@@ -1392,6 +1392,22 @@ section.act,.fold.open .fold-b{animation:none}
   <section id="tab-logs">
     <h2><svg viewBox="0 0 24 24"><path d="M1 8h22M4 16h10M8 4v16M16 4v16"/></svg>日志</h2>
     <div class="sub">按类型分开 · 点一行展开完整记录</div>
+    <div class="card fold" id="personaCenter">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">执行与学习中心</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div class="seg" id="personaTabs">
+          <button type="button" onclick="loadPersona('runs')">执行时间线</button>
+          <button type="button" onclick="loadPersona('replays')">历史回放</button>
+          <button type="button" onclick="loadPersona('memory')">记忆版本与冲突</button>
+          <button type="button" onclick="loadPersona('metrics')">AI 费用与质量</button>
+          <button type="button" onclick="loadPersona('profiles')">模型能力档案</button>
+          <button type="button" onclick="loadPersona('summaries')">定时群摘要</button>
+        </div>
+        <div id="personaStatus" class="hint" role="status" aria-live="polite">选择功能查看当前账号记录</div>
+        <div id="personaBody"></div>
+        <pre id="personaDetail" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:600px;overflow:auto"></pre>
+      </div>
+    </div>
     <div class="log-toolbar">
       <div class="search">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
@@ -1610,7 +1626,7 @@ section.act,.fold.open .fold-b{animation:none}
             <label for="aiProviderModel">模型</label><div class="water-ai-model-row"><input type="text" id="aiProviderModel" list="aiProviderModelOptions" maxlength="256" placeholder="gpt-4o-mini" onkeydown="if(event.key==='Escape')hideAIProviderModelList()"><button class="ghost" type="button" id="aiProviderModelsBtn" onclick="discoverAIProviderModels()">获取模型</button></div>
             <datalist id="aiProviderModelOptions"></datalist><select id="aiProviderModelList" class="model-choice-list hidden" size="10" aria-label="获取到的模型列表" onchange="selectAIProviderModel()"></select><div id="aiProviderModelsStatus" class="hint" role="status" aria-live="polite"></div>
             <label for="aiProviderReasoning">思考强度</label>
-            <select id="aiProviderReasoning" aria-describedby="aiProviderReasoningHint"><option value="default">模型默认</option><option value="none">关闭（none）</option><option value="low">低（low）</option><option value="medium">中（medium）</option><option value="high">高（high）</option><option value="xhigh">极高（xhigh）</option><option value="max">最高（max）</option></select>
+            <select id="aiProviderReasoning" aria-describedby="aiProviderReasoningHint"><option value="default">模型默认</option><option value="none">关闭（none）</option><option value="minimal">最低（minimal）</option><option value="low">低（low）</option><option value="medium">中（medium）</option><option value="high">高（high）</option><option value="xhigh">极高（xhigh）</option><option value="max">最高（max）</option></select>
             <div class="hint" id="aiProviderReasoningHint">应用于使用此 API 的学习、水群、识别和助手。可用档位取决于模型；GLM-5.3 仅支持默认、low、high、max。思考可能占用输出 Token 预算，高强度时请相应提高任务上限。</div>
             <label for="aiProviderProfile">客户端伪装</label>
             <select id="aiProviderProfile" aria-describedby="aiProviderProfileHint"><option value="none">不伪装</option><option value="opencode">opencode</option><option value="codex">codex</option><option value="claude">claude</option></select>
@@ -1851,6 +1867,7 @@ async function loadAccounts(){
   }catch(e){if(seq===accountsLoadSeq)$('#accountResult').textContent='账号加载失败，可点击刷新重试：'+e.message}
 }
 function resetAccountCaches(){
+  resetPersonaCenter();
   state={tg:{},logged_in:false,running:false,stats:{watched_groups:0,rules:0,hits:0}};
   autos=[];openedAutoIds.clear();persistAutoExpanded();autoStopBusy.clear();autoTestBusy.clear();autoReplayBusy.clear();autoReplayResults.clear();autoStopAllBusy=false;syncStopAllButton();closeIconPicker();signinGlobalDirty=false;signinGlobalBusy=false;$('#signinGlobalSave').disabled=false;$('#signinGlobalResult').textContent='';renderSigninGlobal();
   allGroups=[];allRules=[];watchedGroups=[];ruleGroupSel.clear();
@@ -1906,6 +1923,75 @@ async function manageAccount(action){
     if(action!=='create'){await loadAccounts();$('#accountResult').textContent='账号操作成功'}
   }catch(e){$('#accountResult').textContent='账号操作失败，可重试：'+e.message}
   finally{accountsBusy=false;syncAccountButtons()}
+}
+
+// ---------- 执行、回放与学习中心 ----------
+let personaSeq=0,personaView='runs';
+const PERSONA_STATUS={running:'执行中',queued:'排队中',success:'成功',sent:'已发送',failed:'失败',interrupted:'已中断',unknown:'结果待确认',unconfirmed:'待确认',stopped:'已停止',skipped:'已跳过',ready:'待继续',pending:'操作待确认',empty:'无可总结消息',duplicate:'内容重复',cancelled:'已取消',sending:'发送中'};
+function resetPersonaCenter(){personaSeq++;personaView='runs';for(const id of ['personaBody','personaDetail']){const el=$('#'+id);if(el)el.replaceChildren()}const status=$('#personaStatus');if(status)status.textContent='选择功能查看当前账号记录'}
+function personaEl(tag,text='',cls=''){const el=document.createElement(tag);el.textContent=String(text);if(cls)el.className=cls;return el}
+function personaButton(box,label,handler){const el=personaEl('button',label,'ghost');el.type='button';el.onclick=async()=>{if(el.disabled)return;el.disabled=true;try{return await handler()}finally{el.disabled=false}};box.appendChild(el);return el}
+function personaRow(box,title){const row=personaEl('div','','memory-row');row.appendChild(personaEl('b',title));box.appendChild(row);return row}
+function personaField(box,label,value='',type='text',choices=null){const wrap=personaEl('label',label),input=document.createElement(choices?'select':type==='textarea'?'textarea':'input');if(choices){for(const [v,t] of choices){const o=personaEl('option',t);o.value=v;input.appendChild(o)}}else if(type!=='textarea')input.type=type;if(type==='checkbox'){input.checked=!!value;input.style.width='auto'}else input.value=value??'';wrap.appendChild(input);box.appendChild(wrap);return input}
+function personaPicks(box,label,items,selected=[]){const block=personaEl('div'),title=personaEl('label',label);block.appendChild(title);const inputs=items.map(item=>({id:String(item.id),input:personaField(block,item.label,selected.includes(String(item.id)),'checkbox')}));box.appendChild(block);return ()=>inputs.filter(x=>x.input.checked).map(x=>x.id)}
+function personaDetail(value){$('#personaDetail').textContent=typeof value==='string'?value:JSON.stringify(value,null,2)}
+async function personaAction(c,seq,action,refresh=true){if(!isCurrentAccount(c)||seq!==personaSeq)return;try{const result=await action();if(!isCurrentAccount(c)||seq!==personaSeq)return;if(refresh)await loadPersona(personaView);else if(result!==undefined)personaDetail(result)}catch(e){if(isCurrentAccount(c)&&seq===personaSeq&&!e.staleAccount)$('#personaStatus').textContent=e.message}}
+async function loadPersona(view=personaView){
+  personaView=view;const seq=++personaSeq,c=accountContext(),box=$('#personaBody');box.replaceChildren();personaDetail('');$('#personaStatus').textContent='加载中…';
+  const get=path=>api('/api/persona/'+path,{_account:c});
+  try{
+    if(view==='runs'){
+      const [data,recovery]=await Promise.all([get('runs'),get('recovery')]);if(seq!==personaSeq||!isCurrentAccount(c))return;
+      const filter=personaField(box,'任务 ID（0 表示全部）',0,'number');let offset=0;
+      const records=personaEl('div');
+      const draw=data=>{records.replaceChildren();for(const run of data.items){const row=personaRow(records,fmt(run.started)+' · '+run.name+' · '+(PERSONA_STATUS[run.status]||run.status));row.appendChild(personaEl('div','任务 #'+run.task_id+'　'+run.chat_id,'hint'));personaButton(row,'查看步骤',()=>personaAction(c,seq,async()=>{const detail=await get('runs/'+run.id);return detail.events.map(e=>fmt(e.ts)+'　'+e.stage+'　'+JSON.stringify(e.detail)).join('\n')},false))}if(!data.items.length)records.textContent='暂无执行记录'};
+      const page=async n=>{offset=Math.max(0,n);const d=await get('runs?task_id='+Number(filter.value||0)+'&offset='+offset);if(seq===personaSeq&&isCurrentAccount(c))draw(d)};
+      personaButton(box,'查询',()=>personaAction(c,seq,()=>page(0),false));personaButton(box,'上一页',()=>personaAction(c,seq,()=>page(offset-50),false));personaButton(box,'下一页',()=>personaAction(c,seq,()=>page(offset+50),false));box.appendChild(records);draw(data);
+      for(const item of recovery.checkpoints){const row=personaRow(box,'恢复检查点 · '+item.name+' · 第 '+(item.step+1)+' 步');row.appendChild(personaEl('div',PERSONA_STATUS[item.state]||item.state,'hint'));for(const [action,label] of [['resume','继续执行'],['completed','此步骤已完成'],['retry','重新执行此步骤'],['discard','清除检查点']])personaButton(row,label,()=>{if(action!=='resume'&&!window.confirm(label+'？请先核对 Telegram 消息，避免重复提交。'))return;return personaAction(c,seq,()=>api('/api/persona/recovery/'+item.task_id,{_account:c,method:'POST',body:JSON.stringify({action,updated:item.updated})}))})}
+      if(recovery.deletions.length){const row=personaRow(box,'待删除消息');for(const item of recovery.deletions)row.appendChild(personaEl('div',item.chat_id+' / #'+item.message_id+' · '+fmt(item.due)+' · 重试 '+item.attempts+(item.error?' · '+item.error:''),'hint'))}
+    }else if(view==='replays'){
+      const [data,tasks]=await Promise.all([get('replays'),api('/api/autos',{_account:c})]);if(seq!==personaSeq||!isCurrentAccount(c))return;
+      const select=personaField(box,'选择任务并保存最近 20 条消息及按钮快照','', 'text',(tasks.autos||[]).map(a=>[String(a.id),a.name]));
+      personaButton(box,'保存历史样本',()=>personaAction(c,seq,()=>api('/api/persona/replays/capture/'+select.value,{_account:c,method:'POST'})));
+      for(const sample of data.items){const row=personaRow(box,sample.name+' · '+fmt(sample.created));personaButton(row,'对比采集时与当前配置',()=>personaAction(c,seq,()=>api('/api/persona/replays/'+sample.id+'/compare',{_account:c,method:'POST'}),false))}
+      box.appendChild(personaEl('div','对比使用同一份历史消息，不发送或点击。输出包含配置变化、触发结果、脚本按钮选择及待调用的 AI 步骤。','hint'));
+    }else if(view==='memory'){
+      const [versions,conflicts]=await Promise.all([get('memory/versions?file=study.md'),get('memory/conflicts')]);if(seq!==personaSeq||!isCurrentAccount(c))return;
+      const select=personaField(box,'记忆文件','study.md','text',['study.md','skill.md','knowledge.md','knowledge-auto.md'].map(x=>[x,x]));const list=personaEl('div');box.appendChild(list);
+      const draw=data=>{list.replaceChildren();for(const version of data.items){const row=personaRow(list,fmt(version.created)+' · '+version.reason);row.appendChild(personaEl('div',JSON.stringify(version.source),'hint'));personaButton(row,'查看差异 / 恢复',()=>personaAction(c,seq,async()=>{const detail=await get('memory/versions/'+version.id);if(seq!==personaSeq||!isCurrentAccount(c))return;personaDetail(detail.diff||'与当前文件内容相同');const actions=personaRow(list,'所选版本 #'+version.id);personaButton(actions,'恢复此版本',()=>personaAction(c,seq,()=>api('/api/persona/memory/versions/'+version.id+'/restore',{_account:c,method:'POST',body:JSON.stringify({digest:detail.digest})})));return detail.diff||'与当前文件内容相同'},false))}};
+      draw(versions);select.onchange=()=>personaAction(c,seq,async()=>{const data=await get('memory/versions?file='+encodeURIComponent(select.value));if(seq===personaSeq&&isCurrentAccount(c))draw(data)},false);
+      for(const conflict of conflicts.items){const row=personaRow(box,'待处理知识冲突 #'+conflict.id);row.appendChild(personaEl('pre','原说法：'+conflict.old_body+'\n新说法：'+conflict.new_body+'\n来源：'+JSON.stringify(conflict.source)));for(const [choice,label] of [['old','保留原说法'],['new','采用新说法'],['both','同时保留']])personaButton(row,label,()=>personaAction(c,seq,()=>api('/api/persona/memory/conflicts/'+conflict.id,{_account:c,method:'POST',body:JSON.stringify({choice})})))}
+      box.appendChild(personaEl('div','每个文件保留最近 30 个版本；恢复前校验当前内容，避免覆盖新的学习结果。','hint'));
+    }else if(view==='metrics'){
+      const days=personaField(box,'最近天数',14,'number'),group=personaField(box,'统计维度','provider','text',[['provider','AI 线路'],['feature','功能'],['task','任务'],['day','日期']]);const list=personaEl('div');
+      const draw=async()=>{const data=await get('metrics?days='+Number(days.value||14)+'&group='+group.value);if(seq!==personaSeq||!isCurrentAccount(c))return;list.replaceChildren();for(const m of data.items){const row=personaRow(list,String(m.label||'未指定')+' · '+m.calls+' 次调用');row.appendChild(personaEl('div','有效响应率 '+m.success_rate+'%　平均 '+Math.round(m.average_ms)+' ms　P95 '+m.p95_ms+' ms','hint'));row.appendChild(personaEl('div','输入 '+m.input_tokens+' / 输出 '+m.output_tokens+' / 缓存 '+m.cached_tokens+' Token','hint'));row.appendChild(personaEl('div','估算费用：'+(m.cost==null?'未知':Number(m.cost).toFixed(6)+' '+m.currency)+'　未计价 '+m.unpriced+' 次 / 用量未知 '+m.unknown_usage+' 次','hint'))}list.appendChild(personaEl('div',data.notice,'hint'))};personaButton(box,'查询',()=>personaAction(c,seq,draw,false));box.appendChild(list);await draw();
+    }else if(view==='profiles'){
+      const data=await get('profiles');if(seq!==personaSeq||!isCurrentAccount(c))return;
+      box.appendChild(personaEl('div','档案随共用 AI 线路保存。价格单位为每百万 Token；连接探测会调用一次模型，结果仅说明当前参数能否返回正文。','hint'));
+      for(const p of data.items){const profile=p.profile||{},row=personaRow(box,p.note+' · '+p.model),form=personaEl('form');row.appendChild(form);
+        const vision=personaField(form,'图片输入',profile.vision==null?'unknown':String(profile.vision),'text',[['unknown','未声明'],['true','支持'],['false','禁用']]);
+        const reasoning=personaField(form,'思考参数',profile.reasoning_parameter||'auto','text',[['auto','自动'],['reasoning_effort','reasoning_effort'],['thinking','thinking'],['omit','不发送思考参数']]);
+        const levels=personaField(form,'支持的思考档位（逗号分隔，留空不限制）',(profile.reasoning_levels||[]).join(','));
+        const token=personaField(form,'输出额度参数',profile.token_parameter||'max_tokens','text',[['max_tokens','max_tokens'],['max_completion_tokens','max_completion_tokens']]);
+        const max=personaField(form,'最大输出 Token（留空不限制）',profile.max_output_tokens??'','number');
+        const incoming=personaField(form,'输入价格',profile.input_price??'','number'),outgoing=personaField(form,'输出价格',profile.output_price??'','number'),cached=personaField(form,'缓存输入价格',profile.cached_price??'','number');for(const el of [incoming,outgoing,cached]){el.min='0';el.step='any'}
+        const currency=personaField(form,'币种',profile.currency||'CNY','text',[['CNY','CNY'],['USD','USD'],['EUR','EUR']]);
+        personaButton(form,'保存档案',()=>personaAction(c,seq,()=>api('/api/persona/profiles/'+p.id,{_account:c,method:'PUT',body:JSON.stringify({vision:vision.value==='unknown'?null:vision.value==='true',reasoning_parameter:reasoning.value,reasoning_levels:levels.value.split(',').map(x=>x.trim()).filter(Boolean),token_parameter:token.value,max_output_tokens:max.value===''?null:Number(max.value),input_price:incoming.value===''?null:Number(incoming.value),output_price:outgoing.value===''?null:Number(outgoing.value),cached_price:cached.value===''?null:Number(cached.value),currency:currency.value})})));
+        personaButton(row,'探测已保存的参数',()=>personaAction(c,seq,()=>api('/api/persona/profiles/'+p.id+'/probe',{_account:c,method:'POST'}),false));if(profile.probe)row.appendChild(personaEl('div','上次探测：'+(profile.probe.ok?'成功':'失败')+' · '+fmt(profile.probe.at)+' · '+(profile.probe.error||profile.probe.reply||''),'hint'));
+      }
+    }else if(view==='summaries'){
+      const [data,groups,providers]=await Promise.all([get('summaries'),api('/api/watched',{_account:c}),get('profiles')]);if(seq!==personaSeq||!isCurrentAccount(c))return;
+      box.appendChild(personaEl('div','按 '+data.timezone+' 执行，每群每天最多发送一份到当前账号收藏夹。新任务默认关闭；手动运行也使用当天去重记录。','hint'));
+      const watched=Array.isArray(groups)?groups:(groups.groups||[]),editor=personaEl('div');box.appendChild(editor);
+      const edit=job=>{editor.replaceChildren();const row=personaRow(editor,job?'编辑摘要任务':'新增摘要任务'),name=personaField(row,'名称',job?.name||''),enabled=personaField(row,'启用定时摘要',!!job?.enabled,'checkbox');
+        const picks=personaPicks(row,'监听群',watched.map(g=>({id:String(g.chat_id??g.id),label:g.name||String(g.chat_id??g.id)})),job?.groups||[]),routes=personaPicks(row,'AI 线路（不选使用启用线路）',providers.items.map(p=>({id:p.id,label:p.note+' · '+p.model})),job?.provider_ids||[]);
+        const at=personaField(row,'每天发送时间',job?.at||'21:00','time'),hours=personaField(row,'回看小时数',job?.hours||24,'number'),limit=personaField(row,'最多读取消息数',job?.message_limit||200,'number'),topics=personaField(row,'关注主题',job?.topics||'','textarea');
+        personaButton(row,'保存',()=>personaAction(c,seq,()=>api('/api/persona/summaries'+(job?'/'+job.id:''),{_account:c,method:job?'PUT':'POST',body:JSON.stringify({name:name.value,enabled:enabled.checked,groups:picks(),at:at.value,hours:Number(hours.value),message_limit:Number(limit.value),topics:topics.value,provider_ids:routes()})})));if(job)personaButton(row,'新增任务',()=>edit(null))};edit(null);
+      for(const job of data.items){const row=personaRow(box,job.name+' · '+(job.enabled?'已开启':'已关闭')+' · '+job.at);row.appendChild(personaEl('div','群：'+job.groups.join(', ')+'　关注：'+(job.topics||'全部话题'),'hint'));personaButton(row,'编辑',()=>{edit(job);editor.scrollIntoView({block:'nearest'})});personaButton(row,'立即运行',()=>personaAction(c,seq,()=>api('/api/persona/summaries/'+job.id+'/run',{_account:c,method:'POST'})));personaButton(row,'删除',()=>personaAction(c,seq,()=>api('/api/persona/summaries/'+job.id,{_account:c,method:'DELETE'})))}
+      for(const run of data.runs)box.appendChild(personaEl('div',run.day+' · 任务 #'+run.job_id+' · '+run.chat_id+' · '+(PERSONA_STATUS[run.status]||run.status)+(run.error?' · '+run.error:''),'hint'));
+    }
+    if(seq===personaSeq&&isCurrentAccount(c)){$('#personaStatus').textContent='当前账号：'+c.id;personaButton(box,'刷新',()=>loadPersona(view))}
+  }catch(e){if(seq===personaSeq&&isCurrentAccount(c)&&!e.staleAccount)$('#personaStatus').textContent='加载失败：'+e.message}
 }
 
 // ---------- Tab ----------
@@ -3455,7 +3541,7 @@ function renderRegistrationAIProviders(prefix){
 }
 function setRegistrationAIFlock(prefix,providers,reaction){const ids=csvValues(providers);registrationAIProviderExplicit[prefix]=ids.length>0;registrationAIProviderSel[prefix]=new Set(ids);$('#'+prefix+'AiFlockReaction').value=reaction||'';renderRegistrationAIProviders(prefix);syncAIFlockReactionPicker(prefix+'AiFlockReaction')}
 let aiTestResults={};
-const AI_REASONING_LABELS={default:'模型默认',none:'关闭（none）',low:'低（low）',medium:'中（medium）',high:'高（high）',xhigh:'极高（xhigh）',max:'最高（max）'};
+const AI_REASONING_LABELS={default:'模型默认',none:'关闭（none）',minimal:'最低（minimal）',low:'低（low）',medium:'中（medium）',high:'高（high）',xhigh:'极高（xhigh）',max:'最高（max）'};
 const AI_PROFILE_LABELS={none:'不伪装',opencode:'opencode',codex:'codex',claude:'claude'};
 function renderAIProviders(){
   $('#aiProvidersCount').textContent=aiProviders.length;
