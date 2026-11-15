@@ -1030,8 +1030,11 @@ section.act,.fold.open .fold-b{animation:none}
       </div>
     </div>
     <div class="card fold">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12a9 9 0 1 1-9-9"/></svg>签到任务</span><span class="cnt" id="aCntSign">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12a9 9 0 1 1-9-9"/></svg>签到任务</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
+        <div class="fold sub-fold open">
+          <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">BOT 签到</span><span class="cnt" id="aCntSign">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+          <div class="fold-b">
         <div class="card" id="signinGlobalCard" style="margin-bottom:12px">
           <div class="flex" style="gap:10px;align-items:center">
             <label style="display:flex;align-items:center;gap:8px;margin:0"><input type="checkbox" id="signinGlobalEnabled" style="width:auto" onchange="markSigninGlobalDirty()"> 统一执行时间（所有账号）</label>
@@ -1146,26 +1149,6 @@ section.act,.fold.open .fold-b{animation:none}
             <button class="ghost" type="button" onclick="cancelAutoEdit('signin')" id="sCancel" style="display:none">取消编辑</button>
           </div>
         </form></div></div>
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">网页签到（账号密码站）</span><span class="cnt" id="aCntWeb">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-      <div class="fold-b">
-        <div class="hint">适用于有网页版登录入口的站点（如叶子emby）。后台自动登录 → 取算术验证码 → 算答案 → 提交签到。点「执行」可立即试跑一次，结果显示在下方和日志里。</div>
-        <button class="btn addtask" type="button" onclick="openWebForm()">＋ 添加网页签到</button>
-        <div id="aListWeb"></div>
-        <div class="empty" id="aEmptyWeb">暂无网页签到任务,点上面按钮添加</div>
-        <div class="autof" id="af-web"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑网页签到</b><button class="ghost" type="button" onclick="closeWebForm()">关闭</button></div><form onsubmit="saveWebSignin();return false">
-          <label for="wName">任务名称</label><input type="text" id="wName" maxlength="100" placeholder="如: 叶子emby">
-          <label for="wSite">站点地址</label><input type="text" id="wSite" maxlength="300" placeholder="https://xjg.lyezi.cc" required>
-          <label for="wUser">用户名</label><input type="text" id="wUser" maxlength="100" required>
-          <label for="wPass">密码</label><input type="password" id="wPass" maxlength="300" required>
-          <label for="wRunAt">每日执行时间（HH:MM）</label><input type="text" id="wRunAt" maxlength="5" value="08:30" required>
-          <div class="hint">到点后若当天未签成功才会执行；失败自动重试一次。账号密码仅存在本地数据库，不会外传。</div>
-          <label class="check"><input type="checkbox" id="wEnabled" checked> 启用</label>
-          <div class="flex" style="margin-top:14px">
-            <button class="btn" type="submit">保存</button>
-            <button class="ghost" type="button" onclick="closeWebForm()">取消</button>
-          </div>
-        </form></div></div>
-      </div>
       <div class="fold sub-fold">
         <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">批量操作</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
         <div class="fold-b">
@@ -1192,6 +1175,30 @@ section.act,.fold.open .fold-b{animation:none}
         <pre id="batchResult" class="hint" style="white-space:pre-wrap" role="status" aria-live="polite"></pre>
       </div>
       </div>
+          </div>
+        </div>
+        <div class="fold sub-fold open">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">WEB 签到（账号密码站）</span><span class="cnt" id="aCntWeb">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div class="hint">适用于有网页版登录入口的站点（如叶子emby）。后台自动登录 → 取算术验证码 → 算答案 → 提交签到。点「执行」可立即试跑一次，结果显示在下方和日志里。</div>
+        <button class="btn addtask" type="button" onclick="openWebForm()">＋ 添加网页签到</button>
+        <div id="aListWeb"></div>
+        <div class="empty" id="aEmptyWeb">暂无网页签到任务,点上面按钮添加</div>
+        <div class="autof" id="af-web"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑网页签到</b><button class="ghost" type="button" onclick="closeWebForm()">关闭</button></div><form onsubmit="saveWebSignin();return false">
+          <label for="wName">任务名称</label><input type="text" id="wName" maxlength="100" placeholder="如: 叶子emby">
+          <label for="wSite">站点地址</label><input type="text" id="wSite" maxlength="300" placeholder="https://xjg.lyezi.cc" required>
+          <label for="wUser">用户名</label><input type="text" id="wUser" maxlength="100" required>
+          <label for="wPass">密码</label><input type="password" id="wPass" maxlength="300" required>
+          <label for="wRunAt">每日执行时间（HH:MM）</label><input type="text" id="wRunAt" maxlength="5" value="08:30" required>
+          <div class="hint">到点后若当天未签成功才会执行；失败自动重试一次。账号密码仅存在本地数据库，不会外传。</div>
+          <label class="check"><input type="checkbox" id="wEnabled" checked> 启用</label>
+          <div class="flex" style="margin-top:14px">
+            <button class="btn" type="submit">保存</button>
+            <button class="ghost" type="button" onclick="closeWebForm()">取消</button>
+          </div>
+        </form></div></div>
+      </div>
+        </div>
       </div>
     </div>
 
