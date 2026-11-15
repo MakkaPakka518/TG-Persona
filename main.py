@@ -10026,15 +10026,22 @@ def _memory_version(path):
 
 
 @app.get("/api/ai/flock/memory")
-async def list_ai_memory(file: str = "study", q: str = "", offset: int = 0):
+async def list_ai_memory(file: str = "study", q: str = "", offset: int = 0, pinned: str = "all"):
     async with get_runtime().skill_lock:
         path, content, _ = _memory_document(file)
         entries = _memory_entries(content, file)
+        pinned_count = sum(1 for entry in entries if entry["meta"].get("pinned"))
         wanted = [entry for entry in entries if str(q)[:200].casefold() in entry["body"].casefold()]
+        if pinned == "pinned":
+            wanted = [entry for entry in wanted if entry["meta"].get("pinned")]
+        elif pinned == "unpinned":
+            wanted = [entry for entry in wanted if not entry["meta"].get("pinned")]
         offset = max(0, int(offset))
         names = {str(row[0]): row[1] for row in get_account_db().execute("SELECT chat_id,name FROM watched_groups")}
         return {"file": file, "version": _memory_version(path), "bytes": len(content.encode("utf-8")),
-                "total": len(wanted), "offset": offset, "filter": _learning_filter_public(), "items": [
+                "total": len(wanted), "offset": offset, "filter": _learning_filter_public(),
+                "pinned": pinned if pinned in ("pinned", "unpinned") else "all",
+                "pinned_count": pinned_count, "unpinned_count": len(entries) - pinned_count, "items": [
                     {"start": entry["start"], "body": entry["body"], "pinned": bool(entry["meta"].get("pinned")),
                      "created_at": entry["meta"].get("created_at", 0),
                      "source": entry["meta"].get("source", entry["meta"].get("stage", "legacy")),
