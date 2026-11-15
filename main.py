@@ -2920,7 +2920,7 @@ async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False, *, test_job
         _flock_stage(progress, "sending", "正在发送到 Telegram")
         split_ratio = BUBBLE_SPLIT_RATIO_AFTER_GRAB if registration else BUBBLE_SPLIT_RATIO
         sent, bubbles = await asyncio.wait_for(
-            _send_bubbled_reply(chat_id, key, reply, "ai_flock", split_ratio), timeout=30)
+            _send_bubbled_reply(chat_id, key, reply, "ai_flock", split_ratio, dedupe=True), timeout=30)
         if sent is None:
             _flock_stage(progress, "skipped", "内容与最近发送重复，已跳过")
             add_hit("ai_flock", False, chat_id=key, content=trigger[:120],
@@ -3210,9 +3210,10 @@ async def _bubble_pause(entity, text):
         await asyncio.sleep(seconds)
 
 
-async def _send_bubbled_reply(entity, chat_id, text, kind="automation", ratio=BUBBLE_SPLIT_RATIO, rng=None):
-    """先过去重，再按分泡规则逐条发送；返回 (最后一条消息, 气泡数)，去重命中时 (None, 0)。"""
-    if _sent_recently(chat_id, text):
+async def _send_bubbled_reply(entity, chat_id, text, kind="automation", ratio=BUBBLE_SPLIT_RATIO, rng=None,
+                              dedupe=False):
+    """先按需过去重，再按分泡规则逐条发送；返回 (最后一条消息, 气泡数)，去重命中时 (None, 0)。"""
+    if dedupe and _sent_recently(chat_id, text):
         log.info("发送去重命中，跳过重复内容 群=%s", chat_id)
         return None, 0
     parts = _bubble_parts(text, ratio, rng)
@@ -3235,9 +3236,9 @@ async def _event_generated_message(event, method, text, **kwargs):
 
 
 async def _event_bubbled_reply(event, method, chat_id, text, kind="automation",
-                               ratio=BUBBLE_SPLIT_RATIO, rng=None):
+                               ratio=BUBBLE_SPLIT_RATIO, rng=None, dedupe=False):
     """event.reply / event.respond 版本的分泡发送，返回实际发出的气泡数。"""
-    if _sent_recently(chat_id, text):
+    if dedupe and _sent_recently(chat_id, text):
         log.info("发送去重命中，跳过重复内容 群=%s", chat_id)
         return 0
     count = 0

@@ -49,11 +49,25 @@ class ReplyStyleTests(unittest.IsolatedAsyncioTestCase):
             return b['_track_generated_message'](message(1, text, out=True), 'chat', text, 'test')
 
         b['_send_generated_message'] = fake_send
-        await b['_send_bubbled_reply']('chat', 'chat', '好的收到啊', 'test', 0.0)
+        await b['_send_bubbled_reply']('chat', 'chat', '好的收到啊', 'test', 0.0, dedupe=True)
         self.assertEqual(len(sent), 1)
-        result, count = await b['_send_bubbled_reply']('chat', 'chat', '好的收到啊', 'test', 0.0)
+        result, count = await b['_send_bubbled_reply']('chat', 'chat', '好的收到啊', 'test', 0.0, dedupe=True)
         self.assertIsNone(result)
         self.assertEqual(count, 0)
+
+    async def test_fixed_announcement_is_never_deduped(self):
+        b = self.b
+        sent = []
+
+        async def fake_send(entity, text, **kwargs):
+            sent.append(text)
+            return b['_track_generated_message'](message(1, text, out=True), 'chat', text, 'test')
+
+        b['_send_generated_message'] = fake_send
+        # 签到播报、红包回群是固定文案，同一分钟触发两次也必须照发。
+        for _ in range(2):
+            await b['_send_bubbled_reply']('chat', 'chat', '签到成功', 'redpacket', 0.0)
+        self.assertEqual(sent, ['签到成功', '签到成功'])
 
     async def test_knowledge_auto_merges_instead_of_dropping(self):
         b = self.b
