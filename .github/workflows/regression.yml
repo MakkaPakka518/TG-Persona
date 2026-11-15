@@ -1,0 +1,37 @@
+name: 完整回归
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 安装轻量测试依赖
+        run: python -m pip install fastapi telethon httpx uvicorn pyyaml 'cryptography>=42.0' regex
+
+      - name: 后端完整回归
+        env:
+          PYTHONPATH: .:test_suite
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m unittest discover -s test_suite -p 'test_*.py' -q
+
+      - name: 前端完整回归
+        if: always()
+        run: node test_suite/test_frontend.js
