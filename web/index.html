@@ -4200,7 +4200,7 @@ let captchaTestImage='',captchaTestVersion=0,captchaTestReader=null,captchaTestB
 function setAITestMode(mode){
   aiTestMode=(mode==='image'||mode==='poem')?mode:'captcha';
   for(const button of $('#aiTestSeg').querySelectorAll('[data-ai-test-mode]'))button.classList.toggle('on',button.dataset.aiTestMode===aiTestMode);
-  $('#aiTestCaptchaSettings').classList.toggle('hidden',aiTestMode==='image'||aiTestMode==='poem');
+  $('#aiTestCaptchaSettings').classList.toggle('hidden',aiTestMode==='image');
   $('#captchaTestLengthWrap').classList.toggle('hidden',aiTestMode!=='captcha');
   $('#aiTestImagePromptWrap').classList.toggle('hidden',aiTestMode==='captcha');
   $('#aiTestImageAction').value=aiTestMode==='image'?'reply':'click';

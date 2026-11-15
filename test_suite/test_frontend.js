@@ -643,6 +643,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(!element('#aiTestImagePromptWrap').classList.contains('hidden'));
     assert(element('#captchaTestLengthWrap').classList.contains('hidden'));
     assert(element('#captchaTestBtn').textContent==='开始古诗识别');
+    assert(!element('#aiTestCaptchaSettings').classList.contains('hidden'));
     element('#aiTestImagePrompt').value='';
     let body;context.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true,text:'西',channel:'ocr',ocr_text:'蜀僧抱绿绮，O下峨眉峰。',errors:[],elapsed_ms:301}};
     await run('testCaptchaRecognition()');
