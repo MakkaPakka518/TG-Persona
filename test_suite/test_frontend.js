@@ -1229,6 +1229,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(summary.includes('共 42 条'));assert(summary.includes('丢弃 12'));assert(summary.includes('低信息量标记 5'));
     assert(String(ex("learningFilterSummary(null)")).includes('尚未采集'));
     assert(html.includes("learningFilterSummary(data.filter)"));
+    assert(html.includes('loadLearningFilter()'));
+    assert(html.includes('/api/ai/flock/learning-filter'));
   });
   await test('共享库修改后旧图标选择失效，重新加载再选择',async()=>{
     ex('openIconPicker();acceptIcons(iconsFixture)');const old=q('#iconGrid').children[0];const before=q('#sIconUrl').value;app.api=async()=>({libraries:[{id:'l',enabled:false}],ok:true});await ex("updateIconLibrary('l',{enabled:false})");old.listeners.click();assert.strictEqual(q('#sIconUrl').value,before);assert.strictEqual(ex('iconsLoaded'),false);assert.strictEqual(q('#iconGrid').children.length,0);

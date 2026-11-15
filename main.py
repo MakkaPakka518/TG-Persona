@@ -9970,6 +9970,16 @@ _OWNER_AI_DEFAULTS = {"flock_owner_pause_enabled": "0", "flock_owner_pause_minut
     "flock_daily_learning_tokens": "0", "flock_daily_flock_tokens": "0"}
 
 
+@app.get("/api/ai/flock/learning-filter")
+async def get_ai_learning_filter():
+    stats = _learning_filter_public()
+    try:
+        samples = json.loads(get_setting("flock_learning_filter_samples", "[]") or "[]")
+    except Exception:
+        samples = []
+    return {"stats": stats, "samples": samples[-10:] if isinstance(samples, list) else []}
+
+
 @app.get("/api/ai/flock/owner-settings")
 async def get_owner_ai_settings():
     return {"settings": {key: get_setting(key, default) for key, default in _OWNER_AI_DEFAULTS.items()},
