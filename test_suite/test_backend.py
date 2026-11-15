@@ -102,6 +102,8 @@ def load_backend():
                           'TOPIC_STOP_TERMS', '_MEMORY_ID_PREFIX', '_MEMORY_STAGE_WEIGHT', '_button_ai_result',
                         '_CODE_USED_NOTICE_RE', '_CODE_MASK_CHARS', 'KNOWLEDGE_AUTO_MAX_BYTES',
                         'KNOWLEDGE_MAX_BYTES', 'SKILL_MAX_BYTES',
+                        '_LE_REPEAT', '_LE_CATEGORY_WORDS', '_LE_NEUTRAL', '_LE_SIGNAL', '_LE_CHARS',
+                        '_LE_REPLAY', '_LE_STATS', '_LE_SAMPLES', '_LE_FLUSH_AT',
                         'MEMORY_STALE_DAYS', 'SENT_DEDUPE_SECONDS', 'BUBBLE_SPLIT_RATIO',
                         'BUBBLE_SPLIT_RATIO_AFTER_GRAB', 'BUBBLE_MAX_PARTS'}
     selected = []

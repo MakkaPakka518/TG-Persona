@@ -3227,6 +3227,105 @@ def _set_learning_status(status, error=None, run=False, success=False):
         set_setting("flock_learning_last_error", "")
 
 
+# ---------------- 学习信号过滤：A 组真丢 / B 组只打标 / C 组统计 ----------------
+_LE_REPEAT = re.compile(r"(.)\1{2,}")
+_LE_CATEGORY_WORDS = (
+    "开心 高兴 快乐 舒服 爽 妙 笑死 绷不住 好耶 太棒 美滋滋 哈哈哈 嘿嘿 嘻嘻 绝了",
+    "早 早安 晚安 你好 大家好 中秋快乐 新年快乐 生日快乐 恭喜 祝 祝福 一切顺利",
+    "同意 支持 说得对 确实 对的 是的 没错 赞成 顶 认同 服气 果然 有道理 靠谱",
+    "反对 不同意 不行 扯淡 离谱 不至于 没必要 不认同",
+    "难过 伤心 可惜 遗憾 唉 太惨 心疼 哭了",
+    "厉害 牛 优秀 漂亮 好看 帅 强 赞",
+    "蹲 蹲一个 求 想要 期待 等 求带 求教程 谁有 上车 报名 参加 我也来 算我一个",
+    "收到 了解 明白 知道了 好的 嗯 昂",
+)
+_LE_NEUTRAL = set("我 你 他 她 它 的 了 太 很 也 就 都 还 是 有 没 咋 搞 啊 呀 吧 呢 吗 这 那 个 们 真 好 一 下 位 大 家 老 板")
+_LE_SIGNAL = re.compile(
+    r"(?i)\d|\b(?:api|worker|vps|cf|ip|port|dns|ssl|http|json|sql|ssh|docker|nginx|python|telegram|emby|tg)\b"
+    r"|端口|部署|节点|鉴权|代理|反代|订阅|域名|服务器|配置|价格|多少钱|费用|几点|版本|报错|错误|日志|接口"
+    r"|怎么|为什么|为啥|哪里|哪个|如何|能不能|可不可以|有没有|是不是|靠谱吗"
+)
+_LE_CHARS = set("".join(_LE_CATEGORY_WORDS).replace(" ", "")) | _LE_NEUTRAL
+_LE_REPLAY = {}
+_LE_STATS = {"total": 0, "kept": 0, "dropped": {}, "would_drop": 0}
+_LE_SAMPLES = []
+_LE_FLUSH_AT = 0.0
+
+
+def _learning_norm(text):
+    return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", str(text or "")).lower()
+
+
+def _learning_replay(chat, norm, ts=None):
+    """同群 10 分钟内同一句话出现 ≥3 次，判定为复读。"""
+    now = float(ts if ts is not None else time.time())
+    key = (str(chat), norm)
+    stamps = [item for item in _LE_REPLAY.get(key, ()) if now - item <= 600]
+    stamps.append(now)
+    _LE_REPLAY[key] = stamps[-6:]
+    if len(_LE_REPLAY) > 4000:
+        for stale in list(_LE_REPLAY)[:2000]:
+            _LE_REPLAY.pop(stale, None)
+    return len([item for item in _LE_REPLAY[key] if now - item <= 600]) >= 3
+
+
+def _learning_coverage(norm):
+    chars = [ch for ch in norm if "\u4e00" <= ch <= "\u9fff"]
+    if not chars:
+        return 0.0
+    return sum(1 for ch in chars if ch in _LE_CHARS) / len(chars)
+
+
+def _learning_signal(chat, text, ts=None):
+    """返回 (是否保留, 丢弃原因, 标记)。A 组直接丢，B 组 只打标。"""
+    raw = str(text or "").strip()
+    norm = _learning_norm(raw)
+    if not norm:
+        return False, "无有效文字", ""
+    if not re.search(r"[\u4e00-\u9fffA-Za-z]", raw):
+        return False, "纯符号或表情", ""
+    if len(norm) < 4:
+        return False, "过于简短", ""
+    if _LE_REPEAT.fullmatch(raw):
+        return False, "字符复读", ""
+    if len(norm) <= 6 and all(ch in _LE_NEUTRAL for ch in norm):
+        return False, "纯语气词", ""
+    if _learning_replay(chat, norm, ts):
+        return False, "短时复读", ""
+    if _LE_SIGNAL.search(raw):
+        return True, "", "signal"
+    if _learning_coverage(norm) >= 0.7:
+        return True, "低信息量（仅标记）", "would_drop"
+    return True, "", ""
+
+
+def _learning_filter_record(keep, reason, tag, chat, text):
+    _LE_STATS["total"] += 1
+    if keep:
+        _LE_STATS["kept"] += 1
+        if tag == "would_drop":
+            _LE_STATS["would_drop"] += 1
+    else:
+        label = reason or "其他"
+        _LE_STATS["dropped"][label] = _LE_STATS["dropped"].get(label, 0) + 1
+        _LE_SAMPLES.append({"at": now_local().strftime("%Y-%m-%d %H:%M:%S"), "chat": str(chat),
+                            "reason": label, "text": str(text or "")[:80]})
+        del _LE_SAMPLES[:-50]
+    _learning_filter_flush()
+
+
+def _learning_filter_flush(force=False):
+    global _LE_FLUSH_AT
+    if not force and time.monotonic() - _LE_FLUSH_AT < 30:
+        return
+    _LE_FLUSH_AT = time.monotonic()
+    try:
+        set_setting("flock_learning_filter_stats", json.dumps(_LE_STATS, ensure_ascii=False))
+        set_setting("flock_learning_filter_samples", json.dumps(_LE_SAMPLES[-50:], ensure_ascii=False))
+    except Exception:
+        log.warning("学习信号过滤统计写入失败", exc_info=True)
+
+
 def _learning_text(text, message_chars=None, unlimited=None):
     text = str(text or "").strip()
     if (len(text) < 2 or text.startswith(("/", "!", "."))
@@ -3570,6 +3669,10 @@ async def _collect_learning_event(event, role):
     text = _learning_text(getattr(event, "raw_text", ""), unlimited=unlimited or deep)
     if not text:
         return
+    keep, reason, tag = _learning_signal(key, text)
+    _learning_filter_record(keep, reason, tag, key, text)
+    if not keep:
+        return
     _store_learning_samples([(time.time(), key, text, role)])
 
 
@@ -3802,7 +3905,10 @@ async def _bootstrap_deep_learning():
             if text:
                 date = getattr(message, "date", None)
                 ts = date.timestamp() if hasattr(date, "timestamp") else time.time()
-                records.append((ts, group, text, role))
+                keep, reason, tag = _learning_signal(group, text, ts)
+                _learning_filter_record(keep, reason, tag, group, text)
+                if keep:
+                    records.append((ts, group, text, role))
     records.sort(key=lambda item: item[0], reverse=True)
     _store_learning_samples(records[:200])
     set_setting("flock_deep_learning_loaded_start", start)
