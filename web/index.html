@@ -1189,8 +1189,9 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="wSite">站点地址</label><input type="text" id="wSite" maxlength="300" placeholder="https://xjg.lyezi.cc" required>
           <label for="wUser">用户名</label><input type="text" id="wUser" maxlength="100" required>
           <label for="wPass">密码</label><input type="password" id="wPass" maxlength="300" required>
-          <label for="wRunAt">每日执行时间（HH:MM）</label><input type="text" id="wRunAt" maxlength="5" value="08:30" required>
-          <div class="hint">到点后若当天未签成功才会执行；失败自动重试一次。账号密码仅存在本地数据库，不会外传。</div>
+          <label for="wRunAt">执行窗口 · 开始（HH:MM）</label><input type="text" id="wRunAt" maxlength="5" value="08:30" required>
+          <label for="wRunEnd">执行窗口 · 结束（HH:MM，留空 = 开始后 30 分钟）</label><input type="text" id="wRunEnd" maxlength="5" placeholder="08:30">
+          <div class="hint">每天在窗口内随机一个时刻执行（同一天固定，重启不漂移），跟 BOT 签到一样不踩固定的整点。当天签成功后不再重复；失败自动重试一次。账号密码仅存在本地数据库，不会外传。</div>
           <label class="check"><input type="checkbox" id="wEnabled" checked> 启用</label>
           <div class="flex" style="margin-top:14px">
             <button class="btn" type="submit">保存</button>
@@ -2461,7 +2462,7 @@ function renderWebSignins(){
   box.innerHTML=webSignins.map(w=>`<div class="card auto-card">
       <div class="auto-top">
         <div class="grow"><div class="auto-title" title="${esc(w.site)}">${esc(w.name||w.site)}</div>
-        <div class="s" style="font-size:10px">${esc(w.site)} · ${esc(w.username)} · 每天 ${esc(w.run_at)}</div>
+        <div class="s" style="font-size:10px">${esc(w.site)} · ${esc(w.username)} · 每天 ${esc(w.run_at)}${w.run_end?'–'+esc(w.run_end):''}${w.run_end?'（窗口内随机）':''}</div>
         ${w.last_detail?`<div class="s" style="font-size:10px">${esc(w.last_detail)}</div>`:''}</div>
         <div class="auto-tail"><span class="tag ${w.enabled?'ok':'off'}">${w.enabled?'已启用':'已停用'}</span></div>
       </div>
@@ -2490,6 +2491,7 @@ function openWebForm(id){
   $('#wUser').value=w?w.username:'';
   $('#wPass').value=w?w.password:'';
   $('#wRunAt').value=w?w.run_at:'08:30';
+  $('#wRunEnd').value=w?(w.run_end||''):'';
   $('#wEnabled').checked=w?!!w.enabled:true;
   $('#af-web').classList.add('show');
 }
@@ -2499,7 +2501,7 @@ function closeWebForm(){
 }
 async function saveWebSignin(){
   const body={name:$('#wName').value.trim(),site:$('#wSite').value.trim(),username:$('#wUser').value.trim(),
-    password:$('#wPass').value,run_at:$('#wRunAt').value.trim(),enabled:$('#wEnabled').checked?1:0};
+    password:$('#wPass').value,run_at:$('#wRunAt').value.trim(),run_end:$('#wRunEnd').value.trim(),enabled:$('#wEnabled').checked?1:0};
   const wasEditing=!!editingWebId;
   try{
     if(editingWebId)await api('/api/web-signins/'+editingWebId,{method:'PUT',body:JSON.stringify(body)});

@@ -263,6 +263,7 @@ def db_init(database=None):
             username TEXT NOT NULL,
             password TEXT NOT NULL,
             run_at TEXT DEFAULT '08:30',
+            run_end TEXT DEFAULT '',
             enabled INTEGER DEFAULT 1,
             last_day TEXT DEFAULT '',
             last_status TEXT DEFAULT '',
@@ -347,6 +348,11 @@ def db_init(database=None):
     for col, ddl in (("reaction", "TEXT DEFAULT ''"), ("groups", "TEXT DEFAULT ''")):
         try:
             conn.execute(f"ALTER TABLE rules ADD COLUMN {col} {ddl}")
+        except sqlite3.OperationalError:
+            pass
+    for col, ddl in (("run_end", "TEXT DEFAULT ''"),):
+        try:
+            conn.execute(f"ALTER TABLE web_signins ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
             pass
     for col, ddl in (("replies", "INTEGER NOT NULL DEFAULT 0"),
@@ -7301,6 +7307,35 @@ async def _web_signin_execute(wsid):
         _web_signin_busy.discard(wsid)
 
 
+def _web_signin_minutes(text, default):
+    try:
+        parts = str(text or "").strip().split(":")
+        hour, minute = int(parts[0]), int(parts[1])
+    except (ValueError, IndexError):
+        return default
+    if not (0 <= hour <= 24 and 0 <= minute <= 59):
+        return default
+    return min(hour * 60 + minute, 24 * 60)
+
+
+def _web_signin_window(row):
+    """返回 (开始分钟, 结束分钟)。没配结束时间就按开始后 30 分钟算。"""
+    start = _web_signin_minutes(row["run_at"], 8 * 60 + 30)
+    raw_end = str(row["run_end"] or "").strip()
+    end = _web_signin_minutes(raw_end, 0) if raw_end else 0
+    if not end or end <= start:
+        end = min(start + 30, 24 * 60)
+    if end <= start:
+        end = min(start + 1, 24 * 60)
+    return start, end
+
+
+def _web_signin_plan(wid, today, start, end):
+    """同一天同一任务固定随机落点，进程重启也不会漂移。"""
+    rng = random.Random("websignin-%s-%s" % (today, wid))
+    return rng.randrange(start, max(start + 1, end))
+
+
 def web_signin_tick():
     if get_runtime() is None:
         return
@@ -7308,19 +7343,15 @@ def web_signin_tick():
     today = current.strftime("%Y-%m-%d")
     nowm = current.hour * 60 + current.minute
     rows = get_account_db().execute(
-        "SELECT id,run_at,last_day,last_status,failures FROM web_signins "
+        "SELECT id,run_at,run_end,last_day,last_status,failures FROM web_signins "
         "WHERE enabled=1 ORDER BY id DESC").fetchall()
     for row in rows:
         if row["id"] in _web_signin_busy:
             continue
         if row["last_day"] == today:
             continue
-        run_at = str(row["run_at"] or "08:30")
-        try:
-            hour, minute = [int(part) for part in run_at.split(":")[:2]]
-        except ValueError:
-            continue
-        if nowm < hour * 60 + minute:
+        start, end = _web_signin_window(row)
+        if nowm < _web_signin_plan(row["id"], today, start, end):
             continue
         _web_signin_busy.add(row["id"])
         try:
@@ -8961,6 +8992,7 @@ class WebSigninIn(BaseModel):
     username: str = Field("", max_length=100)
     password: str = Field("", max_length=300)
     run_at: str = Field("08:30", max_length=5)
+    run_end: str = Field("", max_length=5)
     enabled: int = 1
 
 
@@ -8972,6 +9004,14 @@ def _web_signin_validate(body: WebSigninIn):
         raise HTTPException(400, "用户名和密码不能为空")
     if not re.fullmatch(r"\d{1,2}:\d{2}", body.run_at.strip()):
         raise HTTPException(400, "签到时间格式应为 HH:MM")
+    raw_end = body.run_end.strip()
+    if raw_end:
+        if not re.fullmatch(r"\d{1,2}:\d{2}", raw_end):
+            raise HTTPException(400, "随机窗口结束时间格式应为 HH:MM")
+        start = _web_signin_minutes(body.run_at, 0)
+        end = _web_signin_minutes(raw_end, 0)
+        if start >= end:
+            raise HTTPException(400, "随机窗口的结束时间要晚于开始时间")
 
 
 @app.get("/api/web-signins")
@@ -8985,9 +9025,9 @@ async def create_web_signin(body: WebSigninIn):
     _web_signin_validate(body)
     db = get_account_db()
     cursor = db.execute(
-        "INSERT INTO web_signins(name,site,username,password,run_at,enabled,created_at) VALUES(?,?,?,?,?,?,?)",
+        "INSERT INTO web_signins(name,site,username,password,run_at,run_end,enabled,created_at) VALUES(?,?,?,?,?,?,?,?)",
         (body.name.strip(), body.site.strip().rstrip("/"), body.username.strip(), body.password.strip(),
-         body.run_at.strip(), 1 if body.enabled else 0, int(time.time())))
+         body.run_at.strip(), body.run_end.strip(), 1 if body.enabled else 0, int(time.time())))
     db.commit()
     return {"id": cursor.lastrowid}
 
@@ -8998,9 +9038,10 @@ async def update_web_signin(wid: int, body: WebSigninIn):
     db = get_account_db()
     if db.execute("SELECT 1 FROM web_signins WHERE id=?", (wid,)).fetchone() is None:
         raise HTTPException(404, "任务不存在")
-    db.execute("UPDATE web_signins SET name=?,site=?,username=?,password=?,run_at=?,enabled=? WHERE id=?",
+    db.execute("UPDATE web_signins SET name=?,site=?,username=?,password=?,run_at=?,run_end=?,enabled=? WHERE id=?",
                (body.name.strip(), body.site.strip().rstrip("/"), body.username.strip(),
-                body.password.strip(), body.run_at.strip(), 1 if body.enabled else 0, wid))
+                body.password.strip(), body.run_at.strip(), body.run_end.strip(),
+                1 if body.enabled else 0, wid))
     db.commit()
     return {"ok": True}
 
