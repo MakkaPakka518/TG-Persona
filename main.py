@@ -11248,7 +11248,9 @@ async def export_logs(kind: str = "", q: str = ""):
 # ---------- 前端 ----------
 @app.get("/")
 async def index():
-    return FileResponse(BASE / "web" / "index.html")
+    # 面板是单文件前端，缓存住旧 HTML 会让新功能"看不见"，必须每次都向服务端确认。
+    return FileResponse(BASE / "web" / "index.html",
+                        headers={"Cache-Control": "no-cache, must-revalidate", "Pragma": "no-cache"})
 
 
 # ---------------- 在线更新 ----------------
