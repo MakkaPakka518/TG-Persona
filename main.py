@@ -4476,9 +4476,15 @@ def match_keywords(kws, text):
 
 
 def extract_code(text):
-    """从消息中提取疑似邀请码/注册码(≥5 位字母数字下划线组合)"""
-    m = re.search(r"[A-Za-z0-9_-]{5,}", text or "")
-    return m.group(0) if m else ""
+    """从消息中提取疑似邀请码/注册码(≥5 位字母数字下划线组合)；遮挡码和已用播报都跳过。"""
+    value = str(text or "")
+    if _is_code_used_notice(value):
+        return ""
+    for match in re.finditer(r"[A-Za-z0-9_-]{5,}", value):
+        code = match.group(0)
+        if not _code_is_masked(code, value):
+            return code
+    return ""
 
 
 # 群里的"某人使用了兑换码"播报，里面的码通常被马赛克遮挡、且是别人已用掉的，
@@ -4611,13 +4617,31 @@ def _link_bot(target):
     return str(target or "").strip().lstrip("@").lower()
 
 
+_CODE_MASK_CHARS = "█▉▊▋▌▍▎▏■□▪▫▣◼◾▩░▒▓×✖✕"
+
+
+def _code_is_masked(code, text):
+    """播报把码打成方块马赛克时，抽出来的只是前半截，拿它去注册必然失败。"""
+    value = str(text or "")
+    index = value.find(str(code or ""))
+    if index < 0:
+        return False
+    tail = value[index + len(str(code)):index + len(str(code)) + 2]
+    return any(char in _CODE_MASK_CHARS for char in tail)
+
+
 def _message_register_codes(message, target):
     """只提取正文里的完整兑换码，URL 仍交给群链接抢注。"""
     text = str(getattr(message, "raw_text", "") or "")
+    # 别人“注册码使用”的播报里带的码已经被用掉，且常被方块遮挡成半截，不能拿来注册。
+    if _is_code_used_notice(text):
+        log.info("兑换码抢注 跳过使用播报 目标=%s 内容=%s", target, text[:60])
+        return []
     text = re.sub(r"(?:https?://|tg://|(?:t|telegram)\.me/)\S+", " ", text, flags=re.I)
     codes = dict.fromkeys(re.findall(r"[A-Za-z0-9_-]+", text))
     return [{"bot": _link_bot(target), "payload": code}
-            for code in codes if _is_register_payload(code)]
+            for code in codes
+            if _is_register_payload(code) and not _code_is_masked(code, text)]
 
 
 def _button_bot_url(url):

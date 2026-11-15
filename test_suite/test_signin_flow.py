@@ -308,8 +308,9 @@ class SigninFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((text,status),('签到成功','success'))
 
     async def test_unconfirmed_stops_same_day_scheduler_even_retries_change(self):
-        # 固定“今天”，否则这个用例会跟着真实时钟漂移，UTC 环境下跨零点就会翻车
+        # 固定“今天”和当前小时，否则调度窗口会跟着真实时钟漂移，窗口内运行时这条用例就翻车
         self.b['_beijing_now']=lambda: datetime(2026,10,30,17,0,tzinfo=timezone(timedelta(hours=8)))
+        self.b['now_local']=lambda: datetime(2026,10,30,17,0,tzinfo=timezone(timedelta(hours=8)))
         aid=await self.create(retries=1)
         db=self.b['conn'];db.execute("UPDATE automations SET retry_day='2026-10-30',retry_count=1,last_status='unconfirmed',next_run_at=0 WHERE id=?",(aid,));db.commit()
         self.b['_signin_tick']();self.assertNotIn(aid,self.b['_auto_running'])

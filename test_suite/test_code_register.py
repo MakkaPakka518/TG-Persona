@@ -47,6 +47,19 @@ class CodeRegisterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.codes('appeal TEST-30-Other_x TEST-x-Register_x TEST-30-Register_'), [])
         self.assertEqual(self.codes('t.me/other_bot?start=TEST-30-Register_hidden'), [])
 
+    def test_used_code_notice_never_yields_payload(self):
+        # 群里别人“注册码使用”的播报，码已经被用掉，不能再拿来注册。
+        text = ('· 🎟️AI ONE 注册码使用 - Jessica [8357510636]\n'
+                '使用了 臻影Ultra hd movie server-30-Register_0Ov██████████')
+        self.assertEqual(self.codes(text), [])
+
+    def test_masked_code_is_ignored_but_clean_code_survives(self):
+        masked = '臻影Ultra hd movie server-30-Register_0Ov██████████'
+        clean = '臻影Ultra hd movie server-30-Register_P9kTq2ZxY8'
+        self.assertEqual(self.codes(masked), [])
+        self.assertEqual([x['payload'] for x in self.codes(clean)],
+                         ['server-30-Register_P9kTq2ZxY8'])
+
     async def test_single_group_and_bot_are_required(self):
         for group in ('', '-100123,-100456', '-100123，-100456', 'all'):
             with self.subTest(group=group), self.assertRaises(HTTPException):
