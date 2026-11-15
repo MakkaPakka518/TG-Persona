@@ -95,6 +95,7 @@ run(slice('async function reloadCaptcha(){','async function panelLogin'));
 run(slice('async function changePw(){','async function logoutAll'));
 run(slice('let updTimer=null','async function checkUpdate'));
 run(slice('// ---------- AI 与验证码测试 ----------','async function changePw(){'));
+run(slice('// ---------- 群游戏 ----------','async function bootstrap(){'));
 for(const id of ['#aiTestResult','#captchaTestResult','#backupsInfo','#backupsReason','#backupsList','#backupsResult']){
   Object.defineProperty(element(id),'innerHTML',{get(){return ''},set(){throw new Error('测试结果必须用 textContent')}});
 }
@@ -492,7 +493,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert.strictEqual(element('#updCheck').disabled,false);
   });
   await test('AI API 已移到设置，自动化 AI 测试卡不包含密钥表单',async()=>{
-    const captcha=html.slice(html.indexOf('>AI 测试<'),html.indexOf('id="aCntSign"'));
+    const captcha=html.slice(html.indexOf('>能力测试<'),html.indexOf('id="aCntSign"'));
     const settings=html.slice(html.indexOf('<section id="tab-settings">'),html.indexOf('</section>',html.indexOf('<section id="tab-settings">')));
     for(const id of ['aiProvidersList','aiProviderAdd','aiProviderNote','aiProviderBase','aiProviderKey','aiProviderModel'])assert(settings.includes('id="'+id+'"'));
     assert(settings.includes('type="password" id="aiProviderKey"'));
@@ -628,7 +629,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(element('#captchaTestResult').textContent.includes('使用通道：AI'));
   });
   await test('自动化 AI 测试可切换图片识别、自定义提示词并选择 API',async()=>{
-    assert(html.includes('>AI 测试<')&&html.includes('data-ai-test-mode="captcha"')&&html.includes('data-ai-test-mode="image"'));
+    assert(html.includes('>能力测试<')&&html.includes('data-ai-test-mode="captcha"')&&html.includes('data-ai-test-mode="image"')&&html.includes('data-ai-test-mode="poem"'));
     context.providerFixture=[{id:'0123456789abcdef',note:'主线路',enabled:true},{id:'aaaaaaaaaaaaaaaa',note:'停用线路',enabled:false}];run("aiProviders=providerFixture;aiTestProviderSel=new Set(['aaaaaaaaaaaaaaaa']);renderAITestProviders()");assert.strictEqual(run('aiTestProviderSel.size'),0);assert(!element('#aiTestProviders').innerHTML.includes('停用线路'));
     selectImage();run("setAITestMode('image');aiTestProviderSel=new Set(['0123456789abcdef'])");element('#aiTestImagePrompt').value='识别并只输出物体名称';let body;
     context.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true,text:'苹果',channel:'ai',errors:[],elapsed_ms:12}};
@@ -636,6 +637,30 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(element('#captchaTestResult').textContent.includes('图片答案：苹果'));assert(element('#captchaTestResult').textContent.includes('12 ms'));
     element('#aiTestImageAction').value='click';element('#aiTestImageOptions').value='苹果\n香蕉';context.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true,text:'苹果',channel:'ai',errors:[],elapsed_ms:8}};await run('testCaptchaRecognition()');assert.strictEqual(body.options,'苹果\n香蕉');assert(element('#captchaTestResult').textContent.includes('匹配选项：苹果'));
     run("setAITestMode('captcha');aiTestProviderSel.clear()");
+  });
+  await test('能力测试支持古诗填空，显示答案与使用通道',async()=>{
+    selectImage();element('#sOcrOn').checked=true;run("setAITestMode('poem')");
+    assert(!element('#aiTestImagePromptWrap').classList.contains('hidden'));
+    assert(element('#captchaTestLengthWrap').classList.contains('hidden'));
+    assert(element('#captchaTestBtn').textContent==='开始古诗识别');
+    element('#aiTestImagePrompt').value='';
+    let body;context.api=async(_p,o)=>{body=JSON.parse(o.body);return {ok:true,text:'西',channel:'ocr',ocr_text:'蜀僧抱绿绮，O下峨眉峰。',errors:[],elapsed_ms:301}};
+    await run('testCaptchaRecognition()');
+    assert.strictEqual(body.mode,'poem');assert.strictEqual(body.length,0);
+    const txt=element('#captchaTestResult').textContent;
+    assert(txt.includes('古诗答案：西')&&txt.includes('本地 OCR')&&txt.includes('301 ms')&&txt.includes('OCR 原文'));
+    run("setAITestMode('captcha')");element('#sOcrOn').checked=false;
+  });
+  await test('群游戏卡片含古诗填空任务与可信出题人配置',async()=>{
+    assert(html.includes('id="gameCard"')&&html.includes('自动识别被遮住的字'));
+    for(const id of ['gChat','gKeyword','gSender','gDelay','gPrompt','gDefend','gEnabled'])assert(html.includes('id="'+id+'"'));
+    assert(html.includes('/api/game-tasks'));
+    context.api=async(p)=>{if(p==='/api/game-tasks')return {items:[{id:3,subtype:'poem',chat:'-100123',trigger_kw:'猜字游戏开始',sender_filter:'@hsuys_bot',reply_delay:1,defend_ai:1,enabled:1,total:2,last_status:'success',last_detail:'西（ocr）'}]};return {ok:true}};
+    await run('loadGameTasks()');
+    assert.strictEqual(element('#gameTaskCount').textContent,'1');
+    let found=false;
+    for(const card of element('#gameTaskList').children)for(const child of card.children)if(String(child.textContent).includes('@hsuys_bot'))found=true;
+    assert(found);
   });
   await test('AI 失败但 OCR 回退成功保留通道提醒与实际文本',async()=>{
     configureAI();context.api=async()=>({ok:true,text:'<img onerror=alert(1)>',channel:'ocr',errors:[{channel:'ai',message:'AI 超时 <script>'}],elapsed_ms:73});

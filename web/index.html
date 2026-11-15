@@ -939,11 +939,12 @@ section.act,.fold.open .fold-b{animation:none}
 
 
     <div class="card fold" id="aiTestCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M7 21h10M12 17a5 5 0 0 0 5-5V5a2 2 0 0 0-4 0v6M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7"/></svg>AI 测试</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M7 21h10M12 17a5 5 0 0 0 5-5V5a2 2 0 0 0-4 0v6M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7"/></svg>能力测试</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <div class="seg" id="aiTestSeg">
           <button class="on" type="button" data-ai-test-mode="captcha">验证码识别</button>
           <button type="button" data-ai-test-mode="image">图片识别</button>
+          <button type="button" data-ai-test-mode="poem">古诗填空</button>
         </div>
         <div id="aiTestCaptchaSettings" style="margin-top:14px">
           <div class="recognition-switches">
@@ -968,7 +969,7 @@ section.act,.fold.open .fold-b{animation:none}
             </div>
             <label for="aiTestImagePrompt">图片识别提示词</label>
             <textarea id="aiTestImagePrompt" maxlength="2000" rows="5">你是一个高精度的验证码与图像识别助手。请仔细观察图片中的核心事物、场景、服装或物品，并根据机器人题目说明给出最匹配的名称。必须且只能输出答案本身，严禁输出任何多余字符、标点符号、解释、理由或思考过程！</textarea>
-            <div class="hint">模型回答会直接用于签到，请让提示词要求只输出答案。图片识别仅使用 AI，不回退本地 OCR。</div>
+            <div class="hint" id="aiTestModeHint">模型回答会直接用于签到，请让提示词要求只输出答案。图片识别仅使用 AI，不回退本地 OCR。</div>
           </div>
           <label for="captchaTestFile" id="aiTestUploadLabel">上传验证码图片（PNG / JPG / WebP，最大 2MB）</label>
           <input type="file" id="captchaTestFile" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" onchange="previewCaptchaFile()" style="max-width:100%">
@@ -977,6 +978,45 @@ section.act,.fold.open .fold-b{animation:none}
           <button class="ghost" type="button" id="captchaTestBtn" disabled style="margin-top:12px" onclick="testCaptchaRecognition()">开始验证码识别</button>
           <div class="hint">选择图片只在本地预览；点击识别才上传。</div>
           <div id="captchaTestResult" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card fold" id="gameCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.6 4.3 2.1 7.7L12 17l-6.5 4 2.1-7.7L2 9h7z"/></svg>群游戏</span><span class="cnt" id="gameTaskCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div class="fold sub-fold open">
+          <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">古诗填空</span><span class="cnt" id="gamePoemCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+          <div class="fold-b">
+            <div class="hint">群里出题机器人发「古诗图 + 开始关键词」时自动识别被遮住的字并抢答。识别通道跟随「能力测试」里的开关：只开本地 OCR 就走纯 OCR，只开 AI 就走纯 AI，两个都开则 OCR 优先、AI 兜底。</div>
+            <button class="btn addtask" type="button" onclick="openGameForm()">＋ 添加古诗填空任务</button>
+            <div id="gameTaskList"></div>
+            <div class="empty" id="gameTaskEmpty">暂无古诗填空任务,点上面按钮添加</div>
+            <div class="autof" id="gameForm"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑古诗填空任务</b><button class="ghost" type="button" onclick="closeGameForm()">关闭</button></div>
+              <form onsubmit="saveGameTask();return false">
+                <label for="gChat">监听的群（群 ID 或 @用户名）</label>
+                <input type="text" id="gChat" placeholder="如: -1001234567890 或 @mystore" maxlength="80">
+                <div class="hint">填群数字 ID 最稳妥；只处理这个群里命中关键词的消息。</div>
+                <label for="gKeyword">任务开始关键词</label>
+                <input type="text" id="gKeyword" value="猜字游戏开始" maxlength="100">
+                <div class="hint">消息文本包含该关键词才触发答题，例如「猜字游戏开始」。</div>
+                <label for="gSender">可信出题人（只识别这些人发的消息，逗号分隔）</label>
+                <input type="text" id="gSender" placeholder="如: @hsuys_bot" maxlength="200">
+                <div class="hint">填 @username 或名字，留空表示不限制。群里有捣乱的人时必须填，否则有人发假关键词会被识别。</div>
+                <div class="flex">
+                  <div><label for="gDelay">答题延迟（秒）</label><input type="number" id="gDelay" value="1" min="0" max="10" step="0.5" inputmode="decimal"></div>
+                </div>
+                <div class="hint">在延迟基础上再随机 0–0.8 秒，避免秒答太像脚本。</div>
+                <label for="gPrompt">古诗提示词（可选，留空用内置）</label>
+                <textarea id="gPrompt" rows="3" maxlength="2000" placeholder="留空则使用内置古诗填空提示词"></textarea>
+                <label class="check"><input type="checkbox" id="gDefend"> 被质疑时启用 AI 水群</label>
+                <div class="hint">有人回复我们的答案表示怀疑时，用 AI 水群接口自然回复一句。</div>
+                <label class="check"><input type="checkbox" id="gEnabled" checked> 启用任务</label>
+                <button class="btn" type="submit" id="gSaveBtn" style="margin-top:10px">保存任务</button>
+                <div class="hint" id="gFormResult" role="status" aria-live="polite"></div>
+              </form>
+            </div></div>
+          </div>
         </div>
       </div>
     </div>
@@ -4158,13 +4198,16 @@ function currentAIConfig(){
 function testElapsed(ms){return typeof ms==='number'&&Number.isFinite(ms)&&ms>=0?ms+' ms':'未知'}
 let captchaTestImage='',captchaTestVersion=0,captchaTestReader=null,captchaTestBusy=false,aiTestMode='captcha';
 function setAITestMode(mode){
-  aiTestMode=mode==='image'?'image':'captcha';
+  aiTestMode=(mode==='image'||mode==='poem')?mode:'captcha';
   for(const button of $('#aiTestSeg').querySelectorAll('[data-ai-test-mode]'))button.classList.toggle('on',button.dataset.aiTestMode===aiTestMode);
-  $('#aiTestCaptchaSettings').classList.toggle('hidden',aiTestMode!=='captcha');
+  $('#aiTestCaptchaSettings').classList.toggle('hidden',aiTestMode==='image'||aiTestMode==='poem');
   $('#captchaTestLengthWrap').classList.toggle('hidden',aiTestMode!=='captcha');
-  $('#aiTestImagePromptWrap').classList.toggle('hidden',aiTestMode!=='image');
-  $('#aiTestUploadLabel').textContent=aiTestMode==='image'?'上传待识别图片（PNG / JPG / WebP，最大 2MB）':'上传验证码图片（PNG / JPG / WebP，最大 2MB）';
-  $('#captchaTestBtn').textContent=aiTestMode==='image'?'开始图片识别':'开始验证码识别';
+  $('#aiTestImagePromptWrap').classList.toggle('hidden',aiTestMode==='captcha');
+  $('#aiTestImageAction').value=aiTestMode==='image'?'reply':'click';
+  $('#aiTestUploadLabel').textContent=aiTestMode==='image'?'上传待识别图片（PNG / JPG / WebP，最大 2MB）':(aiTestMode==='poem'?'上传古诗题图（PNG / JPG / WebP，最大 2MB）':'上传验证码图片（PNG / JPG / WebP，最大 2MB）');
+  $('#captchaTestBtn').textContent=aiTestMode==='image'?'开始图片识别':(aiTestMode==='poem'?'开始古诗识别':'开始验证码识别');
+  const hint=$('#aiTestModeHint');
+  if(hint)hint.textContent=aiTestMode==='poem'?'按识别开关分流：只开本地 OCR 走纯 OCR，只开 AI 走纯 AI，两个都开则 OCR 优先、AI 兜底。古诗提示词留空会自动套用内置提示词。':(aiTestMode==='image'?'模型回答会直接用于签到，请让提示词要求只输出答案。图片识别仅使用 AI，不回退本地 OCR。':'会先按识别开关选择通道；两个都开启时的顺序与验证码识别一致。');
   $('#captchaTestResult').textContent='';
   syncAITestImageAction();
 }
@@ -4221,7 +4264,8 @@ async function testCaptchaRecognition(){
   const options=aiTestMode==='image'&&$('#aiTestImageAction').value==='click'?$('#aiTestImageOptions').value.trim():'';
   if(aiTestMode==='image'&&$('#aiTestImageAction').value==='click'&&!options){result.textContent='请填写至少一个候选项';return}
   const config=currentAIConfig();
-  if(aiTestMode==='captcha'&&config.ai_enabled==='0'&&config.ocr_enabled==='0'){result.textContent='请至少启用 AI 识别或本地 OCR';return}
+  if((aiTestMode==='captcha'||aiTestMode==='poem')&&config.ai_enabled==='0'&&config.ocr_enabled==='0'){result.textContent='请至少启用 AI 识别或本地 OCR';return}
+  if(aiTestMode==='poem'&&config.ai_enabled==='0'&&!captchaTestImage){result.textContent='请先选择有效图片';return}
   const version=captchaTestVersion;
   captchaTestBusy=true;btn.disabled=true;result.textContent='正在识别…';
   try{
@@ -4235,8 +4279,10 @@ async function testCaptchaRecognition(){
     const warnings=errors.map(e=>e&&typeof e==='object'?
       (({ai:'AI',ocr:'本地 OCR',none:'无'}[e.channel]||'未知通道')+'：'+(e.message||'未知错误')):'未知错误');
     const success=d.ok===true&&!!text.trim();
+    const label=aiTestMode==='image'?(options?'匹配选项：':'图片答案：'):(aiTestMode==='poem'?'古诗答案：':'识别文本：');
+    const ocrNote=aiTestMode==='poem'&&typeof d.ocr_text==='string'&&d.ocr_text.trim()?('\nOCR 原文：'+d.ocr_text.trim().split('\n').slice(0,3).join(' / ')):'';
     result.textContent=(success?'识别成功':'识别失败')+
-      '\n'+(aiTestMode==='image'?(options?'匹配选项：':'图片答案：'):'识别文本：')+(text||'（空文本）')+'\n使用通道：'+channel+'\n耗时：'+testElapsed(d.elapsed_ms)+
+      '\n'+label+(text||'（空文本）')+'\n使用通道：'+channel+'\n耗时：'+testElapsed(d.elapsed_ms)+ocrNote+
       (warnings.length?'\n'+(success?'通道提醒（已使用上述通道完成识别）':'失败原因')+'：\n'+warnings.join('\n'):
         (success?'':'\n失败原因：'+(d.error||'未获得有效识别文本')));
   }catch(e){if(isCurrentAccount(c)&&version===captchaTestVersion){result.textContent='识别失败：'+e.message;toast(e.message,1)}}
@@ -4728,6 +4774,107 @@ function refreshVisibleTab(){
 }
 function pollVisibleState(){if(pageIsHidden())return;loadState();loadLogs();if(activeTab==='settings'&&!waterAISkillBusy&&!waterAISkillLoading)loadFlockSkill(true)}
 if(document.addEventListener)document.addEventListener('visibilitychange',()=>{if(!pageIsHidden())refreshVisibleTab()});
+// ---------- 群游戏 ----------
+let gameTasks=[],gameEditId=null;
+async function loadGameTasks(){
+  try{const d=await api('/api/game-tasks',{_account:accountContext()});gameTasks=Array.isArray(d.items)?d.items:[]}catch(e){gameTasks=[]}
+  renderGameTasks();
+}
+function gameStatusText(t){
+  if(!t.last_at)return t.enabled?('待触发 · 共 '+Number(t.total||0)+' 次'):'已停用';
+  return (t.last_status==='success'?'上次成功':'上次失败')+' · '+t.last_at+(t.last_detail?(' · '+t.last_detail):'');
+}
+function renderGameTasks(){
+  const box=$('#gameTaskList'),empty=$('#gameTaskEmpty'),cnt=$('#gameTaskCount'),cnt2=$('#gamePoemCount');
+  if(!box)return;
+  box.innerHTML='';
+  const rows=gameTasks.filter(t=>t.subtype==='poem');
+  if(cnt)cnt.textContent=String(rows.length);
+  if(cnt2)cnt2.textContent=String(rows.length);
+  if(empty)empty.style.display=rows.length?'none':'';
+  for(const t of rows){
+    const card=document.createElement('div');
+    card.className='card';
+    card.style.marginTop='10px';
+    const head=document.createElement('div');
+    head.className='flex';
+    head.style.cssText='gap:8px;align-items:center;justify-content:space-between';
+    const title=document.createElement('b');
+    title.textContent='古诗填空 · '+(t.chat||'未设置群');
+    head.appendChild(title);
+    const ops=document.createElement('div');
+    ops.className='flex';
+    ops.style.cssText='gap:6px';
+    const toggle=document.createElement('button');
+    toggle.className='ghost';
+    toggle.type='button';
+    toggle.textContent=t.enabled?'停用':'启用';
+    toggle.onclick=()=>toggleGameTask(t.id);
+    const edit=document.createElement('button');
+    edit.className='ghost';
+    edit.type='button';
+    edit.textContent='编辑';
+    edit.onclick=()=>openGameForm(t.id);
+    const del=document.createElement('button');
+    del.className='ghost';
+    del.type='button';
+    del.textContent='删除';
+    del.onclick=()=>deleteGameTask(t.id);
+    ops.appendChild(toggle);ops.appendChild(edit);ops.appendChild(del);
+    head.appendChild(ops);
+    card.appendChild(head);
+    const meta=document.createElement('div');
+    meta.className='hint';
+    meta.style.marginTop='6px';
+    meta.textContent='关键词：'+(t.trigger_kw||'—')+' · 出题人：'+(t.sender_filter||'不限')+' · 延迟：'+(t.reply_delay||1)+'s'+(t.defend_ai?' · 被质疑 AI 水群':'');
+    card.appendChild(meta);
+    const status=document.createElement('div');
+    status.className='hint';
+    status.textContent=gameStatusText(t);
+    card.appendChild(status);
+    box.appendChild(card);
+  }
+}
+function openGameForm(id){
+  gameEditId=id||null;
+  const t=gameTasks.find(x=>x.id===id);
+  $('#gChat').value=t?(t.chat||''):'';
+  $('#gKeyword').value=t?(t.trigger_kw||'猜字游戏开始'):'猜字游戏开始';
+  $('#gSender').value=t?(t.sender_filter||''):'';
+  $('#gDelay').value=t?(t.reply_delay||1):1;
+  $('#gPrompt').value=t?(t.prompt||''):'';
+  $('#gDefend').checked=!!(t&&t.defend_ai);
+  $('#gEnabled').checked=t?!!t.enabled:true;
+  $('#gFormResult').textContent='';
+  $('#gameForm').classList.add('open');
+  const el=document.querySelector('#gameForm .autof-card');
+  if(el)el.scrollIntoView({block:'center'});
+}
+function closeGameForm(){gameEditId=null;$('#gameForm').classList.remove('open')}
+async function saveGameTask(){
+  const out=$('#gFormResult');
+  const body={subtype:'poem',chat:$('#gChat').value.trim(),trigger_kw:$('#gKeyword').value.trim(),
+    sender_filter:$('#gSender').value.trim(),prompt:$('#gPrompt').value.trim(),
+    reply_delay:Number($('#gDelay').value)||0,defend_ai:$('#gDefend').checked?1:0,enabled:$('#gEnabled').checked?1:0};
+  if(!body.chat){out.textContent='请填写监听的群';return}
+  if(!body.trigger_kw){out.textContent='请填写任务开始关键词';return}
+  try{
+    const url=gameEditId?('/api/game-tasks/'+gameEditId):'/api/game-tasks';
+    await api(url,{method:gameEditId?'PUT':'POST',body:JSON.stringify(body),_account:accountContext()});
+    out.textContent='已保存';
+    closeGameForm();
+    await loadGameTasks();
+    toast('古诗填空任务已保存');
+  }catch(e){out.textContent='保存失败：'+e.message}
+}
+async function toggleGameTask(id){
+  try{await api('/api/game-tasks/'+id+'/toggle',{method:'POST',_account:accountContext()});await loadGameTasks()}catch(e){toast(e.message,1)}
+}
+async function deleteGameTask(id){
+  if(!confirm('删除这个古诗填空任务?'))return;
+  try{await api('/api/game-tasks/'+id,{method:'DELETE',_account:accountContext()});await loadGameTasks()}catch(e){toast(e.message,1)}
+}
+
 async function bootstrap(){
   const c=accountContext();
   // 把添加任务的弹窗挪到 body 下,避免受折叠面板的 display:none 影响
@@ -4736,7 +4883,7 @@ async function bootstrap(){
   try{await api('/api/state',{_account:c})}catch(e){if(e.message==='未登录面板')return}
   if(!isCurrentAccount(c))return;
   renderEmojis();renderAIFlockReactionPickers();pickAction('reply');pickGrabAct('reply');
-  renderAccounts();loadAccounts();loadState();loadSettings();loadRules();loadAutos();loadWebSignins();loadRuleGroups();
+  renderAccounts();loadAccounts();loadState();loadSettings();loadRules();loadAutos();loadWebSignins();loadGameTasks();loadRuleGroups();
   applyTheme((localStorage.getItem('tgp_theme'))||'dark');
   autoCheckVersion();
   if(bootstrapTimer)clearInterval(bootstrapTimer);

@@ -33,6 +33,8 @@ import sqlite3
 import sys
 import time
 import os
+import gzip
+import subprocess
 import hashlib
 import hmac
 import csv
@@ -271,6 +273,22 @@ def db_init(database=None):
             last_points INTEGER DEFAULT 0,
             last_at TEXT DEFAULT '',
             failures INTEGER DEFAULT 0,
+            created_at INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS game_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subtype TEXT DEFAULT 'poem',
+            chat TEXT DEFAULT '',
+            trigger_kw TEXT DEFAULT '猜字游戏开始',
+            sender_filter TEXT DEFAULT '',
+            prompt TEXT DEFAULT '',
+            reply_delay REAL DEFAULT 1.0,
+            defend_ai INTEGER DEFAULT 0,
+            enabled INTEGER DEFAULT 1,
+            last_at TEXT DEFAULT '',
+            last_status TEXT DEFAULT '',
+            last_detail TEXT DEFAULT '',
+            total INTEGER DEFAULT 0,
             created_at INTEGER
         );
         """
@@ -7369,6 +7387,270 @@ async def web_signin_loop():
         await asyncio.sleep(60)
 
 
+# ---------------- 群游戏：古诗填空 ----------------
+POEM_PROMPT = ("你是一个高精度的古诗填空助手。图片是一首古诗，其中一个字被红色圆圈遮挡。"
+               "请根据诗题、作者和上下文推断被遮住的字。必须且只能输出这一个汉字，"
+               "严禁输出标点、解释、理由或任何多余字符！")
+POEM_MASK_CHARS = set("○〇0oO●◯◎⊙")
+_POEM_PUNCT = set("，。！？、；：\"'“”‘’（）《》〈〉…—·「」『』")
+_poem_lines = None
+_poem_lock = threading.Lock()
+_game_recent = {}
+_game_last_answer = {}
+
+
+def _poem_data_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "poem_lines.txt.gz")
+
+
+def _poem_load():
+    global _poem_lines
+    with _poem_lock:
+        if _poem_lines is not None:
+            return _poem_lines
+        lines = []
+        try:
+            with gzip.open(_poem_data_path(), "rt", encoding="utf-8") as fh:
+                for line in fh:
+                    text = line.strip()
+                    if 4 <= len(text) <= 60:
+                        lines.append(text)
+        except FileNotFoundError:
+            log.warning("诗词语料缺失：%s，本地 OCR 通道将不可用", _poem_data_path())
+        except Exception:
+            log.exception("诗词语料读取失败")
+        _poem_lines = lines
+        log.info("诗词语料载入 %d 句", len(lines))
+        return _poem_lines
+
+
+def _poem_clean_line(line):
+    return "".join(ch for ch in line if (ch in POEM_MASK_CHARS) or (ch not in _POEM_PUNCT and not ch.isspace()))
+
+
+def _poem_ocr_text(image_bytes):
+    """tesseract 中文 OCR；返回原始文本。"""
+    proc = subprocess.run(["tesseract", "-", "stdout", "-l", "chi_sim", "--psm", "6"],
+                          input=image_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=40)
+    if proc.returncode != 0:
+        raise RuntimeError("tesseract 退出码 %s：%s" % (proc.returncode, proc.stderr.decode("utf-8", "ignore")[:120]))
+    return proc.stdout.decode("utf-8", "ignore")
+
+
+def _poem_candidates(fragment, limit=400):
+    data = _poem_load()
+    if not data or not fragment:
+        return []
+    out = []
+    for line in data:
+        if fragment in line:
+            out.append(line)
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _poem_solve_text(raw_text):
+    """从 OCR 文本推答案；返回 (答案, 命中句)。"""
+    best = ("", "")
+    for raw in str(raw_text or "").splitlines():
+        line = _poem_clean_line(raw)
+        if len(line) < 4 or not any(ch in POEM_MASK_CHARS for ch in line):
+            continue
+        cut = next(i for i, ch in enumerate(line) if ch in POEM_MASK_CHARS)
+        left = line[:cut]
+        right = line[cut + 1:]
+        right = right.strip("".join(POEM_MASK_CHARS))
+        votes = {}
+        hits = []
+        if len(right) >= 2:
+            for cand in _poem_candidates(right):
+                pos = cand.find(right)
+                if pos <= 0:
+                    continue
+                answer = cand[pos - 1]
+                if answer in POEM_MASK_CHARS or not answer.strip():
+                    continue
+                weight = 2 if len(left) >= 2 and cand[max(0, pos - len(left)):pos] == left else 1
+                votes[answer] = votes.get(answer, 0) + weight
+                hits.append((answer, cand))
+        elif len(left) >= 2:
+            for cand in _poem_candidates(left):
+                pos = cand.find(left)
+                if pos < 0:
+                    continue
+                pos += len(left)
+                if pos >= len(cand):
+                    continue
+                votes[cand[pos]] = votes.get(cand[pos], 0) + 1
+                hits.append((cand[pos], cand))
+        if not votes:
+            continue
+        best_answer, count = max(votes.items(), key=lambda kv: kv[1])
+        if len(votes) > 1 and count < sum(votes.values()) * 0.6:
+            continue
+        if count < 1:
+            continue
+        line_hit = next((cand for answer, cand in hits if answer == best_answer), "")
+        if line_hit:
+            return best_answer, line_hit
+    return best, ""
+
+
+def _poem_normalize_answer(value):
+    text = "".join(ch for ch in str(value or "").strip() if "\u4e00" <= ch <= "\u9fff")
+    return text[:1]
+
+
+async def _poem_answer(image_bytes, provider_ids=None, prompt=""):
+    """OCR 优先，AI 兜底；只开哪个就只走哪个。"""
+    started = time.perf_counter()
+    ai_on = get_setting("ai_enabled", "0") == "1"
+    ocr_on = get_setting("ocr_enabled", "1") == "1"
+    errors = []
+    ocr_text = ""
+    if ocr_on:
+        try:
+            loop = asyncio.get_running_loop()
+            ocr_text = await asyncio.wait_for(loop.run_in_executor(None, _poem_ocr_text, image_bytes), timeout=45)
+            answer, line = _poem_solve_text(ocr_text)
+            if answer:
+                return {"ok": True, "answer": answer, "text": answer, "channel": "ocr", "detail": line,
+                        "ocr_text": ocr_text, "errors": errors, "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+            errors.append({"channel": "ocr", "message": "本地 OCR 未命中诗词库"})
+        except Exception as error:
+            errors.append({"channel": "ocr", "message": "本地 OCR 失败：" + str(error)[:160]})
+            log.warning("古诗本地 OCR 失败：%s", str(error)[:160])
+    if ai_on:
+        try:
+            text = await recognize_image_answer(image_bytes, prompt or POEM_PROMPT, provider_ids=provider_ids)
+            answer = _poem_normalize_answer(text)
+            if answer:
+                return {"ok": True, "answer": answer, "text": answer, "channel": "ai", "detail": text[:60],
+                        "ocr_text": ocr_text, "errors": errors, "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+            errors.append({"channel": "ai", "message": "AI 未返回单个汉字：" + str(text)[:60]})
+        except Exception as error:
+            errors.append({"channel": "ai", "message": _safe_ai_error(error)})
+    if not ai_on and not ocr_on:
+        errors.append({"channel": "none", "message": "请至少启用 AI 识别或本地 OCR"})
+    return {"ok": False, "answer": "", "text": "", "channel": "none", "detail": "",
+            "ocr_text": ocr_text, "errors": errors, "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+
+
+def _game_sender_labels(event):
+    user = getattr(event, "sender", None)
+    labels = []
+    username = getattr(user, "username", None)
+    if username:
+        labels.append(str(username).lower())
+    name = " ".join(part for part in (getattr(user, "first_name", None), getattr(user, "last_name", None)) if part)
+    if name:
+        labels.append(name.strip().lower())
+    if not labels:
+        try:
+            labels.append(str(event.sender_id).lower())
+        except Exception:
+            pass
+    return labels
+
+
+def _game_sender_allowed(row, labels):
+    wanted = [item.strip().lstrip("@").lower() for item in str(row["sender_filter"] or "").split(",") if item.strip()]
+    if not wanted:
+        return True
+    return any(item in labels for item in wanted)
+
+
+async def _game_message_image(event, chat_id):
+    runtime = get_runtime()
+    msg = event.message
+    if msg is not None and getattr(msg, "photo", None):
+        return await runtime.client.download_media(msg, file=bytes)
+    try:
+        history = await runtime.client.get_messages(int(chat_id), limit=3)
+    except Exception:
+        return b""
+    for item in history:
+        if item is not None and getattr(item, "photo", None) and abs(int(time.time()) - int(item.date.timestamp())) < 600:
+            try:
+                return await runtime.client.download_media(item, file=bytes)
+            except Exception:
+                return b""
+    return b""
+
+
+async def _game_poem_handle(task, event, chat_id):
+    runtime = get_runtime()
+    db = get_account_db()
+    image = await _game_message_image(event, chat_id)
+    if not image:
+        return
+    result = await _poem_answer(image, prompt=str(task["prompt"] or ""))
+    if not result.get("ok"):
+        detail = "；".join(str(item.get("message", "")) for item in result.get("errors") or [])[:200] or "未得到答案"
+        db.execute("UPDATE game_tasks SET last_at=?,last_status='failed',last_detail=? WHERE id=?",
+                   (now_local().strftime("%Y-%m-%d %H:%M:%S"), detail, task["id"]))
+        db.commit()
+        log.info("群游戏未作答 任务=%s 原因=%s", task["name"] if "name" in task.keys() else task["id"], detail)
+        return
+    delay = max(0.3, min(float(task["reply_delay"] or 1.0), 10.0))
+    await asyncio.sleep(delay + random.uniform(0, 0.8))
+    await _send_generated_message(int(chat_id), result["answer"], generated_kind="game_poem")
+    stamp = now_local().strftime("%Y-%m-%d %H:%M:%S")
+    db.execute("UPDATE game_tasks SET last_at=?,last_status='success',last_detail=?,total=COALESCE(total,0)+1 WHERE id=?",
+               (stamp, "%s（%s，%s ms）" % (result["answer"], result["channel"], result.get("elapsed_ms", 0), ), task["id"]))
+    db.commit()
+    _game_last_answer[(str(chat_id), task["id"])] = getattr(event, "id", 0) or 0
+    log.info("群游戏作答 任务=%s 答案=%s 通道=%s", task["id"], result["answer"], result["channel"])
+
+
+async def on_game_event(event):
+    """群游戏：只认指定群的指定出题人 + 关键词，其余消息一律忽略。"""
+    runtime = get_runtime()
+    if runtime is None or runtime.running["paused"] or getattr(event, "out", False):
+        return
+    text = (event.raw_text or "").strip()
+    if not text:
+        return
+    db = get_account_db()
+    tasks = db.execute("SELECT * FROM game_tasks WHERE enabled=1 AND subtype='poem'").fetchall()
+    if not tasks:
+        return
+    chat_id = str(event.chat_id)
+    labels = _game_sender_labels(event)
+    for task in tasks:
+        scope = str(task["chat"] or "").strip()
+        if scope and scope.lstrip("-") != chat_id.lstrip("-"):
+            continue
+        if not _game_sender_allowed(task, labels):
+            continue
+        keyword = str(task["trigger_kw"] or "").strip()
+        if keyword and keyword not in text:
+            continue
+        if _game_recent.get((chat_id, task["id"])) == getattr(event, "id", 0):
+            continue
+        _game_recent[(chat_id, task["id"])] = getattr(event, "id", 0)
+        try:
+            await _game_poem_handle(task, event, chat_id)
+        except Exception:
+            log.exception("群游戏处理失败 任务=%s", task["id"])
+        continue
+    # 被质疑时用 AI 水群顶一句
+    for task in tasks:
+        if not int(task["defend_ai"] or 0):
+            continue
+        scope = str(task["chat"] or "").strip()
+        if scope and scope.lstrip("-") != chat_id.lstrip("-"):
+            continue
+        if not _game_sender_allowed(task, labels):
+            continue
+        last_id = _game_last_answer.get((chat_id, task["id"]))
+        reply_to = getattr(event.message, "reply_to_msg_id", None)
+        if last_id and reply_to and int(reply_to) == int(last_id):
+            asyncio.get_running_loop().create_task(_run_ai_flock(int(chat_id), text))
+            break
+
+
 def _scheduled_register_tick():
     if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
         return
@@ -7893,6 +8175,7 @@ async def finish_login(me=None):
         runtime.client.add_event_handler(runtime.bind_event(on_group_message, runtime.client), events.NewMessage(incoming=True))
         runtime.client.add_event_handler(runtime.bind_event(on_auto_event, runtime.client), events.NewMessage(incoming=True))
         runtime.client.add_event_handler(runtime.bind_event(on_link_event, runtime.client), events.NewMessage(incoming=True))
+        runtime.client.add_event_handler(runtime.bind_event(on_game_event, runtime.client), events.NewMessage(incoming=True))
         runtime.client.add_event_handler(runtime.bind_event(on_outgoing_learning, runtime.client), events.NewMessage(outgoing=True))
         runtime.handler_registered = True
     for name, loop in (("watcher_task", watcher_loop), ("signin_task", signin_loop),
@@ -9012,6 +9295,81 @@ def _web_signin_validate(body: WebSigninIn):
         end = _web_signin_minutes(raw_end, 0)
         if start >= end:
             raise HTTPException(400, "随机窗口的结束时间要晚于开始时间")
+
+
+class GameTaskIn(BaseModel):
+    subtype: str = Field("poem", max_length=20)
+    chat: str = Field("", max_length=80)
+    trigger_kw: str = Field("猜字游戏开始", max_length=100)
+    sender_filter: str = Field("", max_length=200)
+    prompt: str = Field("", max_length=2000)
+    reply_delay: float = 1.0
+    defend_ai: int = 0
+    enabled: int = 1
+
+
+def _game_validate(body: GameTaskIn):
+    if body.subtype not in ("poem",):
+        raise HTTPException(400, "暂只支持古诗填空")
+    if not body.chat.strip():
+        raise HTTPException(400, "请填写监听的群（群 ID 或 @用户名）")
+    if not body.trigger_kw.strip():
+        raise HTTPException(400, "请填写任务开始关键词")
+    if body.reply_delay < 0 or body.reply_delay > 10:
+        raise HTTPException(400, "答题延迟需在 0-10 秒之间")
+
+
+@app.get("/api/game-tasks")
+async def list_game_tasks():
+    rows = get_account_db().execute("SELECT * FROM game_tasks ORDER BY id DESC").fetchall()
+    return {"items": [dict(row) for row in rows]}
+
+
+@app.post("/api/game-tasks")
+async def create_game_task(body: GameTaskIn):
+    _game_validate(body)
+    db = get_account_db()
+    cur = db.execute(
+        "INSERT INTO game_tasks(subtype,chat,trigger_kw,sender_filter,prompt,reply_delay,defend_ai,enabled,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?)",
+        (body.subtype, body.chat.strip(), body.trigger_kw.strip(), body.sender_filter.strip(),
+         body.prompt.strip(), float(body.reply_delay), 1 if body.defend_ai else 0,
+         1 if body.enabled else 0, int(time.time())))
+    db.commit()
+    return {"id": cur.lastrowid}
+
+
+@app.put("/api/game-tasks/{tid}")
+async def update_game_task(tid: int, body: GameTaskIn):
+    _game_validate(body)
+    db = get_account_db()
+    if db.execute("SELECT 1 FROM game_tasks WHERE id=?", (tid,)).fetchone() is None:
+        raise HTTPException(404, "任务不存在")
+    db.execute("UPDATE game_tasks SET chat=?,trigger_kw=?,sender_filter=?,prompt=?,reply_delay=?,defend_ai=?,enabled=? WHERE id=?",
+               (body.chat.strip(), body.trigger_kw.strip(), body.sender_filter.strip(), body.prompt.strip(),
+                float(body.reply_delay), 1 if body.defend_ai else 0, 1 if body.enabled else 0, tid))
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/game-tasks/{tid}")
+async def delete_game_task(tid: int):
+    db = get_account_db()
+    db.execute("DELETE FROM game_tasks WHERE id=?", (tid,))
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/game-tasks/{tid}/toggle")
+async def toggle_game_task(tid: int):
+    db = get_account_db()
+    row = db.execute("SELECT enabled FROM game_tasks WHERE id=?", (tid,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "任务不存在")
+    enabled = 0 if row["enabled"] else 1
+    db.execute("UPDATE game_tasks SET enabled=? WHERE id=?", (enabled, tid))
+    db.commit()
+    return {"enabled": enabled}
 
 
 @app.get("/api/web-signins")
@@ -10540,13 +10898,15 @@ async def test_ai_connection(body: AITestSettings):
 async def test_captcha_recognition(body: CaptchaTestInput):
     if _ai_test_lock.locked():
         raise HTTPException(409, "已有识别或 AI 测试正在执行，请稍后重试")
-    if body.mode not in ("captcha", "image"):
-        raise HTTPException(400, "测试模式只能为验证码识别或图片识别")
+    if body.mode not in ("captcha", "image", "poem"):
+        raise HTTPException(400, "测试模式只能为验证码识别、图片识别或古诗填空")
     ids = [part.strip() for part in body.provider_ids.split(",") if part.strip()]
     if len(ids) != len(set(ids)) or any(not re.fullmatch(r"[a-f0-9]{16}", part) for part in ids):
         raise HTTPException(400, "AI API 选择无效")
     image = _decode_test_image(body.image)
     async with _ai_test_lock:
+        if body.mode == "poem":
+            return await _poem_answer(image, provider_ids=body.provider_ids, prompt=body.prompt)
         if body.mode == "image":
             started = time.perf_counter()
             try:
