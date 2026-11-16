@@ -1257,6 +1257,9 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('peopleOpenIds'));
     assert(html.includes('renderPeopleList'));
     assert(html.includes('memory-preview'));
+    assert(html.includes('peopleProviders'));
+    assert(html.includes("provider_ids:[...peopleProviderSel]"));
+    assert(html.includes('三份文件引用无上限'));
     assert(/id="flockLearningCard"/.test(html)&&/id="peopleMemoryCard"/.test(html));
     assert(html.includes('peopleGroups'));
     assert(html.includes('画像监控群'));
@@ -1624,7 +1627,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     let request;app.fetch=async(p,o)=>{request=[p,o];return {ok:true,status:200,blob:async()=>new Blob(['# 群内氛围'])}};await ex('exportStudy()');assert.strictEqual(request[0],'/api/ai/flock/study/export');assert.strictEqual(request[1].headers['X-Account-ID'],'study-a');assert.strictEqual(downloaded.at(-1).download,'study.md');
   });
   await test('四个水群编辑器明确引用study和knowledge且预算往返准确',async()=>{
-    assert.strictEqual((html.match(/study\.md \+ knowledge\.md 引用预算（0 不引用）/g)||[]).length,4);assert.strictEqual((html.match(/两份文件引用无上限/g)||[]).length,4);assert.strictEqual((html.match(/按需引用两份文件/g)||[]).length,4);
+    assert.strictEqual((html.match(/study\.md \+ knowledge\.md \+ friends\.md 引用预算（0 不引用）/g)||[]).length,4);assert.strictEqual((html.match(/三份文件引用无上限/g)||[]).length,4);assert.strictEqual((html.match(/按需引用两份文件/g)||[]).length,4);
     assert.strictEqual(ex('taskConfig({ai_flock_knowledge_chars:-1}).ai_flock_knowledge_chars'),-1);assert.notStrictEqual(ex('taskFingerprint({ai_flock_knowledge_chars:-1})'),ex('taskFingerprint({ai_flock_knowledge_chars:0})'));
     for(const prefix of ['waterAiJob','brAiFlock','lkAiFlock','crAiFlock']){assert(html.includes('id="'+prefix+'KnowledgeOnDemand"'));ex("setIntegerFields('"+prefix+"',{},AI_FLOCK_LIMIT_SPECS)");q('#'+prefix+'KnowledgeChars').value='4567';q('#'+prefix+'KnowledgeUnlimited').checked=true;ex("syncKnowledgeLimit('"+prefix+"')");assert(q('#'+prefix+'KnowledgeChars').disabled);assert.strictEqual(ex("readIntegerFields('"+prefix+"',AI_FLOCK_LIMIT_SPECS).knowledge_chars"),-1);q('#'+prefix+'KnowledgeUnlimited').checked=false;ex("syncKnowledgeLimit('"+prefix+"')");assert.strictEqual(ex("readIntegerFields('"+prefix+"',AI_FLOCK_LIMIT_SPECS).knowledge_chars"),4567);ex("setIntegerFields('"+prefix+"',{knowledge_chars:-1},AI_FLOCK_LIMIT_SPECS)");assert(q('#'+prefix+'KnowledgeUnlimited').checked);ex("setIntegerFields('"+prefix+"',{},AI_FLOCK_LIMIT_SPECS)");assert(!q('#'+prefix+'KnowledgeUnlimited').checked);assert.strictEqual(q('#'+prefix+'KnowledgeChars').value,'2000')}
   });

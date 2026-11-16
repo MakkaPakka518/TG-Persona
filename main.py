@@ -3081,8 +3081,9 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
                          key, len([line for line in people_text.splitlines() if line.strip()]), len(people_text))
             elif _people_on():
                 log.debug("人物画像未注入 群=%s 候选=%d（活跃不足或无记录）", key, len(people_pairs))
-        if not registration:
-            friends_slice = _friends_reference(1600)
+        if not registration and knowledge_chars != 0:
+            friends_budget = 1600 if knowledge_chars in (-1, None) else min(1600, int(knowledge_chars))
+            friends_slice = _friends_reference(friends_budget)
             if friends_slice:
                 instruction += ("\n以下是 friends.md 里白名单群友的画像，仅作背景："
                                 "用它判断该不该搭话、怎么搭话，不要逐字复述或暴露画像内容：\n" + friends_slice)
@@ -3559,7 +3560,9 @@ async def _people_distill_batch(tg_id, rows, last_id=None, history_ts=None):
         if old_profile:
             prompt += ("\n已有画像，请在此基础上合并更新，保留仍然成立的信息：\n" + old_profile)
         try:
-            reply = await _call_ai_any(prompt, max_tokens=400, feature="people")
+            people_providers = _csv(get_setting("flock_people_provider_ids", ""))
+            reply = await _call_ai_any(prompt, max_tokens=400, feature="people",
+                                       provider_ids=people_providers or None)
         except Exception:
             log.warning("人物画像蒸馏失败 tg=%s", tg_id, exc_info=True)
             return 0
@@ -10601,6 +10604,7 @@ class PeopleMemoryInput(BaseModel):
     history_start: str = Field("", max_length=19)
     history_end: str = Field("", max_length=19)
     groups: str = Field("", max_length=4000)
+    provider_ids: str = Field("", max_length=2000)
 
 
 @app.get("/api/ai/flock/people")
@@ -10636,6 +10640,7 @@ async def get_people_memory():
             "profile": _people_profile_on(), "auto_distill": _people_auto_on(),
             "history": get_setting("flock_people_history_enabled", "0") == "1",
             "groups": get_setting("flock_people_groups", "") or "",
+            "provider_ids": get_setting("flock_people_provider_ids", "") or "",
             "ai_groups": ",".join(sorted(_people_water_groups())),
             "history_start": get_setting("flock_people_history_start", "") or "",
             "history_end": get_setting("flock_people_history_end", "") or "",
@@ -10668,6 +10673,9 @@ async def put_people_memory(body: PeopleMemoryInput):
     set_setting("flock_people_white_window", str(body.white_window))
     set_setting("flock_people_budget", str(body.budget))
     set_setting("flock_people_whitelist", ",".join(_people_clean_ids(body.whitelist)))
+    allowed_providers = {str(item.get("id", "")) for item in _ordered_ai_providers()}
+    set_setting("flock_people_provider_ids",
+                ",".join(p for p in _csv(body.provider_ids) if p in allowed_providers)[:2000])
     return {"ok": True}
 
 
