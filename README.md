@@ -315,6 +315,14 @@ location / {
 - `on_game_event` 的异常兜底也补写 `last_at/last_detail`，任何异常都不再让任务计数停在 0。
 - `GET /api/game-tasks/{tid}/probe` 增加 `can_send_messages`，自检时能直接看到本账号在该群能不能发言。
 
+## 1.29.16：兜底心跳去重放（没有新消息就不再每分钟说一遍"不说"）
+
+- `_flock_latest_msg_id()` 读取群里最新消息 id，作为心跳游标 `last_msg_id`。
+- `_flock_hb_needs_wake()`：有新消息立刻唤醒；没有新消息时把重放间隔拉到 `FLOCK_HB_IDLE_GAP`（8 分钟），期间只延后 `next_wake_at`，不再落 `skipped` 记录。
+- 首次/无法取到游标时保持原行为，安静群仍可自己开口。
+- `_flock_reply()` 收到纯数字（`5`、`12`）按“不说”处理，不再报「模型只输出了数字或符号」。
+- `_flock_split()` 分钟数下限改为 1，与面板兜底区间一致。
+
 ## 1.29.15：水群实体解析与预热（重启后心跳也能找到群）
 
 - 新增 `_warm_flock_entities()`：账号连上后把全部会话实体缓存一次（群与频道都收），本机实测预热 **466 个群**，解决重启后「Cannot find any entity」。

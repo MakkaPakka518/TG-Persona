@@ -69,6 +69,50 @@ class FlockActiveTests(unittest.TestCase):
         src = {'hourly_limit': 8, 'inactive_mode': 1, 'min_messages': 6, 'max_messages': 8}
         self.assertEqual(self.b['_flock_apply_active'](dict(src)), src)
 
+class FlockIdleReproTests(unittest.TestCase):
+    """兜底心跳不该在没有新消息时每分钟重放同一个"不说"判断。"""
+
+    def setUp(self):
+        self.b = load_backend()
+        self.gap = 8 * 60
+        self.b['FLOCK_HB_IDLE_GAP'] = self.gap
+
+    def test_new_message_wakes_and_records_cursor(self):
+        data = {'last_msg_id': 100, 'last_idle_probe': 0}
+        wake, delay = self.b['_flock_hb_needs_wake'](data, 120, 1000.0)
+        self.assertTrue(wake)
+        self.assertEqual(data['last_msg_id'], 120)
+        self.assertEqual(delay, 0.0)
+
+    def test_no_new_message_holds_off(self):
+        now = 1000.0
+        data = {'last_msg_id': 120, 'last_idle_probe': now - 60}
+        wake, delay = self.b['_flock_hb_needs_wake'](data, 120, now)
+        self.assertFalse(wake)
+        self.assertEqual(delay, data['last_idle_probe'] + self.gap)
+
+    def test_no_new_message_after_gap_allows_once(self):
+        now = 2000.0
+        data = {'last_msg_id': 120, 'last_idle_probe': now - self.gap - 5}
+        wake, delay = self.b['_flock_hb_needs_wake'](data, 120, now)
+        self.assertTrue(wake)
+        self.assertEqual(data['last_idle_probe'], now)
+
+    def test_unknown_latest_keeps_old_behaviour(self):
+        data = {}
+        wake, delay = self.b['_flock_hb_needs_wake'](data, None, 100.0)
+        self.assertTrue(wake)
+        self.assertEqual(delay, 0.0)
+
+    def test_bare_number_is_silence(self):
+        self.assertEqual(self.b['_flock_reply']('5'), 'NO_REPLY|0')
+        self.assertEqual(self.b['_flock_reply'](' 12 '), 'NO_REPLY|0')
+
+    def test_split_allows_one_minute(self):
+        self.assertEqual(self.b['_flock_split']('1|好的'), ('reply', 1, '好的'))
+
+
+
 
 if __name__ == '__main__':
     unittest.main()

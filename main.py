@@ -1233,6 +1233,9 @@ def _flock_reply(value, registration=False):
     raw = str(value or "").strip().strip('`"\' ').strip()
     if not raw:
         raise ValueError("模型返回空正文")
+    if re.fullmatch(r"\d{1,2}", raw):
+        # 模型只回了"5"这类纯数字，语义就是过几分钟，按不说处理。
+        return "NO_REPLY|0"
     head, sep, body = raw.partition("|")
     head = head.strip()
     if re.fullmatch(r"(?i)(?:no_reply|skip)\s*\d{0,2}", head):
@@ -1266,7 +1269,7 @@ def _flock_split(reply):
     head = head.strip()
     # 只有带 "N|" 前缀时 head 才是分钟数，否则整段都是正文。
     if sep and re.fullmatch(r"\d{1,2}", head):
-        return "reply", max(2, min(int(head), 30)), body.strip()
+        return "reply", max(1, min(int(head), 30)), body.strip()
     return "reply", 0, text
 
 
@@ -2029,6 +2032,38 @@ async def _warm_flock_entities():
     return len(cache)
 
 
+FLOCK_HB_IDLE_GAP = 8 * 60
+
+
+async def _flock_latest_msg_id(chat):
+    """群里最新一条消息 id，用来判断兜底心跳是不是在空转重放。"""
+    runtime = get_runtime()
+    if getattr(runtime, "client", None) is None:
+        return None
+    try:
+        messages = await asyncio.wait_for(runtime.client.get_messages(chat, limit=1), timeout=12)
+    except Exception:
+        return None
+    if not messages:
+        return 0
+    return int(getattr(messages[0], "id", 0) or 0)
+
+
+def _flock_hb_needs_wake(data, latest, now):
+    """没有新消息时把重放间隔拉到 FLOCK_HB_IDLE_GAP，避免每分钟重复"不说"。"""
+    if latest is None:
+        return True, 0.0
+    seen = int(data.get("last_msg_id") or 0)
+    if seen and latest <= seen:
+        idle_at = float(data.get("last_idle_probe") or 0)
+        if now - idle_at < FLOCK_HB_IDLE_GAP:
+            return False, idle_at + FLOCK_HB_IDLE_GAP
+        data["last_idle_probe"] = now
+    if latest > seen:
+        data["last_msg_id"] = latest
+    return True, 0.0
+
+
 def _flock_heartbeat_targets():
     """兜底唤醒到点的工作群：只取生效中、不干预模式的任务，避免与消息触发抢跑。"""
     targets, seen = [], set()
@@ -2078,6 +2113,14 @@ async def _flock_heartbeat_loop():
                 if len(runtime.ai_flock_busy_groups) >= 2:
                     break
                 now = time.time()
+                latest = await _flock_latest_msg_id(chat)
+                wake, delay_to = _flock_hb_needs_wake(data, latest, now)
+                if not wake:
+                    data["next_wake_at"] = delay_to
+                    _flock_hb_save(source["job_id"], chat, data)
+                    log.debug("水群兜底心跳 群=%s 无新消息，%s 再看", chat,
+                              time.strftime("%H:%M", time.localtime(delay_to)))
+                    continue
                 data["next_wake_at"] = now + _flock_hb_gap(source) * 60
                 _flock_hb_save(source["job_id"], chat, data)
                 if await _flock_ensure_entity(chat) is None:
