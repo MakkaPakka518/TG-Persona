@@ -1982,20 +1982,51 @@ async def _flock_ensure_entity(chat_id):
     runtime = get_runtime()
     if getattr(runtime, "client", None) is None:
         return None
+    cache = getattr(runtime, "flock_entities", None)
+    if isinstance(cache, dict) and cache.get(str(chat_id)) is not None:
+        return cache[str(chat_id)]
     try:
-        return await asyncio.wait_for(runtime.client.get_entity(int(str(chat_id))), timeout=8)
+        entity = await asyncio.wait_for(runtime.client.get_entity(int(str(chat_id))), timeout=8)
+        if isinstance(cache, dict):
+            cache[str(chat_id)] = entity
+        return entity
     except Exception:
         pass
     try:
-        await asyncio.wait_for(_fetch_all_dialogs(), timeout=40)
+        await asyncio.wait_for(_fetch_all_dialogs(None), timeout=60)
     except Exception:
         log.warning("水群实体扫描失败 群=%s", chat_id)
         return None
     try:
-        return await asyncio.wait_for(runtime.client.get_entity(int(str(chat_id))), timeout=8)
+        entity = await asyncio.wait_for(runtime.client.get_entity(int(str(chat_id))), timeout=8)
+        if isinstance(cache, dict):
+            cache[str(chat_id)] = entity
+        return entity
     except Exception:
         log.warning("水群实体解析失败 群=%s", chat_id)
         return None
+
+
+async def _warm_flock_entities():
+    """账号连上后把群实体缓存一次，避免重启后按 chat_id 取群报 Cannot find any entity。"""
+    runtime = get_runtime()
+    if getattr(runtime, "client", None) is None:
+        return 0
+    cache = getattr(runtime, "flock_entities", None)
+    if not isinstance(cache, dict):
+        cache = {}
+    try:
+        async for dialog in runtime.client.iter_dialogs(limit=None):
+            entity = getattr(dialog, "entity", None)
+            if entity is None:
+                continue
+            if not (getattr(dialog, "is_group", False) or getattr(dialog, "is_channel", False)):
+                continue
+            cache[str(getattr(dialog, "id", ""))] = entity
+    except Exception:
+        log.warning("水群实体缓存预热失败", exc_info=True)
+    runtime.flock_entities = cache
+    return len(cache)
 
 
 def _flock_heartbeat_targets():
@@ -5341,6 +5372,15 @@ async def on_group_message(event):
                         direct_to_self = bool(getattr(await event.get_reply_message(), "out", False))
                     except Exception:
                         pass
+                try:
+                    cache = getattr(get_runtime(), "flock_entities", None)
+                    if cache is None:
+                        cache = {}
+                        get_runtime().flock_entities = cache
+                    if cache.get(str(event.chat_id)) is None and getattr(event, "chat", None) is not None:
+                        cache[str(event.chat_id)] = event.chat
+                except Exception:
+                    pass
                 if _flock_frequency_ready(event.chat_id, direct_to_self):
                     get_runtime().spawn(_run_ai_flock(event.chat_id, text, direct_to_self))
         except Exception:
@@ -8719,6 +8759,14 @@ async def _health_check_once():
         if get_runtime().session_alerted:
             log.info("会话已恢复正常")
         get_runtime().session_alerted = False
+        if not getattr(get_runtime(), "flock_entities_warm", False):
+            get_runtime().flock_entities_warm = True
+            try:
+                warmed = await asyncio.wait_for(_warm_flock_entities(), timeout=60)
+                log.info("水群实体缓存预热 %s 个群", warmed)
+            except Exception:
+                get_runtime().flock_entities_warm = False
+                log.warning("水群实体缓存预热超时，稍后重试")
 
 
 async def health_loop():
@@ -9176,9 +9224,9 @@ async def list_watched():
 DIALOG_TTL = 60.0
 
 
-async def _fetch_all_dialogs():
+async def _fetch_all_dialogs(limit=500):
     out = []
-    async for d in get_runtime().client.iter_dialogs(limit=500):
+    async for d in get_runtime().client.iter_dialogs(limit=limit):
         if not d.is_group:
             continue
         out.append({
