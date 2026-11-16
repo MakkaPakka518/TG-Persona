@@ -7923,12 +7923,48 @@ def _poem_candidates(fragment, limit=400):
     return out
 
 
+def _poem_solve_gap(line):
+    """整行比诗库候选少一个字时，唯一确定缺的是哪个字（诗库条目是多句拼接，按滑动窗口比对）。"""
+    size = len(line)
+    if size < 5:
+        return None
+    known = _poem_candidates(line[:5], limit=300) + _poem_candidates(line[-5:], limit=300)
+    if any(line in cand for cand in known):
+        return None
+    found = set()
+    for fragment in (line[:5], line[-5:], line[:4], line[-4:]):
+        if len(fragment) < 4:
+            continue
+        for cand in _poem_candidates(fragment, limit=300):
+            if len(cand) <= size:
+                continue
+            for start in range(0, len(cand) - size):
+                window = cand[start:start + size + 1]
+                for i in range(len(window)):
+                    if window[:i] + window[i + 1:] == line:
+                        found.add((window[i], cand))
+                        break
+    if not found:
+        return None
+    answers = {answer for answer, _cand in found}
+    if len(answers) != 1:
+        return None
+    answer = answers.pop()
+    return answer, next(cand for ans, cand in found if ans == answer)
+
+
 def _poem_solve_text(raw_text):
     """从 OCR 文本推答案；返回 (答案, 命中句)。"""
     best = ("", "")
     for raw in str(raw_text or "").splitlines():
         line = _poem_clean_line(raw)
         if len(line) < 4 or not any(ch in POEM_MASK_CHARS for ch in line):
+            if len(line) >= 5 and not best[0]:
+                known = _poem_candidates(line[:6], limit=200)
+                if not any(line == cand for cand in known):
+                    gap = _poem_solve_gap(line)
+                    if gap:
+                        best = gap
             continue
         cut = next(i for i, ch in enumerate(line) if ch in POEM_MASK_CHARS)
         left = line[:cut]

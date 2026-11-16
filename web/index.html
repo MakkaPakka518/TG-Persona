@@ -4331,7 +4331,7 @@ async function testCaptchaRecognition(){
     const label=aiTestMode==='image'?(options?'匹配选项：':'图片答案：'):(aiTestMode==='poem'?'古诗答案：':'识别文本：');
     const ocrNote=aiTestMode==='poem'&&typeof d.ocr_text==='string'&&d.ocr_text.trim()?('\nOCR 原文：'+d.ocr_text.trim().split('\n').slice(0,3).join(' / ')):'';
     result.textContent=(success?'识别成功':'识别失败')+
-      '\n'+label+(text||'（空文本）')+'\n使用通道：'+channel+'\n耗时：'+testElapsed(d.elapsed_ms)+ocrNote+
+      '\n'+label+(text||'（空文本）')+'\n使用通道：'+channel+(channel==='AI'&&errors.some(e=>e&&e.channel==='ocr')?'（本地 OCR 未命中，已回退 AI）':'')+'\n耗时：'+testElapsed(d.elapsed_ms)+ocrNote+
       (warnings.length?'\n'+(success?'通道提醒（已使用上述通道完成识别）':'失败原因')+'：\n'+warnings.join('\n'):
         (success?'':'\n失败原因：'+(d.error||'未获得有效识别文本')));
   }catch(e){if(isCurrentAccount(c)&&version===captchaTestVersion){result.textContent='识别失败：'+e.message;toast(e.message,1)}}

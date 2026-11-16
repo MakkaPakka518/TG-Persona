@@ -1247,6 +1247,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('peopleGroups'));
     assert(html.includes('画像监控群'));
     assert(html.includes('grp-search'));
+    assert(html.includes('本地 OCR 未命中，已回退 AI'));
     assert(html.includes('setGroupFilter('));
     assert(!html.includes("$('#waterAiJobName').focus()"));
     assert(html.includes('datetime-local'));
