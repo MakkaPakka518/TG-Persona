@@ -3196,6 +3196,13 @@ def _beijing_now():
 
 
 def _parse_beijing_window(start_text, end_text):
+    # 兼容旧版只填时分的时间窗：按当天日期补齐；新版统一用 datetime-local。
+    start_text = str(start_text or "").strip()
+    end_text = str(end_text or "").strip()
+    if re.fullmatch(r"\d{2}:\d{2}", start_text) and re.fullmatch(r"\d{2}:\d{2}", end_text):
+        today = _beijing_now().strftime("%Y-%m-%d")
+        start_text = today + "T" + start_text
+        end_text = today + "T" + end_text
     try:
         if not (re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", start_text)
                 and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", end_text)):
@@ -10303,8 +10310,8 @@ class PeopleMemoryInput(BaseModel):
     normal: bool = True
     white: bool = True
     history: bool = False
-    history_start: str = Field("", max_length=5)
-    history_end: str = Field("", max_length=5)
+    history_start: str = Field("", max_length=19)
+    history_end: str = Field("", max_length=19)
 
 
 @app.get("/api/ai/flock/people")
@@ -10338,8 +10345,8 @@ async def put_people_memory(body: PeopleMemoryInput):
     set_setting("flock_people_normal_enabled", "1" if body.normal else "0")
     set_setting("flock_people_white_enabled", "1" if body.white else "0")
     set_setting("flock_people_history_enabled", "1" if body.history else "0")
-    set_setting("flock_people_history_start", str(body.history_start)[:5])
-    set_setting("flock_people_history_end", str(body.history_end)[:5])
+    set_setting("flock_people_history_start", str(body.history_start)[:19])
+    set_setting("flock_people_history_end", str(body.history_end)[:19])
     set_setting("flock_people_profile_enabled", "1" if body.profile else "0")
     set_setting("flock_people_auto_distill", "1" if body.auto_distill else "0")
     set_setting("flock_people_lines", str(body.lines))

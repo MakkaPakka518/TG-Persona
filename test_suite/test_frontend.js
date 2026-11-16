@@ -1241,6 +1241,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('peopleHistoryEnabled'));
     assert(html.includes('近到远翻群历史'));
     assert(html.includes('waterAiPeopleRefHint'));
+    assert(html.includes('peopleHistoryStart'));
+    assert(html.includes('datetime-local'));
     assert(html.includes('人物画像命中'));
     assert(html.includes("/api/ai/flock/people"));
     assert(html.includes('loadPeople()'));
