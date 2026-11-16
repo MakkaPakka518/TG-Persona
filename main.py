@@ -1451,8 +1451,10 @@ def _render_friends_md():
     """白名单人物的画像汇总成 friends.md：AI 水群直接按文件引用。"""
     try:
         rows = get_account_db().execute(
-            "SELECT tg_id, name, profile, updated_at, samples, note FROM people_profiles "
-            "WHERE TRIM(COALESCE(profile,''))<>'' ORDER BY updated_at DESC").fetchall()
+            "SELECT p.tg_id, p.name, p.profile, p.updated_at, p.samples, p.note, "
+            "(SELECT MAX(m.name) FROM people_memory m WHERE m.tg_id=p.tg_id) "
+            "FROM people_profiles p WHERE TRIM(COALESCE(p.profile,''))<>'' "
+            "ORDER BY p.updated_at DESC").fetchall()
     except Exception:
         rows = []
     whitelist = _people_ids()
@@ -1463,16 +1465,18 @@ def _render_friends_md():
     if not picked:
         lines.append("_白名单还没有可用画像：先勾上白名单人物，攒够 5 条发言会自动蒸馏。_")
     for row in picked:
-        tg_id, name, profile, updated_at, samples, note = row
-        title = str(name or "").strip() or ("TG " + str(tg_id))
+        tg_id, name, profile, updated_at, samples, note = row[0], row[1], row[2], row[3], row[4], row[5]
+        remembered = str(row[6] or "").strip() if len(row) > 6 else ""
+        title = str(name or "").strip() or remembered or ("TG " + str(tg_id))
         stamp = ""
         if updated_at:
             try:
                 stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(int(updated_at)))
             except Exception:
                 stamp = str(updated_at)
-        lines.append("## %s（TG %s）" % (title, tg_id))
-        body_text = re.sub(r"(?m)^##\s*", "### ", str(profile or "").strip())
+        label = ("TG " + str(tg_id)) if title == ("TG " + str(tg_id)) else ("%s（TG %s）" % (title, tg_id))
+        lines.append("## " + label)
+        body_text = re.sub(r"(?m)^#{1,3}\s*", "### ", str(profile or "").strip())
         lines.append(body_text)
         meta = []
         if stamp:
