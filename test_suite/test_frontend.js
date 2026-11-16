@@ -1236,6 +1236,13 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('只看未固定'));
     assert(html.includes('pinned_count'));
     assert(html.includes('把这段记忆钉住'));
+    assert(html.includes('peopleEnabled'));
+    assert(html.includes("/api/ai/flock/people"));
+    assert(html.includes('loadPeople()'));
+    assert(html.includes('人物记忆'));
+    assert(html.includes('人物画像'));
+    assert(html.includes('备注：这是谁'));
+    assert(html.includes('savePerson('));
   });
   await test('共享库修改后旧图标选择失效，重新加载再选择',async()=>{
     ex('openIconPicker();acceptIcons(iconsFixture)');const old=q('#iconGrid').children[0];const before=q('#sIconUrl').value;app.api=async()=>({libraries:[{id:'l',enabled:false}],ok:true});await ex("updateIconLibrary('l',{enabled:false})");old.listeners.click();assert.strictEqual(q('#sIconUrl').value,before);assert.strictEqual(ex('iconsLoaded'),false);assert.strictEqual(q('#iconGrid').children.length,0);
