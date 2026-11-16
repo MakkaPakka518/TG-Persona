@@ -1254,6 +1254,9 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('renderFriendsUpload'));
     assert(html.includes('friends.md 引用预算'));
     assert(html.includes('重建 friends.md'));
+    assert(html.includes('peopleOpenIds'));
+    assert(html.includes('renderPeopleList'));
+    assert(html.includes('memory-preview'));
     assert(/id="flockLearningCard"/.test(html)&&/id="peopleMemoryCard"/.test(html));
     assert(html.includes('peopleGroups'));
     assert(html.includes('画像监控群'));
