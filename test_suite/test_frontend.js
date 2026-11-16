@@ -1246,6 +1246,9 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('人物画像（可选，只对白名单）'));
     assert(html.includes('peopleGroups'));
     assert(html.includes('画像监控群'));
+    assert(html.includes('grp-search'));
+    assert(html.includes('setGroupFilter('));
+    assert(!html.includes("$('#waterAiJobName').focus()"));
     assert(html.includes('datetime-local'));
     assert(html.includes('人物画像命中'));
     assert(html.includes("/api/ai/flock/people"));
