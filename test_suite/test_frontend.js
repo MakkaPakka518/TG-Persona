@@ -1245,6 +1245,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('消息记忆'));
     assert(html.includes('id="peopleProfileCard"'));
     assert(html.includes('id="peopleMemoryCard"'));
+    assert(html.includes("loadGithubToken();loadPeople()"));
     assert(/id="flockLearningCard"/.test(html)&&/id="peopleMemoryCard"/.test(html));
     assert(html.includes('peopleGroups'));
     assert(html.includes('画像监控群'));

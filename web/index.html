@@ -2125,7 +2125,7 @@ function goTab(t){
   if(t==='autos')loadAutos();
   if(t==='groups')loadDialogs();
   if(t==='logs')loadLogs();
-  if(t==='settings'){renderTgCard();loadUpd(false);loadGithubToken()}
+  if(t==='settings'){renderTgCard();loadUpd(false);loadGithubToken();loadPeople()}
 }
 function foldToggle(el){
   el.closest('.fold').classList.toggle('open');
@@ -3938,7 +3938,7 @@ async function saveWaterAIJob(){
   const limits=validIntegerFields('waterAiJob',AI_FLOCK_LIMIT_SPECS);if(!limits)return;const frequency={};const hourlyUnlimited=$('#waterAiJobHourlyUnlimited').checked;for(const [id,key,min,max] of [['waterAiJobMinMessages','min_messages',1,100],['waterAiJobMaxMessages','max_messages',1,100],['waterAiJobHourlyLimit','hourly_limit',1,60],['waterAiJobActiveMinutes','active_minutes',0,30],['waterAiJobBudgetMessages','budget_messages',0,60]]){if(key==='hourly_limit'&&hourlyUnlimited){frequency[key]=-1;continue}const raw=$('#'+id).value.trim(),value=Number(raw);if(!raw||!Number.isInteger(value)||value<min||value>max)return toast('水群频率设置须为有效整数',1);frequency[key]=value}if(frequency.min_messages>frequency.max_messages)return toast('最多间隔消息数不能小于最少间隔消息数',1);const body=waterAIJobPayload({name:$('#waterAiJobName').value,enabled:$('#waterAiJobEnabled').checked,groups:[...waterAIJobGroupSel],start_time:$('#waterAiJobStart').value,end_time:$('#waterAiJobEnd').value,knowledge_on_demand:$('#waterAiJobKnowledgeOnDemand').checked?1:0,end_next_day:$('#waterAiJobEndNextDay').checked?1:0,inactive_mode:$('#waterAiJobInactiveMode').checked?1:0,prompt:$('#waterAiJobPrompt').value,provider_ids:[...waterAIJobProviderSel],reaction:$('#waterAiJobReaction').value,...frequency,...limits});
   if(!body.name||!body.groups)return toast('请填写任务名称并选择生效群',1);if(!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(body.start_time)||!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(body.end_time)||(body.end_next_day?body.start_time<body.end_time:body.start_time>=body.end_time))return toast('水群每日时段须大于 0 且不超过 24 小时，跨午夜请勾选次日结束',1);if(body.enabled&&!aiProviders.some(p=>p.enabled))return toast('请先到设置添加并启用 AI API',1);if(!selectedAIProvidersEnabled(body.provider_ids))return toast('水群任务只能选择已启用的 AI API',1);
   waterAIJobBusy=true;$('#waterAiJobSave').disabled=true;const id=editingWaterAIJobId;
-  try{await api('/api/ai/flock/jobs'+(id!=null?'/'+encodeURIComponent(id):''),{method:id!=null?'PUT':'POST',body:JSON.stringify(body),_account:c});if(!isCurrentAccount(c))return;resetWaterAIJobForm();toast(id!=null?'水群任务已更新':'水群任务已添加');await loadWaterAIJobs()}catch(e){if(isCurrentAccount(c))toast(e.message,1)}finally{if(isCurrentAccount(c)){waterAIJobBusy=false;$('#waterAiJobSave').disabled=false}}
+  try{await api('/api/ai/flock/jobs'+(id!=null?'/'+encodeURIComponent(id):''),{method:id!=null?'PUT':'POST',body:JSON.stringify(body),_account:c});if(!isCurrentAccount(c))return;resetWaterAIJobForm();toast(id!=null?'水群任务已更新':'水群任务已添加');await loadWaterAIJobs();await loadPeople()}catch(e){if(isCurrentAccount(c))toast(e.message,1)}finally{if(isCurrentAccount(c)){waterAIJobBusy=false;$('#waterAiJobSave').disabled=false}}
 }
 async function mutateWaterAIJob(id,action,c=accountContext()){
   if(action==='test'){if(isCurrentAccount(c))openWaterAITest(id);return}
@@ -4505,7 +4505,7 @@ async function addGroup(id,name){
     await api('/api/groups',{method:'POST',body:JSON.stringify({chat_id:id,name}),_account:c});
     if(!isCurrentAccount(c))return;toast('已加入监听');
     const g=allGroups.find(x=>String(x.chat_id)===String(id));if(g)g.watched=true;
-    loadWatched();renderGroups();await loadRuleGroups();
+    loadWatched();renderGroups();await loadRuleGroups();await loadPeople();
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function removeGroup(id){
