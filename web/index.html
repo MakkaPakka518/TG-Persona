@@ -1010,6 +1010,11 @@ section.act,.fold.open .fold-b{animation:none}
                   <div><label for="gDelay">答题延迟（秒）</label><input type="number" id="gDelay" value="1" min="0" max="10" step="0.5" inputmode="decimal"></div>
                 </div>
                 <div class="hint">在延迟基础上再随机 0–0.8 秒，避免秒答太像脚本。</div>
+                <label class="check"><input type="checkbox" id="gWait"> 等 1–3 人答对后再跟（降低脚本嫌疑）</label>
+                <div class="hint">开启后先识别出答案但不马上发，随机等到群里 1–3 个人说出正确答案后再跟；超过下面的时限就直接答。</div>
+                <div class="flex">
+                  <div><label for="gWaitTimeout">最长等待（秒）</label><input type="number" id="gWaitTimeout" value="30" min="3" max="120" step="1" inputmode="numeric"></div>
+                </div>
                 <label for="gPrompt">古诗提示词（可选，留空用内置）</label>
                 <textarea id="gPrompt" rows="3" maxlength="2000" placeholder="留空则使用内置古诗填空提示词"></textarea>
                 <label class="check"><input type="checkbox" id="gDefend"> 被质疑时启用 AI 水群</label>
@@ -4329,7 +4334,8 @@ async function testCaptchaRecognition(){
       (({ai:'AI',ocr:'本地 OCR',none:'无'}[e.channel]||'未知通道')+'：'+(e.message||'未知错误')):'未知错误');
     const success=d.ok===true&&!!text.trim();
     const label=aiTestMode==='image'?(options?'匹配选项：':'图片答案：'):(aiTestMode==='poem'?'古诗答案：':'识别文本：');
-    const ocrNote=aiTestMode==='poem'&&typeof d.ocr_text==='string'&&d.ocr_text.trim()?('\nOCR 原文：'+d.ocr_text.trim().split('\n').slice(0,3).join(' / ')):'';
+    const ocrLines=aiTestMode==='poem'&&typeof d.ocr_text==='string'?d.ocr_text.split(/\n+/).map(x=>x.trim()).filter(Boolean).slice(0,8):[];
+    const ocrNote=ocrLines.length?('\nOCR 原文：'+ocrLines.join(' / ')):'';
     result.textContent=(success?'识别成功':'识别失败')+
       '\n'+label+(text||'（空文本）')+'\n使用通道：'+channel+(channel==='AI'&&errors.some(e=>e&&e.channel==='ocr')?'（本地 OCR 未命中，已回退 AI）':'')+'\n耗时：'+testElapsed(d.elapsed_ms)+ocrNote+
       (warnings.length?'\n'+(success?'通道提醒（已使用上述通道完成识别）':'失败原因')+'：\n'+warnings.join('\n'):
@@ -4825,9 +4831,11 @@ function refreshVisibleTab(){
 function pollVisibleState(){if(pageIsHidden())return;loadState();loadLogs();if(activeTab==='settings'&&!waterAISkillBusy&&!waterAISkillLoading)loadFlockSkill(true)}
 if(document.addEventListener)document.addEventListener('visibilitychange',()=>{if(!pageIsHidden())refreshVisibleTab()});
 // ---------- 群游戏 ----------
-let gameTasks=[],gameEditId=null;
+let gameTasks=[],gameEditId=null,gameLogStats={},gameLogItems=[];
+async function loadGameLogs(){try{const d=await api('/api/game-logs',{_account:accountContext()});gameLogStats=d.stats||{};gameLogItems=Array.isArray(d.items)?d.items:[]}catch(e){gameLogStats={};gameLogItems=[]}}
 async function loadGameTasks(){
   try{const d=await api('/api/game-tasks',{_account:accountContext()});gameTasks=Array.isArray(d.items)?d.items:[]}catch(e){gameTasks=[]}
+  await loadGameLogs();
   renderGameTasks();
 }
 function gameStatusText(t){
@@ -4870,18 +4878,25 @@ function renderGameTasks(){
     del.type='button';
     del.textContent='删除';
     del.onclick=()=>deleteGameTask(t.id);
-    ops.appendChild(toggle);ops.appendChild(edit);ops.appendChild(del);
+    const logBtn=document.createElement('button');
+    logBtn.className='ghost';logBtn.type='button';logBtn.textContent='日志';
+    const logBox=document.createElement('div');
+    logBox.className='hint hidden';logBox.style.marginTop='6px';
+    logBtn.onclick=()=>{if(logBox.classList.contains('hidden')){const rows=gameLogItems.filter(x=>String(x.task_id)===String(t.id)).slice(0,15);logBox.innerHTML=rows.length?rows.map(x=>esc(x.at)+' · '+(x.status==='success'?'成功':'失败')+' · '+esc(x.detail||'')+'（'+Number(x.elapsed_ms||0)+' ms）').join('<br>'):'暂无日志'}logBox.classList.toggle('hidden')};
+    ops.appendChild(toggle);ops.appendChild(edit);ops.appendChild(del);ops.appendChild(logBtn);
     head.appendChild(ops);
     card.appendChild(head);
     const meta=document.createElement('div');
     meta.className='hint';
     meta.style.marginTop='6px';
-    meta.textContent='关键词：'+(t.trigger_kw||'—')+' · 出题人：'+(t.sender_filter||'不限')+' · 延迟：'+(t.reply_delay||1)+'s'+(t.defend_ai?' · 被质疑 AI 水群':'');
+    meta.textContent='关键词：'+(t.trigger_kw||'—')+' · 出题人：'+(t.sender_filter||'不限')+' · 延迟：'+(t.reply_delay||1)+'s'+(t.defend_ai?' · 被质疑 AI 水群':'')+(t.wait_others?' · 等 1-3 人答对后跟（'+Number(t.wait_timeout||30)+'s 内）':'');
     card.appendChild(meta);
     const status=document.createElement('div');
     status.className='hint';
-    status.textContent=gameStatusText(t);
+    const st=gameLogStats[String(t.id)]||{};
+    status.textContent=gameStatusText(t)+' ｜ 今日 成功 '+Number(st.today_success||0)+' · 失败 '+Number(st.today_failed||0)+' ｜ 累计 成功 '+Number(st.success||0)+' · 失败 '+Number(st.failed||0);
     card.appendChild(status);
+    card.appendChild(logBox);
     box.appendChild(card);
   }
 }
@@ -4892,6 +4907,8 @@ function openGameForm(id){
   $('#gKeyword').value=t?(t.trigger_kw||'猜字游戏开始'):'猜字游戏开始';
   $('#gSender').value=t?(t.sender_filter||''):'';
   $('#gDelay').value=t?(t.reply_delay||1):1;
+  $('#gWait').checked=!!(t&&t.wait_others);
+  $('#gWaitTimeout').value=t?(t.wait_timeout||30):30;
   $('#gPrompt').value=t?(t.prompt||''):'';
   $('#gDefend').checked=!!(t&&t.defend_ai);
   $('#gEnabled').checked=t?!!t.enabled:true;
@@ -4905,7 +4922,7 @@ async function saveGameTask(){
   const out=$('#gFormResult');
   const body={subtype:'poem',chat:$('#gChat').value.trim(),trigger_kw:$('#gKeyword').value.trim(),
     sender_filter:$('#gSender').value.trim(),prompt:$('#gPrompt').value.trim(),
-    reply_delay:Number($('#gDelay').value)||0,defend_ai:$('#gDefend').checked?1:0,enabled:$('#gEnabled').checked?1:0};
+    reply_delay:Number($('#gDelay').value)||0,defend_ai:$('#gDefend').checked?1:0,enabled:$('#gEnabled').checked?1:0,wait_others:$('#gWait').checked?1:0,wait_timeout:Number($('#gWaitTimeout').value)||30};
   if(!body.chat){out.textContent='请填写监听的群';return}
   if(!body.trigger_kw){out.textContent='请填写任务开始关键词';return}
   try{

@@ -288,6 +288,15 @@ def db_init(database=None):
             failures INTEGER DEFAULT 0,
             created_at INTEGER
         );
+        CREATE TABLE IF NOT EXISTS game_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL, chat_id TEXT NOT NULL DEFAULT '',
+            at TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '',
+            detail TEXT NOT NULL DEFAULT '', answer TEXT NOT NULL DEFAULT '',
+            channel TEXT NOT NULL DEFAULT '', elapsed_ms INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_game_logs_task ON game_logs(task_id, id);
         CREATE TABLE IF NOT EXISTS game_tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             subtype TEXT DEFAULT 'poem',
@@ -302,6 +311,9 @@ def db_init(database=None):
             last_status TEXT DEFAULT '',
             last_detail TEXT DEFAULT '',
             total INTEGER DEFAULT 0,
+            failed INTEGER DEFAULT 0,
+            wait_others INTEGER DEFAULT 0,
+            wait_timeout INTEGER DEFAULT 30,
             created_at INTEGER
         );
         """
@@ -374,6 +386,11 @@ def db_init(database=None):
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
+        except sqlite3.OperationalError:
+            pass
+    for col, ddl in (("wait_others", "INTEGER DEFAULT 0"), ("wait_timeout", "INTEGER DEFAULT 30"), ("failed", "INTEGER DEFAULT 0")):
+        try:
+            conn.execute(f"ALTER TABLE game_tasks ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
             pass
     for col, ddl in (("reaction", "TEXT DEFAULT ''"), ("groups", "TEXT DEFAULT ''")):
@@ -8003,7 +8020,7 @@ def _poem_solve_text(raw_text):
         line_hit = next((cand for answer, cand in hits if answer == best_answer), "")
         if line_hit:
             return best_answer, line_hit
-    return best, ""
+    return best[0], best[1]
 
 
 def _poem_normalize_answer(value):
@@ -8088,6 +8105,47 @@ async def _game_message_image(event, chat_id):
     return b""
 
 
+def _game_log(task_id, chat_id, status, detail, answer="", channel="", elapsed_ms=0):
+    """群游戏每次作答都落一条记录，面板可查成功/失败次数与原因。"""
+    try:
+        db = get_account_db()
+        db.execute("""INSERT INTO game_logs (task_id, chat_id, at, status, detail, answer, channel, elapsed_ms, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (int(task_id), str(chat_id), now_local().strftime("%Y-%m-%d %H:%M:%S"), str(status),
+                    str(detail)[:200], str(answer)[:20], str(channel)[:10], int(elapsed_ms or 0), int(time.time())))
+        db.commit()
+    except Exception:
+        log.warning("群游戏日志写入失败 task=%s", task_id, exc_info=True)
+
+
+async def _game_wait_others(chat_id, answer, baseline, need, timeout):
+    """等群里 1-3 个人说出正确答案再跟，降低"秒答像脚本"的嫌疑；超时返回未达成。"""
+    runtime = get_runtime()
+    started = time.time()
+    hits = 0
+    seen = set()
+    while time.time() - started < timeout:
+        await asyncio.sleep(0.8)
+        try:
+            history = await runtime.client.get_messages(int(chat_id), limit=20, min_id=int(baseline))
+        except Exception:
+            continue
+        for msg in history or []:
+            try:
+                mid = int(getattr(msg, "id", 0) or 0)
+                if mid <= int(baseline) or mid in seen or getattr(msg, "out", False):
+                    continue
+                seen.add(mid)
+                body = _poem_clean_line(getattr(msg, "raw_text", "") or "")
+                if answer and len(body) <= 8 and answer in body:
+                    hits += 1
+            except Exception:
+                continue
+        if hits >= need:
+            return hits, True
+    return hits, False
+
+
 async def _game_poem_handle(task, event, chat_id):
     runtime = get_runtime()
     db = get_account_db()
@@ -8097,18 +8155,37 @@ async def _game_poem_handle(task, event, chat_id):
     result = await _poem_answer(image, prompt=str(task["prompt"] or ""))
     if not result.get("ok"):
         detail = "；".join(str(item.get("message", "")) for item in result.get("errors") or [])[:200] or "未得到答案"
-        db.execute("UPDATE game_tasks SET last_at=?,last_status='failed',last_detail=? WHERE id=?",
+        db.execute("UPDATE game_tasks SET last_at=?,last_status='failed',last_detail=?,failed=COALESCE(failed,0)+1 WHERE id=?",
                    (now_local().strftime("%Y-%m-%d %H:%M:%S"), detail, task["id"]))
         db.commit()
+        _game_log(task["id"], chat_id, "failed", detail)
         log.info("群游戏未作答 任务=%s 原因=%s", task["name"] if "name" in task.keys() else task["id"], detail)
         return
+    wait_note = ""
+    try:
+        wait_on = int(task["wait_others"] or 0)
+        wait_timeout = float(task["wait_timeout"] or 30)
+    except Exception:
+        wait_on, wait_timeout = 0, 30.0
+    if wait_on:
+        need = random.randint(1, 3)
+        hits, done = await _game_wait_others(chat_id, str(result["answer"]), getattr(event, "id", 0) or 0,
+                                             need, wait_timeout)
+        wait_note = "等%s人后跟(已见%s)" % (need, hits)
+        if not done:
+            wait_note += "(超时)"
+            log.info("群游戏等待他人作答超时 需=%s 已见=%s 任务=%s", need, hits, task["id"])
     delay = max(0.3, min(float(task["reply_delay"] or 1.0), 10.0))
     await asyncio.sleep(delay + random.uniform(0, 0.8))
     await _send_generated_message(int(chat_id), result["answer"], generated_kind="game_poem")
     stamp = now_local().strftime("%Y-%m-%d %H:%M:%S")
     db.execute("UPDATE game_tasks SET last_at=?,last_status='success',last_detail=?,total=COALESCE(total,0)+1 WHERE id=?",
-               (stamp, "%s（%s，%s ms）" % (result["answer"], result["channel"], result.get("elapsed_ms", 0), ), task["id"]))
+               (stamp, "%s（%s，%s ms%s）" % (result["answer"], result["channel"], result.get("elapsed_ms", 0),
+                                             "，" + wait_note if wait_note else ""), task["id"]))
     db.commit()
+    _game_log(task["id"], chat_id, "success", "%s（%s，%s ms）" % (result["answer"], result["channel"],
+                                                                 result.get("elapsed_ms", 0)),
+              answer=result["answer"], channel=result["channel"], elapsed_ms=result.get("elapsed_ms", 0))
     _game_last_answer[(str(chat_id), task["id"])] = getattr(event, "id", 0) or 0
     log.info("群游戏作答 任务=%s 答案=%s 通道=%s", task["id"], result["answer"], result["channel"])
 
@@ -9815,6 +9892,8 @@ class GameTaskIn(BaseModel):
     reply_delay: float = 1.0
     defend_ai: int = 0
     enabled: int = 1
+    wait_others: int = 0
+    wait_timeout: int = 30
 
 
 def _game_validate(body: GameTaskIn):
@@ -9826,6 +9905,38 @@ def _game_validate(body: GameTaskIn):
         raise HTTPException(400, "请填写任务开始关键词")
     if body.reply_delay < 0 or body.reply_delay > 10:
         raise HTTPException(400, "答题延迟需在 0-10 秒之间")
+    if body.wait_timeout < 3 or body.wait_timeout > 120:
+        raise HTTPException(400, "最长等待需在 3-120 秒之间")
+
+
+@app.get("/api/game-logs")
+async def get_game_logs(task_id: int = 0, limit: int = 80):
+    db = get_account_db()
+    day = now_local().strftime("%Y-%m-%d")
+    stats = {}
+    for row in db.execute("SELECT task_id, status, COUNT(*), "
+                          "SUM(CASE WHEN at LIKE ? THEN 1 ELSE 0 END) FROM game_logs "
+                          "GROUP BY task_id, status", (day + "%",)).fetchall():
+        item = stats.setdefault(str(row[0]), {"success": 0, "failed": 0, "today_success": 0, "today_failed": 0})
+        count = int(row[2] or 0)
+        today = int(row[3] or 0)
+        if str(row[1]) == "success":
+            item["success"] += count
+            item["today_success"] += today
+        else:
+            item["failed"] += count
+            item["today_failed"] += today
+    sql = "SELECT task_id, at, status, detail, answer, channel, elapsed_ms FROM game_logs"
+    params = []
+    if task_id:
+        sql += " WHERE task_id=?"
+        params.append(int(task_id))
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(max(1, min(int(limit or 80), 200)))
+    items = [{"task_id": int(row[0]), "at": row[1], "status": row[2], "detail": row[3],
+              "answer": row[4], "channel": row[5], "elapsed_ms": int(row[6] or 0)}
+             for row in db.execute(sql, tuple(params)).fetchall()]
+    return {"stats": stats, "items": items}
 
 
 @app.get("/api/game-tasks")
@@ -9839,11 +9950,11 @@ async def create_game_task(body: GameTaskIn):
     _game_validate(body)
     db = get_account_db()
     cur = db.execute(
-        "INSERT INTO game_tasks(subtype,chat,trigger_kw,sender_filter,prompt,reply_delay,defend_ai,enabled,created_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO game_tasks(subtype,chat,trigger_kw,sender_filter,prompt,reply_delay,defend_ai,enabled,"
+        "wait_others,wait_timeout,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         (body.subtype, body.chat.strip(), body.trigger_kw.strip(), body.sender_filter.strip(),
          body.prompt.strip(), float(body.reply_delay), 1 if body.defend_ai else 0,
-         1 if body.enabled else 0, int(time.time())))
+         1 if body.enabled else 0, 1 if body.wait_others else 0, int(body.wait_timeout), int(time.time())))
     db.commit()
     return {"id": cur.lastrowid}
 
@@ -9854,9 +9965,11 @@ async def update_game_task(tid: int, body: GameTaskIn):
     db = get_account_db()
     if db.execute("SELECT 1 FROM game_tasks WHERE id=?", (tid,)).fetchone() is None:
         raise HTTPException(404, "任务不存在")
-    db.execute("UPDATE game_tasks SET chat=?,trigger_kw=?,sender_filter=?,prompt=?,reply_delay=?,defend_ai=?,enabled=? WHERE id=?",
+    db.execute("UPDATE game_tasks SET chat=?,trigger_kw=?,sender_filter=?,prompt=?,reply_delay=?,defend_ai=?,enabled=?,"
+               "wait_others=?,wait_timeout=? WHERE id=?",
                (body.chat.strip(), body.trigger_kw.strip(), body.sender_filter.strip(), body.prompt.strip(),
-                float(body.reply_delay), 1 if body.defend_ai else 0, 1 if body.enabled else 0, tid))
+                float(body.reply_delay), 1 if body.defend_ai else 0, 1 if body.enabled else 0,
+                1 if body.wait_others else 0, int(body.wait_timeout), tid))
     db.commit()
     return {"ok": True}
 

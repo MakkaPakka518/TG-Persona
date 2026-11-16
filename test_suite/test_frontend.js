@@ -1248,6 +1248,12 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('画像监控群'));
     assert(html.includes('grp-search'));
     assert(html.includes('本地 OCR 未命中，已回退 AI'));
+    assert(html.includes('const ocrLines='));
+    assert(html.includes('/api/game-logs'));
+    assert(html.includes('loadGameLogs'));
+    assert(html.includes('今日 成功 '));
+    assert(html.includes('等 1–3 人答对后再跟'));
+    assert(html.includes('gWaitTimeout'));
     assert(html.includes('setGroupFilter('));
     assert(!html.includes("$('#waterAiJobName').focus()"));
     assert(html.includes('datetime-local'));
