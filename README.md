@@ -315,6 +315,15 @@ location / {
 - `on_game_event` 的异常兜底也补写 `last_at/last_detail`，任何异常都不再让任务计数停在 0。
 - `GET /api/game-tasks/{tid}/probe` 增加 `can_send_messages`，自检时能直接看到本账号在该群能不能发言。
 
+## 1.29.18：水群不再写空转日志
+
+- `_run_ai_flock` 在落库前先确认该群有生效中的任务；没有任务的群收到消息时直接返回，不再写 `execution_runs`，日志页不会再被 `skipped / reason 为空` 刷屏。
+
+## 1.29.17：游标在实体解析之后再读
+
+- `_flock_latest_msg_id()` 改为接收已解析的 entity，避免拿 chat_id 字符串取消息时又踩 `Cannot find any entity` 而让游标永远是空、去重失效。
+- 心跳顺序改为「解析实体 → 读最新消息 id → 判断是否重放」，解析失败仍退避 2 分钟。
+
 ## 1.29.16：兜底心跳去重放（没有新消息就不再每分钟说一遍"不说"）
 
 - `_flock_latest_msg_id()` 读取群里最新消息 id，作为心跳游标 `last_msg_id`。

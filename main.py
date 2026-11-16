@@ -2113,7 +2113,13 @@ async def _flock_heartbeat_loop():
                 if len(runtime.ai_flock_busy_groups) >= 2:
                     break
                 now = time.time()
-                latest = await _flock_latest_msg_id(chat)
+                entity = await _flock_ensure_entity(chat)
+                if entity is None:
+                    data["next_wake_at"] = time.time() + 120
+                    _flock_hb_save(source["job_id"], chat, data)
+                    log.info("水群兜底心跳 群=%s 暂不可解析，2 分钟后再试", chat)
+                    continue
+                latest = await _flock_latest_msg_id(entity)
                 wake, delay_to = _flock_hb_needs_wake(data, latest, now)
                 if not wake:
                     data["next_wake_at"] = delay_to
@@ -2123,11 +2129,6 @@ async def _flock_heartbeat_loop():
                     continue
                 data["next_wake_at"] = now + _flock_hb_gap(source) * 60
                 _flock_hb_save(source["job_id"], chat, data)
-                if await _flock_ensure_entity(chat) is None:
-                    data["next_wake_at"] = time.time() + 120
-                    _flock_hb_save(source["job_id"], chat, data)
-                    log.info("水群兜底心跳 群=%s 暂不可解析，2 分钟后再试", chat)
-                    continue
                 runtime.ai_flock_status[chat] = {"job_id": source["job_id"], "chat_id": chat,
                                                  "stage": "heartbeat", "reason": "兜底心跳唤醒",
                                                  "updated_at": time.time()}
@@ -3158,6 +3159,13 @@ def _flock_frequency_ready(chat_id, direct_to_self=False):
 
 
 async def _run_ai_flock(chat_id, trigger_text, direct_to_self=False, *, test_job_id=None, progress=None):
+    if test_job_id is None:
+        # 不落空转日志：群没有生效中的水群任务时直接退出，不写 execution_runs。
+        try:
+            if not _ai_flock_source(str(chat_id)):
+                return None
+        except Exception:
+            return None
     db = get_account_db()
     run = persona_store.start_run(db, kind="ai_flock", name="AI 水群", chat_id=chat_id)
     state = progress if progress is not None else {}

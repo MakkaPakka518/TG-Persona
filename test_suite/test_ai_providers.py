@@ -203,8 +203,11 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.startswith('NO_REPLY'))
         self.b['_call_ai'].assert_awaited_once()
 
-    def test_flock_reply_rejects_bare_numbers_and_symbols(self):
-        for bad in ('8', '98', '?!', '🧧'):
+    def test_flock_reply_rejects_bare_symbols_and_maps_numbers(self):
+        # 纯数字是模型在说"过几分钟"，按不说处理，不再报错。
+        for minutes in ('8', '98'):
+            self.assertEqual(self.b['_flock_reply'](minutes), 'NO_REPLY|0')
+        for bad in ('?!', '🧧'):
             with self.assertRaises(ValueError):
                 self.b['_flock_reply'](bad)
         self.assertEqual(self.b['_flock_split'](self.b['_flock_reply']('嗯 行'))[2], '嗯 行')
