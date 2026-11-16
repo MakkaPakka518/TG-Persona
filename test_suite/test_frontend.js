@@ -1236,10 +1236,15 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('只看未固定'));
     assert(html.includes('pinned_count'));
     assert(html.includes('把这段记忆钉住'));
-    assert(html.includes('peopleEnabled'));
+    assert(html.includes('peopleNormalEnabled'));
+    assert(html.includes('peopleWhiteEnabled'));
+    assert(html.includes('peopleHistoryEnabled'));
+    assert(html.includes('近到远翻群历史'));
+    assert(html.includes('waterAiPeopleRefHint'));
+    assert(html.includes('人物画像命中'));
     assert(html.includes("/api/ai/flock/people"));
     assert(html.includes('loadPeople()'));
-    assert(html.includes('人物记忆'));
+    assert(html.includes('记录白名单'));
     assert(html.includes('人物画像'));
     assert(html.includes('备注：这是谁'));
     assert(html.includes('savePerson('));
