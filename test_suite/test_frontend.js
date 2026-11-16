@@ -1019,8 +1019,9 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert.strictEqual(requests[0][1].enabled,1);
   });
   await test('兑换码抢注只能选一个群，保存固定Bot和现有接力配置',async()=>{
-    const select=html.match(/<select\b[^>]*id="crGroup"[^>]*>/)[0];
-    assert(!select.includes('multiple'));assert(select.includes('required'));
+    const groupInput=html.match(/<input\b[^>]*id="crGroup"[^>]*>/)[0];
+    assert(groupInput.includes('type="hidden"'));(function(){const m=html.match(/<input\b[^>]*id="crGroupSearch"[^>]*>/);assert(m&&m[0].includes('oninput'))})();
+    assert(html.includes('id="crGroupPicker"'));
     ex("selectedAccount='default';accountEpoch++;cancelAutoEdit('code_register')");
     assert.strictEqual(q('#crGroup').value,'');assert.strictEqual(q('#crMode').value,'1');
     assert.strictEqual(q('#crWait').value,'3');assert.strictEqual(q('#crExisting').value,'无法启用续期功能');
@@ -1254,6 +1255,12 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('今日 成功 '));
     assert(html.includes('等 1–3 人答对后再跟'));
     assert(html.includes('gWaitTimeout'));
+    assert(html.includes('id="crGroupSearch"'));
+    assert(html.includes('没有匹配的群'));
+    assert(html.includes('id="crGroupPicker"'));
+    assert(html.includes('pickCodeGroup('));
+    assert(html.includes(`data-k="game"`));
+    assert(html.includes('loadGameLogsPage'));
     assert(html.includes('setGroupFilter('));
     assert(!html.includes("$('#waterAiJobName').focus()"));
     assert(html.includes('datetime-local'));
