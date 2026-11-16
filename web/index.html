@@ -1535,6 +1535,11 @@ section.act,.fold.open .fold-b{animation:none}
           </div>
           <pre id="updLog" class="hint" style="white-space:pre-wrap;display:none;margin-top:12px;max-height:260px;overflow:auto"></pre>
           <div class="hint">更新会自动备份当前文件到 data/backup-时间戳,再拉取仓库最新文件并重启服务;data 数据和 venv 不受影响。</div>
+          <label for="ghToken">GitHub 访问令牌（私库更新用，只需对该仓库只读）</label>
+          <input type="password" id="ghToken" autocomplete="off" placeholder="粘贴 token 后点保存；留空保存等于清除">
+          <div class="hint" id="ghTokenState">令牌状态加载中…</div>
+          <div class="flex" style="margin-top:8px"><button class="ghost" type="button" onclick="saveGithubToken()">保存令牌</button></div>
+          <div class="hint">仓库转私库后，公开接口会 404，这里填一个只有该仓库 Read 权限、无过期时间的 token，检查更新和拉取文件都会带上它。令牌只存本机数据库，面板只显示末四位。</div>
           <h4 style="margin:16px 0 8px">备份管理</h4>
           <div class="hint" id="backupsInfo" aria-live="polite">尚未加载备份列表</div>
           <div class="hint" id="backupsReason">请先查看备份；清理只删除备份，不删除数据库、会话或 venv。</div>
@@ -2115,13 +2120,30 @@ function goTab(t){
   if(t==='autos')loadAutos();
   if(t==='groups')loadDialogs();
   if(t==='logs')loadLogs();
-  if(t==='settings'){renderTgCard();loadUpd(false)}
+  if(t==='settings'){renderTgCard();loadUpd(false);loadGithubToken()}
 }
 function foldToggle(el){
   el.closest('.fold').classList.toggle('open');
 }
 
 // ---------- 系统更新 ----------
+async function loadGithubToken(){
+  try{
+    const d=await api('/api/github-token');
+    const el=$('#ghTokenState');
+    if(el)el.textContent=d.configured?('已配置 · 末尾 '+String(d.tail||'')+' · 仓库 '+String(d.repo||'')):'未配置（公开仓库不需要；转私库后必须填）';
+  }catch(e){const el=$('#ghTokenState');if(el)el.textContent='令牌状态读取失败：'+e.message}
+}
+async function saveGithubToken(){
+  const input=$('#ghToken'),token=input?input.value.trim():'';
+  try{
+    const d=await api('/api/github-token',{method:'PUT',body:JSON.stringify({token})});
+    if(input)input.value='';
+    toast(d.configured?'已保存 GitHub 令牌':'已清除 GitHub 令牌');
+    loadGithubToken();
+  }catch(e){toast(e.message,true)}
+}
+
 let updTimer=null, updPolling=false;
 let backupsBusy=false, backupsCleanupAllowed=false, backupsCount=0, backupsUpdateBusy=false;
 function backupBytes(value){

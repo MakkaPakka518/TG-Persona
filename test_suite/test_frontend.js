@@ -1262,6 +1262,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('loadGameLogsPage'));
     assert(html.includes('openedGameIds'));
     assert(html.includes('gameLastResult'));
+    assert(html.includes('id="ghToken"'));
+    assert(html.includes('/api/github-token'));
     assert(html.includes('最近执行：'));
     assert(html.includes('setGroupFilter('));
     assert(!html.includes("$('#waterAiJobName').focus()"));

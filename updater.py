@@ -83,8 +83,37 @@ def _log(msg):
         _state()
 
 
+_TOKEN_CACHE = {"value": None}
+
+
+def refresh_token():
+    """面板保存/清除令牌后清缓存，下一次拉取立即生效。"""
+    _TOKEN_CACHE["value"] = None
+
+
+def _github_token():
+    """面板设置里的 GitHub 只读令牌，私库更新用；读不到就按公开库处理。"""
+    if _TOKEN_CACHE["value"] is not None:
+        return _TOKEN_CACHE["value"]
+    try:
+        import sqlite3
+        with sqlite3.connect(str(DATA / "config.db")) as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key='github_token'").fetchone()
+        token = str(row[0] or "").strip() if row else ""
+        token = token if token and "\n" not in token else ""
+        _TOKEN_CACHE["value"] = token
+        return token
+    except Exception:
+        return ""
+
+
 def _http_get(url, timeout=30, limit=MAX_ARCHIVE):
-    req = urllib.request.Request(url, headers={"User-Agent": "tg-persona-updater"})
+    headers = {"User-Agent": "tg-persona-updater"}
+    token = _github_token()
+    if token:
+        headers["Authorization"] = "Bearer " + token
+        headers["Accept"] = "application/vnd.github+json"
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as response:
         blob = response.read(limit + 1)
     if len(blob) > limit:

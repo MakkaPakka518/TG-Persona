@@ -11859,6 +11859,28 @@ class BackupCleanupInput(BaseModel):
     keep: int = Field(1, ge=0, le=20, strict=True)
 
 
+class GithubTokenInput(BaseModel):
+    token: str = Field("", max_length=255)
+
+
+@app.get("/api/github-token")
+async def get_github_token():
+    """只回报是否已配置和末四位，避免令牌在面板回显。"""
+    token = str(get_setting("github_token", "") or "").strip()
+    return {"configured": bool(token), "tail": token[-4:] if token else "",
+            "repo": updater.REPO, "branch": updater.BRANCH}
+
+
+@app.put("/api/github-token")
+async def set_github_token(body: GithubTokenInput):
+    token = body.token.strip()
+    if token and not re.fullmatch(r"[A-Za-z0-9_\-]{20,255}", token):
+        raise HTTPException(400, "令牌格式不对：粘贴 GitHub 生成的 token（20 位以上字母数字）")
+    set_setting("github_token", token)
+    updater.refresh_token()
+    return {"configured": bool(token), "tail": token[-4:] if token else ""}
+
+
 @app.get("/api/backups")
 async def get_backup_files():
     try:
