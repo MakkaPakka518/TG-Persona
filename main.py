@@ -3142,7 +3142,7 @@ def _flock_frequency_ready(chat_id, direct_to_self=False):
         if now_epoch < wake_at:
             # 群里有人说话不该干等心跳：距上次评估超过 90 秒就重新评估一轮。
             last_msg = float(data.get("last_msg_at") or 0)
-            if now_epoch - last_msg >= 90:
+            if last_msg and now_epoch - last_msg >= 90:
                 data["last_msg_at"] = now_epoch
                 data["next_wake_at"] = now_epoch + _flock_hb_gap(source) * 60
                 _flock_hb_save(job_id, key, data)
