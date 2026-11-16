@@ -208,7 +208,8 @@ def db_init(database=None):
         CREATE TABLE IF NOT EXISTS people_profiles (
             tg_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
             note TEXT NOT NULL DEFAULT '', profile TEXT NOT NULL DEFAULT '',
-            updated_at INTEGER NOT NULL DEFAULT 0, samples INTEGER NOT NULL DEFAULT 0
+            updated_at INTEGER NOT NULL DEFAULT 0, samples INTEGER NOT NULL DEFAULT 0,
+            last_id INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS memory_refs (
             block_id TEXT PRIMARY KEY, file TEXT NOT NULL,
@@ -396,6 +397,12 @@ def db_init(database=None):
                      ("knowledge_on_demand", "INTEGER NOT NULL DEFAULT 0")):
         try:
             conn.execute(f"ALTER TABLE ai_flock_sessions ADD COLUMN {col} {ddl}")
+        except sqlite3.OperationalError:
+            pass
+    for col, ddl in (("note", "TEXT NOT NULL DEFAULT ''"),
+                     ("last_id", "INTEGER NOT NULL DEFAULT 0")):
+        try:
+            conn.execute(f"ALTER TABLE people_profiles ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
             pass
     for col, ddl in (("context_messages", "INTEGER NOT NULL DEFAULT 6"),
@@ -3263,6 +3270,34 @@ def _people_profile_on():
     return get_setting("flock_people_profile_enabled", "0") == "1"
 
 
+def _people_auto_on():
+    return get_setting("flock_people_auto_distill", "0") == "1"
+
+
+_PEOPLE_RUNNING = set()
+PEOPLE_SAMPLE_STEP = 10
+
+
+def _people_schedule(tg_id):
+    """白名单人物攒够 10 条新发言就后台蒸馏一次，不阻塞消息处理。"""
+    tg_id = str(tg_id or "")
+    if tg_id not in _people_ids():
+        return False
+    if not (_people_on() and _people_profile_on() and _people_auto_on()):
+        return False
+    db = get_account_db()
+    row = db.execute("SELECT last_id FROM people_profiles WHERE tg_id=?", (tg_id,)).fetchone()
+    cursor = int(row[0] or 0) if row else 0
+    fresh = db.execute("SELECT COUNT(*) FROM people_memory WHERE tg_id=? AND id>?", (tg_id, cursor)).fetchone()[0]
+    if int(fresh or 0) < PEOPLE_SAMPLE_STEP:
+        return False
+    try:
+        asyncio.create_task(_people_distill_one(tg_id))
+    except RuntimeError:
+        return False
+    return True
+
+
 def _people_ids():
     raw = str(get_setting("flock_people_whitelist", "") or "")
     return [item for item in re.split(r"[,\s，]+", raw) if item.strip().isdigit()][:60]
@@ -3340,40 +3375,61 @@ def _people_block(pairs, budget=None):
     return "\n".join(blocks)[:max(0, budget)]
 
 
-async def _people_distill(force=False):
-    """把白名单人物最近发言蒸馏成 2-4 句画像；只勾了画像开关或手动触发才跑。"""
-    if not force and not (_people_on() and _people_profile_on()):
+async def _people_distill_one(tg_id, force=False):
+    """一次蒸馏一个样本：把新发言合并进旧画像，可无限叠加。"""
+    tg_id = str(tg_id or "")
+    if not tg_id or tg_id in _PEOPLE_RUNNING:
         return 0
-    db = get_account_db()
-    done = 0
-    for tg_id in _people_ids():
-        rows = db.execute("SELECT name, text FROM people_memory WHERE tg_id=? ORDER BY id DESC LIMIT 30",
-                          (tg_id,)).fetchall()
-        if len(rows) < 6:
-            continue
-        cached = db.execute("SELECT samples FROM people_profiles WHERE tg_id=?", (tg_id,)).fetchone()
-        if cached and int(cached[0] or 0) >= len(rows) and not force:
-            continue
-        name = next((str(item[0]) for item in rows if item[0]), "群友")
-        body = "\n".join("- " + str(item[1]) for item in rows[::-1])
+    _PEOPLE_RUNNING.add(tg_id)
+    try:
+        db = get_account_db()
+        saved = db.execute("SELECT profile, samples FROM people_profiles WHERE tg_id=?", (tg_id,)).fetchone()
+        old_profile = str(saved[0] or "") if saved else ""
+        cursor = 0
+        if not force:
+            hit = db.execute("SELECT last_id FROM people_profiles WHERE tg_id=?", (tg_id,)).fetchone()
+            cursor = int(hit[0] or 0) if hit else 0
+        rows = db.execute("SELECT id, name, text FROM people_memory WHERE tg_id=? AND id>? ORDER BY id DESC LIMIT 30",
+                          (tg_id, cursor)).fetchall()
+        if len(rows) < (1 if force else PEOPLE_SAMPLE_STEP):
+            return 0
+        name = next((str(item[1]) for item in rows if item[1]), "群友")
+        body = "\n".join("- " + str(item[2]) for item in rows[::-1])
+        prompt = ("你在给 AI 助手维护群友的人物画像。下面是这个人最近的新发言，"
+                  "用 2-4 句中文写他常聊什么、说话什么风格、在意什么、和谁熟。"
+                  "不评价人品，不编造事实，不要标题和解释。\n\n新发言：\n" + body)
+        if old_profile:
+            prompt += ("\n\n这是他已有的画像，请在此基础上合并补充，输出合并后的完整画像，"
+                       "不要丢掉仍然成立的信息，也不要照抄原句：\n" + old_profile)
         try:
-            reply = await _call_ai_any(
-                "你在给 AI 助手整理群友的人物画像。只看下面这些发言，输出 2-4 句中文，"
-                "写这个人常聊什么、说话什么风格、在意什么、和谁熟。不评价人品，不编造事实，"
-                "不要标题、不要解释、不要重复原文。\n\n发言：\n" + body,
-                max_tokens=256, feature="people")
+            reply = await _call_ai_any(prompt, max_tokens=256, feature="people")
         except Exception:
             log.warning("人物画像蒸馏失败 tg=%s", tg_id, exc_info=True)
-            continue
+            return 0
         text = str(reply or "").strip()
         if not text:
-            continue
-        db.execute("""INSERT INTO people_profiles (tg_id, name, profile, updated_at, samples) VALUES (?, ?, ?, ?, ?)
+            return 0
+        new_last = max(int(item[0]) for item in rows)
+        total = int(saved[1] or 0) if saved else 0
+        db.execute("""INSERT INTO people_profiles (tg_id, name, note, profile, updated_at, samples, last_id)
+                      VALUES (?, ?, '', ?, ?, ?, ?)
                       ON CONFLICT(tg_id) DO UPDATE SET name=excluded.name, profile=excluded.profile,
-                      updated_at=excluded.updated_at, samples=excluded.samples""",
-                   (tg_id, name, text[:400], int(time.time()), len(rows)))
-        done += 1
-    db.commit()
+                      updated_at=excluded.updated_at, samples=excluded.samples, last_id=excluded.last_id""",
+                   (tg_id, name, text[:400], int(time.time()), total + len(rows), new_last))
+        db.commit()
+        return len(rows)
+    finally:
+        _PEOPLE_RUNNING.discard(tg_id)
+
+
+async def _people_distill(force=False):
+    """手动「生成画像」：对白名单逐个跑一次合并蒸馏。非白名单永不蒸馏。"""
+    if not force and not (_people_on() and _people_profile_on()):
+        return 0
+    done = 0
+    for tg_id in _people_ids():
+        if await _people_distill_one(tg_id, force=True):
+            done += 1
     return done
 
 
@@ -3834,8 +3890,8 @@ async def _collect_learning_event(event, role):
     _learning_filter_record(keep, reason, tag, key, text)
     if not keep:
         return
-    if person is not None:
-        _people_capture(person, key, text)
+    if person is not None and _people_capture(person, key, text):
+        _people_schedule(getattr(person, "id", ""))
     _store_learning_samples([(time.time(), key, text, role)])
 
 
@@ -10143,6 +10199,7 @@ class PeopleMemoryInput(BaseModel):
     white_window: int = Field(7200, ge=60, le=86400)
     budget: int = Field(PEOPLE_BUDGET, ge=100, le=4000)
     whitelist: str = Field("", max_length=2000)
+    auto_distill: bool = False
 
 
 @app.get("/api/ai/flock/people")
@@ -10153,7 +10210,7 @@ async def get_people_memory():
     profiles = {str(item[0]): (item[1] or "", int(item[2] or 0), item[3] or "", item[4] or "")
                 for item in db.execute("SELECT tg_id, profile, updated_at, note, name FROM people_profiles").fetchall()}
     white = _people_ids()
-    return {"enabled": _people_on(), "profile": _people_profile_on(),
+    return {"enabled": _people_on(), "profile": _people_profile_on(), "auto_distill": _people_auto_on(),
             "lines": _people_limits("")[0], "white_lines": PEOPLE_WHITE_LINES,
             "window": int(get_setting("flock_people_window", "1800") or 1800),
             "white_window": int(get_setting("flock_people_white_window", "7200") or 7200),
@@ -10170,6 +10227,7 @@ async def get_people_memory():
 async def put_people_memory(body: PeopleMemoryInput):
     set_setting("flock_people_memory_enabled", "1" if body.enabled else "0")
     set_setting("flock_people_profile_enabled", "1" if body.profile else "0")
+    set_setting("flock_people_auto_distill", "1" if body.auto_distill else "0")
     set_setting("flock_people_lines", str(body.lines))
     set_setting("flock_people_white_lines", str(body.white_lines))
     set_setting("flock_people_window", str(body.window))
