@@ -2035,18 +2035,20 @@ async def _warm_flock_entities():
 FLOCK_HB_IDLE_GAP = 8 * 60
 
 
-async def _flock_latest_msg_id(chat):
-    """群里最新一条消息 id，用来判断兜底心跳是不是在空转重放。"""
+async def _flock_latest_probe(entity):
+    """群里最新一条消息的 id 与正文：既判断有没有新消息，也把新消息交给模型当触发。"""
     runtime = get_runtime()
     if getattr(runtime, "client", None) is None:
-        return None
+        return None, ""
     try:
-        messages = await asyncio.wait_for(runtime.client.get_messages(chat, limit=1), timeout=12)
+        messages = await asyncio.wait_for(runtime.client.get_messages(entity, limit=1), timeout=12)
     except Exception:
-        return None
+        return None, ""
     if not messages:
-        return 0
-    return int(getattr(messages[0], "id", 0) or 0)
+        return 0, ""
+    message = messages[0]
+    return (int(getattr(message, "id", 0) or 0),
+            str(getattr(message, "message", "") or "").strip()[:200])
 
 
 def _flock_hb_needs_wake(data, latest, now):
@@ -2119,8 +2121,10 @@ async def _flock_heartbeat_loop():
                     _flock_hb_save(source["job_id"], chat, data)
                     log.info("水群兜底心跳 群=%s 暂不可解析，2 分钟后再试", chat)
                     continue
-                latest = await _flock_latest_msg_id(entity)
+                seen_before = int(data.get("last_msg_id") or 0)
+                latest, latest_text = await _flock_latest_probe(entity)
                 wake, delay_to = _flock_hb_needs_wake(data, latest, now)
+                new_msg = bool(latest) and latest > seen_before
                 if not wake:
                     data["next_wake_at"] = delay_to
                     _flock_hb_save(source["job_id"], chat, data)
@@ -2133,7 +2137,7 @@ async def _flock_heartbeat_loop():
                                                  "stage": "heartbeat", "reason": "兜底心跳唤醒",
                                                  "updated_at": time.time()}
                 log.info("水群兜底心跳 群=%s 任务=%s", chat, source.get("job_id"))
-                runtime.spawn(_run_ai_flock(chat, ""))
+                runtime.spawn(_run_ai_flock(chat, latest_text if new_msg else ""))
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -3136,6 +3140,14 @@ def _flock_frequency_ready(chat_id, direct_to_self=False):
             _flock_hb_save(job_id, key, data)
             return True
         if now_epoch < wake_at:
+            # 群里有人说话不该干等心跳：距上次评估超过 90 秒就重新评估一轮。
+            last_msg = float(data.get("last_msg_at") or 0)
+            if now_epoch - last_msg >= 90:
+                data["last_msg_at"] = now_epoch
+                data["next_wake_at"] = now_epoch + _flock_hb_gap(source) * 60
+                _flock_hb_save(job_id, key, data)
+                log.info("水群消息驱动 群=%s 有人在说，提前评估一轮", key)
+                return True
             progress = {"job_id": job_id, "chat_id": key}
             _flock_stage(progress, "waiting_wake",
                          "下次唤醒 %s（约 %d 分钟后）" % (time.strftime("%H:%M", time.localtime(wake_at)),
@@ -3320,9 +3332,9 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
                     gap_text = "你上次在这个群说话是 %d 分钟前。" % max(0, int((time.time() - float(last_spoke)) / 60))
                 instruction += (
                     "\n这一轮由你自己决定要不要开口。" + gap_text +
-                    "不想说、插不上、别人已经在答了、跟你没关系，就输出 SKIP 加一个数字（2 到 30），"
-                    "表示过几分钟再来看。要说就输出“数字|你要说的话”，数字是下次多久再来。"
-                    "只输出这一行，不要解释你为什么说或者不说。"
+                    "只有在话题跟你完全无关、群里正在吵架、或你刚说完整段话没人接时才输出 SKIP 加一个数字（2 到 30）；"
+                    "只要群友在聊的内容你能接一句，就直接说，格式是“数字|你要说的话”，数字是下次多久再来。"
+                    "只输出这一行，不要解释。"
                 )
         used_ids = []
         skill_slice = _skill_reference(skill_chars, key, trigger_text, used_sink=used_ids)
@@ -3390,8 +3402,9 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
                 instruction += ("\n当前触发消息：" + json.dumps(trigger, ensure_ascii=False)
                                 + ("。这是直接回复你的消息，可以自然接话。" if direct_to_self else "。根据聊天语境决定是否参与。"))
             else:
-                instruction += ("\n这一轮没有新消息，是你自己想起来看一眼群里最近的聊天。自己判断要不要开口，"
-                                "要开口就接着最近的话题自然说一句，不要复述别人的话。")
+                instruction += ("\n这一轮没有新消息，是你自己想起来看一眼群里最近的聊天。"
+                                "最近的话题还能接一句就接，用“数字|你要说的话”；真的插不上才 SKIP。"
+                                "不要复述别人的话。")
             # 心跳模式下"该不该说"已经交给模型，这段不能再说"程序已决定让你说"。
             if source.get("active_mode"):
                 instruction += "\n本轮是积极时段，程序已按消息间隔与小时上限放行：直接开口，不要输出 NO_REPLY 或 SKIP。"
