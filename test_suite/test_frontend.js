@@ -1243,7 +1243,9 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('waterAiPeopleRefHint'));
     assert(html.includes('peopleHistoryStart'));
     assert(html.includes('消息记忆'));
-    assert(html.includes('人物画像（可选，只对白名单）'));
+    assert(html.includes('id="peopleProfileCard"'));
+    assert(html.includes('id="peopleMemoryCard"'));
+    assert(/id="flockLearningCard"/.test(html)&&/id="peopleMemoryCard"/.test(html));
     assert(html.includes('peopleGroups'));
     assert(html.includes('画像监控群'));
     assert(html.includes('grp-search'));
