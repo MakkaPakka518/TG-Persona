@@ -2041,28 +2041,32 @@ async def _flock_latest_probe(entity):
     if getattr(runtime, "client", None) is None:
         return None, ""
     try:
-        messages = await asyncio.wait_for(runtime.client.get_messages(entity, limit=1), timeout=12)
+        messages = await asyncio.wait_for(runtime.client.get_messages(entity, limit=5), timeout=12)
     except Exception:
         return None, ""
     if not messages:
         return 0, ""
-    message = messages[0]
-    return (int(getattr(message, "id", 0) or 0),
-            str(getattr(message, "message", "") or "").strip()[:200])
+    for message in messages:
+        if getattr(message, "out", False):
+            continue
+        if getattr(message, "via_bot", None) is not None or getattr(message, "action", None) is not None:
+            continue
+        sender = getattr(message, "sender", None)
+        if sender is not None and getattr(sender, "bot", False):
+            continue
+        return (int(getattr(message, "id", 0) or 0),
+                str(getattr(message, "message", "") or "").strip()[:200])
+    return 0, ""
 
 
 def _flock_hb_needs_wake(data, latest, now):
-    """没有新消息时把重放间隔拉到 FLOCK_HB_IDLE_GAP，避免每分钟重复"不说"。"""
+    """只有出现真人新消息才唤醒；没人说话就只推迟，不调模型、不写日志。"""
     if latest is None:
         return True, 0.0
     seen = int(data.get("last_msg_id") or 0)
-    if seen and latest <= seen:
-        idle_at = float(data.get("last_idle_probe") or 0)
-        if now - idle_at < FLOCK_HB_IDLE_GAP:
-            return False, idle_at + FLOCK_HB_IDLE_GAP
-        data["last_idle_probe"] = now
-    if latest > seen:
-        data["last_msg_id"] = latest
+    if not latest or latest <= seen:
+        return False, now + FLOCK_HB_IDLE_GAP
+    data["last_msg_id"] = latest
     return True, 0.0
 
 

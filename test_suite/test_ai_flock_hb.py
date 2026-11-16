@@ -89,14 +89,21 @@ class FlockIdleReproTests(unittest.TestCase):
         data = {'last_msg_id': 120, 'last_idle_probe': now - 60}
         wake, delay = self.b['_flock_hb_needs_wake'](data, 120, now)
         self.assertFalse(wake)
-        self.assertEqual(delay, data['last_idle_probe'] + self.gap)
+        self.assertEqual(delay, now + self.gap)
 
-    def test_no_new_message_after_gap_allows_once(self):
+    def test_no_new_message_never_wakes_even_after_gap(self):
+        # 没人说话就不该再花钱问模型"要不要开口"。
         now = 2000.0
         data = {'last_msg_id': 120, 'last_idle_probe': now - self.gap - 5}
         wake, delay = self.b['_flock_hb_needs_wake'](data, 120, now)
-        self.assertTrue(wake)
-        self.assertEqual(data['last_idle_probe'], now)
+        self.assertFalse(wake)
+        self.assertGreaterEqual(delay, now)
+
+    def test_bot_only_traffic_counts_as_silence(self):
+        now = 3000.0
+        data = {'last_msg_id': 0}
+        wake, delay = self.b['_flock_hb_needs_wake'](data, 0, now)
+        self.assertFalse(wake)
 
     def test_unknown_latest_keeps_old_behaviour(self):
         data = {}

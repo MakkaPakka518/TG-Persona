@@ -315,6 +315,12 @@ location / {
 - `on_game_event` 的异常兜底也补写 `last_at/last_detail`，任何异常都不再让任务计数停在 0。
 - `GET /api/game-tasks/{tid}/probe` 增加 `can_send_messages`，自检时能直接看到本账号在该群能不能发言。
 
+## 1.29.21：只认真人发言，安静群不再花钱问"要不要开口"
+
+- `_flock_latest_probe()` 取最近 5 条，跳过自己发的（`out`）、机器人转发的（`via_bot`）、系统动作（`action`）、以及 `sender.bot` 为真的消息，只把真人发言当作"有新消息"。
+- `_flock_hb_needs_wake()` 改为严格模式：没有真人新消息就只把 `next_wake_at` 往后推 8 分钟，**不唤醒、不调模型、不写日志**。原先"偶尔自己想开口"的空转彻底取消。
+- 群里安静时不再产生「模型选择不说」记录，也不再消耗 token。
+
 ## 1.29.20：心跳把新消息当触发，放宽 SKIP 门槛
 
 - 心跳探测改 `_flock_latest_probe()`：同时拿消息 id 与正文，有新消息时把正文作为 `trigger_text` 传给模型，不再以「你自己想起来看一眼」的空触发开场。
