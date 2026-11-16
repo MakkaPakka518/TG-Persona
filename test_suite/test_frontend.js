@@ -1246,6 +1246,14 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('id="peopleProfileCard"'));
     assert(html.includes('id="peopleMemoryCard"'));
     assert(html.includes("loadGithubToken();loadPeople()"));
+    assert(html.includes('peopleStatusBox'));
+    assert(html.includes('renderPeopleStatus'));
+    assert(html.includes('已有画像 '));
+    assert(html.includes('friendsUploadEnabled'));
+    assert(html.includes('/api/ai/flock/friends/upload'));
+    assert(html.includes('renderFriendsUpload'));
+    assert(html.includes('friends.md 引用预算'));
+    assert(html.includes('重建 friends.md'));
     assert(/id="flockLearningCard"/.test(html)&&/id="peopleMemoryCard"/.test(html));
     assert(html.includes('peopleGroups'));
     assert(html.includes('画像监控群'));

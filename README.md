@@ -238,6 +238,24 @@ location / {
 
 空间显示为文件逻辑大小，不等同于真实磁盘分配块。删除途中若权限/I/O 出错会停止，可能已有部分备份删除，需重新查看列表。功能不会自动清理，也不会替用户判断新版本是否稳定。
 
+## 1.29.5：人物画像加「任务详情」状态块
+
+- 人物画像卡片底部新增和学习区同一套样式的状态块：是否启用、白名单人数、已有画像人数、累计样本条数、
+  记录过多少人、最近蒸馏时间、自动蒸馏开关、历史蒸馏时间段、上一轮时间与结果、已有游标的群数。
+- 后端 `GET /api/ai/flock/people` 补回 `whitelist_count/profile_total/sample_total/distilled/last_profile_at/
+  history_cursors/history_last_at/history_last_note` 这些统计；历史蒸馏每跑完一轮都会记下这次扫描了几个群、蒸馏了几个人。
+- 状态块样式沿用 `.learning-status`：正常运行时圆点绿色，未启用/无群时黄色。
+
+### 1.29.5 追加：friends.md（白名单人物画像文件）
+
+- 人物画像原本只存在 `data/config.db` 的 `people_profiles` 表（字段 tg_id/name/note/profile/updated_at/samples/last_id/history_ts）。
+  现在每次蒸馏完会同步生成 `friends.md`（仓库根目录，部署后是 `/opt/tg-persona/friends.md`），只收白名单人物的画像。
+- AI 水群真正引用这个文件：prompt 里加一段 friends.md 内容（按 1600 字预算切前几个人），单独记在 `references.friends`，
+  和 people 注入并存，标注「只作背景、不要逐字复述」。
+- 面板里能定时把 friends.md 导出到 TG 收藏夹：开关 + 时间（默认 23:00）+ 账号，成功后在收藏夹留
+  `tg-persona-friends-YYYYMMDD-HHMM.md`，只保留最近 3 份；也有「立即导出」和「重建 friends.md」按钮。
+- 相关接口：`GET/PUT /api/ai/flock/friends/upload`、`POST /api/ai/flock/friends/upload/run`、`POST /api/ai/flock/friends/rebuild`。
+
 ## 1.29.4：AI 水群与学习忽略机器人消息
 
 - 群里 bot 发的消息不再进 AI 水群判断、不进从众跟风的计数，也不进学习样本（普通/鲸鱼/深度学习都一样）。
