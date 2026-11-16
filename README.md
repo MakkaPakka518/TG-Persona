@@ -304,6 +304,59 @@ location / {
   仓库转私库后公开接口 404 也能正常检查/拉取。
 - 令牌格式做基础校验（20 位以上字母数字/下划线/连字符），保存后立即清缓存生效，不用重启。
 
+## 1.29.11：群游戏失败不再静默（禁言场景）
+
+- 线上实测定位：题目每小时都进了处理函数、OCR 也出了答案，但最后一步 `send_message` 抛
+  `UserBannedInChannelError`（该群禁止本账号发言），异常被外层兜住、`total` / `failed` 都没写，于是面板一直显示「共 0 次」。
+- 修复：`_game_poem_handle` 发送环节单独捕获 `UserBannedInChannelError` / `ChatWriteForbiddenError` /
+  `ChatAdminRequiredError` 与其它异常，统一走 `_game_mark_failed` 落库（`last_at` / `last_detail` / `failed+1` 并写 `game_logs`），
+  面板会直接显示「上次失败 · 该群禁止你发言」以及识别到的答案。
+- 答题前先 `get_permissions(chat,'me')` 预检 `can_send_messages`，被禁言时直接记失败并跳过，不再白跑一次 OCR。
+- `on_game_event` 的异常兜底也补写 `last_at/last_detail`，任何异常都不再让任务计数停在 0。
+- `GET /api/game-tasks/{tid}/probe` 增加 `can_send_messages`，自检时能直接看到本账号在该群能不能发言。
+
+## 1.29.13：AI 水群积极模式（指定时段热情多聊）
+
+- 新增全局「积极模式」：`flock_active_enabled` / `flock_active_start` / `flock_active_end`，按北京时间判断，支持跨午夜（结束时间早于开始时间自动视为第二天）。
+- 积极时段内自动调整：每小时发言上限按 2 倍（至少 +10，封顶 60）；被回复后活跃分钟翻倍（至少 10）；临时关闭「不干预模式」，不再由模型自己 SKIP。
+- 提示词注入 `FLOCK_ACTIVE_PROMPT`：心情最好、主动接话、优先回答提问、可以起话题和追问，明确禁止输出 `NO_REPLY` / `SKIP`。
+- 新增接口 `GET/PUT /api/ai/flock/active`；面板「AI 水群」卡片顶部加开关 + 起止时间 + 状态行（显示当前是否处于积极时段）+ 保存按钮。
+- 时段外行为与原来完全一致，不影响任务自身的生效时间。
+
+## 1.29.12：人物画像蒸馏修复（provider 传参类型 + 失败可见）
+
+- 根因：`_people_distill_batch` 把 `flock_people_provider_ids` 用 `_csv()` 拆成 **list** 后直接传给 `_call_ai_any`，
+  而 `_ordered_ai_providers` 用 `str(provider_ids).split(",")` 解析，list 会被转成 `"['bed658…']"`，导致候选 provider 过滤成空，
+  抛 `ValueError: 请先在设置中添加并启用 AI API` —— 蒸馏全部失败、`people_profiles` 永远是旧画像或没有画像。
+- 新增 `_provider_sel()` 统一解析，`_ordered_ai_providers` 与 `_has_ai_providers` 同时兼容 list / 逗号字符串。
+- 蒸馏失败写 `flock_people_last_error`（时间 + 原因），成功时清空；`GET /api/ai/flock/people` 返回 `last_error` 与 `auto_step`，
+  前端状态行显示「上次失败 …」，列表里没有画像的人显示真实阈值（默认 10 条新发言）而不是写死的 5 条。
+- 列表行文案改为「保留 N 条（累计 M 条）」，避免误以为到 20 条就停止统计（白名单每人按 `白名单保留` 条数滚动裁剪，累计数在 `people_profiles.samples`）。
+
+## 1.29.11：群游戏发送失败不再静默（禁言 / 无发言权限 / 异常）
+
+- 根因：账号在目标群被禁言时，`send_message` 抛 `UserBannedInChannelError`，异常直接冒到 `on_game_event`，
+  而累计次数与 `last_at` 是在发送成功之后才写，所以面板永远显示「共 0 次」，日志里只有一条 `群游戏处理失败`。
+- 发送阶段改为分类捕获：`UserBannedInChannelError`（群禁言）、`ChatWriteForbiddenError`（无发言权限）、
+  `ChatAdminRequiredError`（需管理员）、其它异常，统一走 `_game_mark_failed` 写 `last_at / last_status=failed / last_detail / failed+1` 并落一条 `game_log`。
+- 答题前先查 `get_permissions(chat, "me").can_send_messages`，不可发言时直接记失败原因，不再白白跑一次 OCR。
+- `on_game_event` 的兜底异常也写一条失败状态，任何异常都不会再变成面板上的「0 次」。
+- `GET /api/game-tasks/{tid}/probe` 返回值新增 `runtime.can_send_messages`，配合卡片上的「自检最近消息」可直接确认是否被禁言。
+
+## 1.29.10：群游戏 0 触发排查工具与判定顺序修正
+
+- 群游戏判定顺序改为「先关键词、后出题人」：群友正常聊天不再被逐条打成「出题人未匹配」（同群同任务 60 秒去重），日志只在看起来像题目的消息上出现。
+- 新增只读诊断接口 `GET /api/game-tasks/{tid}/probe?limit=n`：返回该任务配置、账号运行状态（是否连接 / 是否暂停）以及最近 n 条消息按「关键词 / 出题人」两段判定，一次看清卡在哪一环。
+- 古诗任务卡片展开区新增「自检最近消息」按钮，点击把判定结果直接打印在卡片里，不用再去翻日志。
+- 结论：`on_game_event` 不读 `watched_groups`，群游戏**不需要**该群在监听列表里也能触发；判定只有四道（启用、群 ID、关键词、出题人）。
+
+## 1.29.9：群游戏「监听的群」从填 ID 改成选择群
+
+- 表单里原来是「填群 ID 或 @用户名」，和别的任务不统一；现改为隐藏字段 `#gChat` + 搜索框 `#gChatSearch` + 点选列表 `#gChatPicker`：
+  选项来自群组页已监听群，支持按群名或数字 ID 搜索，选中项高亮并在下方回显「已选：群名（只在这个群触发）」。
+- 留空仍表示不限群，保存请求体与后端字段完全不变，历史任务不需要迁移。
+- 新增 `renderGameGroupOptions` / `pickGameGroup`，与兑换码抢注的选群交互保持一致。
+
 ## 1.29.0：古诗任务卡片改成和其它任务一样的折叠详情
 
 - 古诗填空任务卡片不再平铺一行行文字，改成与其它自动化任务一致的结构：

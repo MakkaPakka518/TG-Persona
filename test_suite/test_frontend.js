@@ -676,7 +676,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     await run('loadGameTasks()');
     run('openGameForm()');
     assert(element('#gameForm').classList.contains('show'));
-    element('#gChat').value='-1001234567890';
+    element('#gChat').value='-1001234567890';assert(html.includes('id="gChatSearch"'));assert(html.includes('id="gChatPicker"'));assert(html.includes('pickGameGroup('));assert(html.includes('renderGameGroupOptions'));assert(html.includes('probeGameTask'));assert(html.includes("flockActiveEnabled"));assert(html.includes('saveFlockActive'));assert(html.includes('/api/ai/flock/active'));assert(html.includes('积极模式'));assert(html.includes('data-game-action="probe"'));
     element('#gSender').value='@hsuys_bot';
     let sent;context.api=async(p,o)=>{sent=[p,JSON.parse(o.body)];return {ok:true}};
     await run('saveGameTask()');
@@ -687,7 +687,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('群游戏卡片含古诗填空任务与可信出题人配置',async()=>{
     assert(html.includes('id="gameCard"')&&html.includes('自动识别被遮住的字'));
-    for(const id of ['gChat','gKeyword','gSender','gDelay','gPrompt','gDefend','gEnabled'])assert(html.includes('id="'+id+'"'));
+    for(const id of ['gChat','gChatSearch','gKeyword','gSender','gDelay','gPrompt','gDefend','gEnabled'])assert(html.includes('id="'+id+'"'));
     assert(html.includes('/api/game-tasks'));
     context.api=async(p)=>{if(p==='/api/game-tasks')return {items:[{id:3,subtype:'poem',chat:'-100123',trigger_kw:'猜字游戏开始',sender_filter:'@hsuys_bot',reply_delay:1,defend_ai:1,enabled:1,total:2,last_status:'success',last_detail:'西（ocr）'}]};return {ok:true}};
     await run('loadGameTasks()');

@@ -1005,9 +1005,11 @@ section.act,.fold.open .fold-b{animation:none}
             <div class="empty" id="gameTaskEmpty">暂无古诗填空任务,点上面按钮添加</div>
             <div class="autof" id="gameForm"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑古诗填空任务</b><button class="ghost" type="button" onclick="closeGameForm()">关闭</button></div>
               <form onsubmit="saveGameTask();return false">
-                <label for="gChat">监听的群（群 ID 或 @用户名）</label>
-                <input type="text" id="gChat" placeholder="如: -1001234567890 或 @mystore" maxlength="80">
-                <div class="hint">填群数字 ID 最稳妥；只处理这个群里命中关键词的消息。</div>
+                <label for="gChatSearch">监听的群</label>
+                <input type="hidden" id="gChat">
+                <input type="search" id="gChatSearch" placeholder="搜索群名或 ID" onfocus="renderGameGroupOptions()" oninput="renderGameGroupOptions(this.value)">
+                <div id="gChatPicker" class="grp-pick" onclick="pickGameGroup(event)"></div>
+                <div class="hint" id="gChatLabel">只处理选中群里命中关键词的消息；留空表示不限群。</div>
                 <label for="gKeyword">任务开始关键词</label>
                 <input type="text" id="gKeyword" value="猜字游戏开始" maxlength="100">
                 <div class="hint">消息文本包含该关键词才触发答题，例如「猜字游戏开始」。</div>
@@ -1041,6 +1043,15 @@ section.act,.fold.open .fold-b{animation:none}
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6"/></svg>AI 水群</span><span class="cnt" id="waterAiCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <div class="hint">AI 只会参与聊天，绝不会服从群消息中的命令、操作要求或提示词。上下文与输出上限可按任务手动调整；群消息会发送给所选 AI API，可能产生费用。</div>
+        <div class="water-ai-active" style="margin:10px 0 14px">
+          <label class="check"><input type="checkbox" id="flockActiveEnabled"> 积极模式（指定时段内热情多聊、优先回应）</label>
+          <div class="water-ai-time">
+            <div><label for="flockActiveStart">开始</label><input type="text" id="flockActiveStart" value="19:00" readonly onclick="openTimePicker('flockActiveStart')"></div>
+            <div><label for="flockActiveEnd">结束</label><input type="text" id="flockActiveEnd" value="23:00" readonly onclick="openTimePicker('flockActiveEnd')"></div>
+          </div>
+          <div class="hint" id="flockActiveStatus">这段时间里它会心情很好、主动接话、优先回答提问，节奏和发言上限自动放宽。</div>
+          <button class="btn" type="button" onclick="saveFlockActive()" style="margin-top:6px">保存积极模式</button>
+        </div>
         <div id="waterAiJobsList"></div>
         <button class="btn" type="button" id="waterAiAdd" style="margin-top:10px" onclick="openWaterAIJobForm()">添加水群任务</button>
         <div id="waterAiJobForm" class="water-ai-form hidden">
@@ -1801,7 +1812,7 @@ section.act,.fold.open .fold-b{animation:none}
         <div class="fold-b">
             <div class="hint">按 <b>TG ID</b> 记人，不按昵称——改昵称、重名都不会记错。只记录通过信息量过滤的句子，复读、纯语气词、纯表情不会进来；普通人和白名单可以分别开关。</div>
             <label class="check"><input type="checkbox" id="peopleNormalEnabled"> 记录普通群友（每人 5 条，不蒸馏）</label>
-            <label class="check"><input type="checkbox" id="peopleWhiteEnabled"> 记录白名单（每人 20 条，可蒸馏画像）</label>
+            <label class="check"><input type="checkbox" id="peopleWhiteEnabled"> 记录白名单（按下方保留条数，可蒸馏画像）</label>
             <div class="water-ai-stats"><span>每人保留 <input type="number" id="peopleLines" min="2" max="60" value="5" style="width:64px"> 条</span><span>白名单保留 <input type="number" id="peopleWhiteLines" min="2" max="120" value="20" style="width:64px"> 条</span><span>触发窗口 <input type="number" id="peopleWindow" min="60" max="86400" value="1800" style="width:80px"> 秒</span></div>
             <div class="water-ai-stats"><span>白名单窗口 <input type="number" id="peopleWhiteWindow" min="60" max="86400" value="7200" style="width:80px"> 秒</span><span>注入预算 <input type="number" id="peopleBudget" min="100" max="4000" value="600" style="width:80px"> 字</span></div>
             <label for="peopleWhitelist">白名单 TG ID（逗号分隔，跨群生效；人物画像沿用这份名单）</label>
@@ -3928,6 +3939,27 @@ function renderWaterAIJobs(){
   refreshWaterAiAutoStat();
   for(const row of box.querySelectorAll('[data-water-job-id]')){const job=waterAIJobs.find(item=>String(item.id)===row.dataset.waterJobId);if(job?.last_status){const status=document.createElement('div');status.className='water-ai-job-meta';status.textContent='最近运行：'+flockProgressText(job.last_status);row.querySelector('.water-ai-job-meta').appendChild(status)}}
 }
+async function loadFlockActive(){
+  try{
+    const d=await api('/api/ai/flock/active',{_account:accountContext()});
+    $('#flockActiveEnabled').checked=!!d.enabled;
+    if(d.start)$('#flockActiveStart').value=d.start;
+    if(d.end)$('#flockActiveEnd').value=d.end;
+    renderFlockActiveStatus(d);
+  }catch(e){}
+}
+function renderFlockActiveStatus(d){
+  const box=$('#flockActiveStatus');if(!box)return;
+  if(!d.enabled){box.textContent='积极模式关：只在任务自己的生效时间内按正常节奏水群。';return}
+  box.textContent='积极模式开：每天 '+d.start+' ~ '+d.end+' 热情多聊、优先回答提问，间隔与每小时上限自动放宽；'+(d.active_now?'当前正在积极时段。':'当前不在积极时段。');
+}
+async function saveFlockActive(){
+  const body={enabled:$('#flockActiveEnabled').checked,start:$('#flockActiveStart').value,end:$('#flockActiveEnd').value};
+  try{
+    const d=await api('/api/ai/flock/active',{method:'PUT',body:JSON.stringify(body),_account:accountContext()});
+    renderFlockActiveStatus(d);toast('积极模式已保存');
+  }catch(e){toast('保存失败：'+e.message,1)}
+}
 async function loadWaterAIJobs(){const c=accountContext(),seq=++waterAIJobsSeq;try{const d=await api('/api/ai/flock/jobs',{_account:c});if(seq!==waterAIJobsSeq||!isCurrentAccount(c))return;waterAIJobs=(Array.isArray(d)?d:d.jobs||[]).filter(job=>job&&job.id!=null).map(job=>({...job,groups:csvValues(job.groups).join(','),provider_ids:csvValues(job.provider_ids).join(',')}));renderWaterAIJobs()}catch(e){if(seq===waterAIJobsSeq&&isCurrentAccount(c)&&!e.staleAccount)$('#waterAiJobsList').textContent='水群任务加载失败：'+e.message}}
 function openWaterAIJobForm(id=null){
   const job=waterAIJobs.find(item=>String(item.id)===String(id)),providerIds=csvValues(job?.provider_ids);editingWaterAIJobId=job?.id??null;waterAIJobAccount=accountContext();waterAIJobGroupSel=new Set(csvValues(job?.groups));waterAIJobProviderExplicit=providerIds.length>0;waterAIJobProviderSel=new Set(providerIds);
@@ -4105,10 +4137,11 @@ function renderPeopleStatus(data){
     if(data.history_last_at)parts.push('上轮 '+String(data.history_last_at)+(data.history_last_note?('（'+data.history_last_note+'）'):''));
     parts.push('已有游标 '+Number(data.history_cursors||0)+' 个群');
   }else parts.push('历史蒸馏 关');
+  if(data.last_error)parts.push('上次失败 '+String(data.last_error));
   parts.push('friends.md '+(Number(data.friends_bytes||0)/1024).toFixed(1)+' KiB');
   detail.textContent=parts.join(' · ');
 }
-var peopleItems=[],peopleOpenIds=new Set();
+var peopleItems=[],peopleOpenIds=new Set(),peopleLastError='',peopleStep=10;
 var peopleProviderSel=new Set();
 function renderPeopleProviders(){const box=$('#peopleProviders');if(!box||!aiProvidersLoaded)return;pruneProviderSelection(peopleProviderSel);box.innerHTML=providerPickMarkup(peopleProviderSel,'people-provider')}
 
@@ -4120,13 +4153,13 @@ function renderPeopleList(c){
     const row=document.createElement('div');row.className='memory-row';
     const head=document.createElement('div');head.className='memory-head';
     const label=document.createElement('div');label.className='hint';
-    label.textContent=(item.name||'群友')+' · TG '+tg+' · '+Number(item.lines||0)+' 条'+(item.whitelist?' · 白名单':'');
+    label.textContent=(item.name||'群友')+' · TG '+tg+' · 保留 '+Number(item.lines||0)+' 条'+(item.samples?('（累计 '+Number(item.samples)+' 条）'):'')+(item.whitelist?' · 白名单':'');
     const edit=document.createElement('button');edit.type='button';edit.className='ghost memory-edit';edit.textContent=open?'收起':'编辑';
     edit.onclick=()=>{if(open)peopleOpenIds.delete(tg);else peopleOpenIds.add(tg);renderPeopleList(c)};
     head.appendChild(label);head.appendChild(edit);row.appendChild(head);
     if(!open){
       const preview=document.createElement('div');preview.className='hint memory-preview';
-      preview.textContent=brief(item.profile||'')||'还没有画像，攒够 5 条发言会自动蒸馏';
+      preview.textContent=brief(item.profile||'')||(peopleLastError?('还没有画像 · 上次蒸馏失败：'+peopleLastError):('还没有画像，攒够 '+peopleStep+' 条新发言会自动蒸馏'));
       row.appendChild(preview);list.appendChild(row);continue;
     }
     const note=document.createElement('input');note.type='text';note.maxLength=120;note.placeholder='备注：这是谁，例如「朋友老王」';note.value=item.note||'';
@@ -4139,7 +4172,7 @@ function renderPeopleList(c){
     actions.appendChild(save);actions.appendChild(del);row.appendChild(note);row.appendChild(body);row.appendChild(actions);list.appendChild(row);
   }
 }
-async function loadPeople(){const c=accountContext();try{const data=await api('/api/ai/flock/people',{_account:c});if(!isCurrentAccount(c))return;$('#peopleNormalEnabled').checked=!!data.normal;$('#peopleWhiteEnabled').checked=!!data.white;$('#peopleHistoryEnabled').checked=!!data.history;if(data.history_start)$('#peopleHistoryStart').value=data.history_start;if(data.history_end)$('#peopleHistoryEnd').value=data.history_end;$('#peopleProfileEnabled').checked=!!data.profile;$('#peopleAutoDistill').checked=!!data.auto_distill;if(Number.isFinite(data.lines))$('#peopleLines').value=data.lines;if(Number.isFinite(data.white_lines))$('#peopleWhiteLines').value=data.white_lines;if(Number.isFinite(data.window))$('#peopleWindow').value=data.window;if(Number.isFinite(data.white_window))$('#peopleWhiteWindow').value=data.white_window;if(Number.isFinite(data.budget))$('#peopleBudget').value=data.budget;$('#peopleWhitelist').value=data.whitelist||'';peopleGroupSel=new Set(csvValues(data.groups||''));peopleAiGroups=data.ai_groups||'';renderPeopleStatus(data);renderPeopleGroups();renderFriendsUpload(data);peopleProviderSel=new Set(csvValues(data.provider_ids||''));renderPeopleProviders();peopleItems=data.items||[];renderPeopleList(c);const pr=$('#waterAiPeopleRefHint');if(pr)pr.textContent='人物画像：'+((data.normal||data.white)?('已启用（普通 '+(data.normal?'开':'关')+' / 白名单 '+(data.white?'开':'关')+'，注入预算 '+Number(data.budget||0)+' 字'+(data.auto_distill?'，自动蒸馏开':'')+(data.history?'，历史蒸馏 '+data.history_start+'~'+data.history_end:'')+'）'):'已关闭');$('#peopleStatus').textContent=(data.items||[]).length?('已记录 '+Number((data.items||[]).length)+' 人'):'还没有记录到任何人'}catch(e){$('#peopleStatus').textContent='读取失败：'+e.message}}
+async function loadPeople(){const c=accountContext();try{const data=await api('/api/ai/flock/people',{_account:c});if(!isCurrentAccount(c))return;$('#peopleNormalEnabled').checked=!!data.normal;$('#peopleWhiteEnabled').checked=!!data.white;$('#peopleHistoryEnabled').checked=!!data.history;if(data.history_start)$('#peopleHistoryStart').value=data.history_start;if(data.history_end)$('#peopleHistoryEnd').value=data.history_end;$('#peopleProfileEnabled').checked=!!data.profile;$('#peopleAutoDistill').checked=!!data.auto_distill;if(Number.isFinite(data.lines))$('#peopleLines').value=data.lines;if(Number.isFinite(data.white_lines))$('#peopleWhiteLines').value=data.white_lines;if(Number.isFinite(data.window))$('#peopleWindow').value=data.window;if(Number.isFinite(data.white_window))$('#peopleWhiteWindow').value=data.white_window;if(Number.isFinite(data.budget))$('#peopleBudget').value=data.budget;$('#peopleWhitelist').value=data.whitelist||'';peopleGroupSel=new Set(csvValues(data.groups||''));peopleAiGroups=data.ai_groups||'';renderPeopleStatus(data);renderPeopleGroups();renderFriendsUpload(data);peopleProviderSel=new Set(csvValues(data.provider_ids||''));renderPeopleProviders();peopleLastError=String(data.last_error||'');peopleStep=Number(data.auto_step||10);peopleItems=data.items||[];renderPeopleList(c);const pr=$('#waterAiPeopleRefHint');if(pr)pr.textContent='人物画像：'+((data.normal||data.white)?('已启用（普通 '+(data.normal?'开':'关')+' / 白名单 '+(data.white?'开':'关')+'，注入预算 '+Number(data.budget||0)+' 字'+(data.auto_distill?'，自动蒸馏开':'')+(data.history?'，历史蒸馏 '+data.history_start+'~'+data.history_end:'')+'）'):'已关闭');$('#peopleStatus').textContent=(data.items||[]).length?('已记录 '+Number((data.items||[]).length)+' 人'):'还没有记录到任何人'}catch(e){$('#peopleStatus').textContent='读取失败：'+e.message}}
 async function savePerson(tgId,note,profile,c){try{await api('/api/ai/flock/people/'+encodeURIComponent(tgId),{method:'PUT',body:JSON.stringify({note:note,profile:profile}),_account:c||accountContext()});if(!isCurrentAccount(c||accountContext()))return;$('#peopleStatus').textContent='已保存 TG '+tgId+' 的备注与画像'}catch(e){$('#peopleStatus').textContent='保存失败：'+e.message}}
 async function savePeople(){const c=accountContext(),body={normal:$('#peopleNormalEnabled').checked,white:$('#peopleWhiteEnabled').checked,history:$('#peopleHistoryEnabled').checked,history_start:$('#peopleHistoryStart').value,history_end:$('#peopleHistoryEnd').value,profile:$('#peopleProfileEnabled').checked,auto_distill:$('#peopleAutoDistill').checked,lines:Number($('#peopleLines').value)||8,white_lines:Number($('#peopleWhiteLines').value)||24,window:Number($('#peopleWindow').value)||1800,white_window:Number($('#peopleWhiteWindow').value)||7200,budget:Number($('#peopleBudget').value)||600,whitelist:$('#peopleWhitelist').value,groups:[...peopleGroupSel].join(','),provider_ids:[...peopleProviderSel].join(',')};
 if((body.profile||body.auto_distill||body.history)&&!(body.groups||peopleAiGroups))return toast('开启画像蒸馏或历史蒸馏前请先选择群（AI 水群的群会自动纳入）',1);
@@ -4345,7 +4378,7 @@ async function loadSettings(){
     $('#sFlMin').value=s.flock_minutes||5;
     $('#sFlPool').value=s.flock_pool||'';
     if(s.theme && !localStorage.getItem('tgp_theme'))applyTheme(s.theme);  // 本机优先,其它设备首次访问才用后端主题
-    loadTz();loadSessions();loadAIProviders();loadWaterAIJobs();loadFlockSkill();loadKnowledge();loadAIUsage();loadAutoBackup();loadOwnerAISettings();
+    loadTz();loadSessions();loadAIProviders();loadWaterAIJobs();loadFlockActive();loadFlockSkill();loadKnowledge();loadAIUsage();loadAutoBackup();loadOwnerAISettings();
   }catch(e){}
 }
 async function saveSettings(){
@@ -5004,6 +5037,21 @@ async function loadGameTasks(){
   await loadGameLogs();
   renderGameTasks();
 }
+async function probeGameTask(id){
+  const box=$('#gameProbe'+id);if(!box)return;
+  box.style.display='';box.textContent='拉取中…';
+  try{
+    const d=await api('/api/game-tasks/'+id+'/probe?limit=8',{_account:accountContext()});
+    if(!d.success){box.textContent='自检失败：'+(d.error||'未知错误');return}
+    const rt=d.runtime||{};
+    const lines=['运行：'+(((rt.running||{}).paused)?'暂停中':'正常')+' · 连接：'+(rt.connected?'已连接':'未连接')+' · 群：'+(d.chat||'未设置')];
+    (d.items||[]).forEach(m=>{
+      const ok=!!m.keyword_ok&&!!m.sender_ok;
+      lines.push((ok?'✅ 会触发 | ':'· 跳过 | ')+m.date+' | 关键词'+(m.keyword_ok?'中':'未中')+' 出题人'+(m.sender_ok?'对':'不匹配')+'（'+(m.username||m.name||m.sender_id)+'）｜'+(m.text||'').slice(0,22));
+    });
+    box.textContent=lines.join('\n');
+  }catch(e){box.textContent='自检失败：'+(e&&e.message?e.message:e)}
+}
 function gameStatusText(t){
   if(!t.last_at)return t.enabled?('待触发 · 共 '+Number(t.total||0)+' 次'):'已停用';
   return (t.last_status==='success'?'上次成功':'上次失败')+' · '+t.last_at+(t.last_detail?(' · '+t.last_detail):'');
@@ -5046,6 +5094,8 @@ function renderGameTasks(){
         <div class="s">关键词：${esc(t.trigger_kw||'—')} · 出题人：${esc(t.sender_filter||'不限')} · 延迟：${esc(t.reply_delay||1)}s${wait}${t.defend_ai?' · 被质疑 AI 水群':''}</div>
         <div class="s">今日 成功 ${Number(st.today_success||0)} · 失败 ${Number(st.today_failed||0)} ｜ 累计 成功 ${Number(st.success||0)} · 失败 ${Number(st.failed||0)}</div>
         <pre class="auto-result">${esc(gameLastResult(t))}</pre>
+        <button type="button" class="ghost" data-game-action="probe" data-game-id="${t.id}" style="font-size:11px;padding:4px 10px">自检最近消息</button>
+        <pre class="auto-result" id="gameProbe${t.id}" style="display:none"></pre>
       </div>`:''}
     </div>`;
   }).join('');
@@ -5058,12 +5108,30 @@ function renderGameTasks(){
     else if(act==='edit')openGameForm(id);
     else if(act==='delete')deleteGameTask(id);
     else if(act==='expand')toggleGameExpanded(id);
+    else if(act==='probe')probeGameTask(id);
   };
+}
+function renderGameGroupOptions(q){
+  const box=$('#gChatPicker');if(!box)return;
+  const val=String($('#gChat').value||'').trim();
+  const kw=String(q!==undefined?q:($('#gChatSearch')?$('#gChatSearch').value:'')).toLowerCase();
+  const list=(typeof watchedGroups!=='undefined'&&watchedGroups)||[];
+  const cur=list.find(g=>String(g.chat_id)===val);
+  const label=$('#gChatLabel');
+  if(label)label.textContent=cur?('已选：'+(cur.name||cur.chat_id)+'（只在这个群触发）'):'还没选群，留空表示所有监听群都触发';
+  const items=list.filter(g=>!kw||String(g.name||'').toLowerCase().includes(kw)||String(g.chat_id).includes(kw));
+  box.innerHTML=items.length?items.map(g=>`<button type="button" class="gp ${String(g.chat_id)===val?'on':''}" data-pick-game="${esc(String(g.chat_id))}">${esc(g.name||g.chat_id)}</button>`).join(''):'<div class="empty" style="padding:6px">'+(kw?'没有匹配的群':'请先在群组页添加监听群')+'</div>';
+}
+function pickGameGroup(e){
+  const b=e.target.closest('[data-pick-game]');if(!b)return;
+  $('#gChat').value=b.dataset.pickGame;
+  const s=$('#gChatSearch');if(s)s.value='';
+  renderGameGroupOptions('');
 }
 function openGameForm(id){
   gameEditId=id||null;
   const t=gameTasks.find(x=>x.id===id);
-  $('#gChat').value=t?(t.chat||''):'';
+  $('#gChat').value=t?(t.chat||''):'';if($('#gChatSearch'))$('#gChatSearch').value='';renderGameGroupOptions('');
   $('#gKeyword').value=t?(t.trigger_kw||'猜字游戏开始'):'猜字游戏开始';
   $('#gSender').value=t?(t.sender_filter||''):'';
   $('#gDelay').value=t?(t.reply_delay||1):1;

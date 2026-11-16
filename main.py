@@ -829,9 +829,15 @@ def _record_ai_usage(provider_id, usage, feature="other"):
                 return
 
 
+def _provider_sel(provider_ids):
+    if isinstance(provider_ids, (list, tuple, set)):
+        return [str(part).strip() for part in provider_ids if str(part).strip()]
+    return [part.strip() for part in str(provider_ids or "").split(",") if part.strip()]
+
+
 def _ordered_ai_providers(provider_ids=None):
     providers = _ai_provider_configs()
-    selected = [part.strip() for part in str(provider_ids or "").split(",") if part.strip()]
+    selected = _provider_sel(provider_ids)
     if selected:
         allowed = set(selected)
         providers = [cfg for cfg in providers if cfg["id"] in allowed]
@@ -1345,7 +1351,7 @@ def _valid_provider_ids(value, require_enabled=False):
 
 
 def _has_ai_providers(provider_ids=""):
-    selected = set(_csv(provider_ids))
+    selected = set(_provider_sel(provider_ids))
     return any(not selected or row["id"] in selected for row in _ai_provider_configs())
 
 
@@ -2701,6 +2707,42 @@ def _knowledge_usage(trigger, on_demand, limit):
     return None
 
 
+def _flock_active_on():
+    return get_setting("flock_active_enabled", "0") == "1"
+
+
+def _flock_active_window():
+    return (get_setting("flock_active_start", "19:00") or "19:00",
+            get_setting("flock_active_end", "23:00") or "23:00")
+
+
+def _flock_active_now():
+    if not _flock_active_on():
+        return False
+    start, end = _flock_active_window()
+    start_min, end_min = _win_minutes(start), _win_minutes(end)
+    if start_min is None or end_min is None:
+        return False
+    local = _beijing_now()
+    minute = local.hour * 60 + local.minute
+    spans = _flock_time_spans(start, end, 1 if end_min <= start_min else 0)
+    return any(low <= minute < high for low, high in spans)
+
+
+def _flock_apply_active(src):
+    """积极时段：放宽节奏与上限，并关掉「自己决定说不说」。"""
+    if not src:
+        return src
+    if not _flock_active_now():
+        return src
+    src["active_mode"] = 1
+    limit = int(src.get("hourly_limit") or 0)
+    if limit > 0:
+        src["hourly_limit"] = min(60, max(limit * 2, limit + 10))
+    src["active_minutes"] = min(60, max(10, int(src.get("active_minutes") or 5) * 2))
+    src["inactive_mode"] = 0
+    return src
+
 def _flock_time_spans(start_time, end_time, end_next_day=0):
     start, end = _win_minutes(start_time), _win_minutes(end_time)
     if start is None or end is None or end_next_day not in (0, 1):
@@ -2710,6 +2752,14 @@ def _flock_time_spans(start_time, end_time, end_next_day=0):
         return ()
     return ((start, 1440), (0, end)) if end_next_day else ((start, end),)
 
+
+
+FLOCK_ACTIVE_PROMPT = (
+    "【积极模式】现在是你最清醒、心情最好的时段，你很想在群里多说几句。"
+    "说话要热情、带表情或语气词都可以，主动接别人的话，看到有人提问就优先回答，别人聊到什么就顺着聊下去，"
+    "可以主动起话题、追问一句、补一句，不要只回一两个字。"
+    "除非这条消息跟你完全无关、或者群里正在吵架，否则这一轮都要开口，禁止输出 NO_REPLY 或 SKIP。"
+)
 
 def _ai_flock_source(chat_id):
     chat_id = str(chat_id)
@@ -2739,7 +2789,7 @@ def _ai_flock_source(chat_id):
             continue
         spans = _flock_time_spans(job["start_time"], job["end_time"], job["end_next_day"])
         if any(start <= minute < end for start, end in spans):
-            return {"kind": "scheduled", "task_id": 0, "job_id": job["id"], "name": job["name"],
+            src = {"kind": "scheduled", "task_id": 0, "job_id": job["id"], "name": job["name"],
                     "prompt": job["prompt"], "expires_at": 0, "replies": 0,
                     "provider_ids": job["provider_ids"], "reaction": job["reaction"],
                     "context_messages": job["context_messages"], "message_chars": job["message_chars"],
@@ -2751,6 +2801,7 @@ def _ai_flock_source(chat_id):
                     "inactive_mode": (job["inactive_mode"] if "inactive_mode" in job.keys() else 0),
                     "budget_messages": (job["budget_messages"] if "budget_messages" in job.keys() else 0),
                     **{field: job[field] for field in ("min_messages", "max_messages", "hourly_limit", "active_minutes")}}
+            return _flock_apply_active(src)
     return None
 
 
@@ -3047,6 +3098,8 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
                               "不要为凑长度硬写，也不要写成小标题或分点。")
             local_t = _beijing_now()
             rhythm = _flock_rhythm_hint(source)
+            if source.get("active_mode"):
+                instruction += "\n" + FLOCK_ACTIVE_PROMPT
             instruction += (f"\n现在是北京时间 {local_t:%H:%M}。" + rhythm +
                             "每条记录格式是「时间 发送者：内容」，发送者不同就是不同的人，"
                             "不要把不同人的话当成同一个人说的，也不要把别人的话当成自己说的。"
@@ -3563,8 +3616,12 @@ async def _people_distill_batch(tg_id, rows, last_id=None, history_ts=None):
             people_providers = _csv(get_setting("flock_people_provider_ids", ""))
             reply = await _call_ai_any(prompt, max_tokens=400, feature="people",
                                        provider_ids=people_providers or None)
-        except Exception:
+        except Exception as exc:
             log.warning("人物画像蒸馏失败 tg=%s", tg_id, exc_info=True)
+            try:
+                set_setting("flock_people_last_error", "%s %s" % (now_local().strftime("%Y-%m-%d %H:%M:%S"), str(exc)[:120]))
+            except Exception:
+                pass
             return 0
         text = str(reply or "").strip()
         if not text:
@@ -3575,6 +3632,10 @@ async def _people_distill_batch(tg_id, rows, last_id=None, history_ts=None):
                       ON CONFLICT(tg_id) DO UPDATE SET profile=excluded.profile, updated_at=excluded.updated_at,
                       samples=excluded.samples""",
                    (tg_id, text[:500], int(time.time()), total + len(rows)))
+        try:
+            set_setting("flock_people_last_error", "")
+        except Exception:
+            pass
         if last_id:
             db.execute("UPDATE people_profiles SET last_id=? WHERE tg_id=?", (int(last_id), tg_id))
         if history_ts:
@@ -8266,9 +8327,33 @@ async def _game_wait_others(chat_id, answer, baseline, need, timeout):
     return hits, False
 
 
+def _game_mark_failed(db, task, chat_id, detail):
+    """任何失败都要落库，避免面板一直显示 0 次。"""
+    stamp = now_local().strftime("%Y-%m-%d %H:%M:%S")
+    text = str(detail)[:200]
+    try:
+        db.execute("UPDATE game_tasks SET last_at=?,last_status='failed',last_detail=?,failed=COALESCE(failed,0)+1 WHERE id=?",
+                   (stamp, text, task["id"]))
+        db.commit()
+    except Exception:
+        log.exception("群游戏 失败状态写入失败 任务=%s", task["id"])
+    try:
+        _game_log(task["id"], chat_id, "failed", text)
+    except Exception:
+        pass
+    log.info("群游戏未作答 任务=%s 原因=%s", task["id"], text[:120])
+
+
 async def _game_poem_handle(task, event, chat_id):
     runtime = get_runtime()
     db = get_account_db()
+    try:
+        perms = await runtime.client.get_permissions(int(chat_id), "me")
+        can_send = getattr(perms, "can_send_messages", True)
+    except Exception:
+        can_send = True
+    if can_send is False:
+        return _game_mark_failed(db, task, chat_id, "你在该群被禁言（can_send_messages=false），跳过本次答题")
     image = await _game_message_image(event, chat_id)
     if not image:
         return
@@ -8297,7 +8382,16 @@ async def _game_poem_handle(task, event, chat_id):
             log.info("群游戏等待他人作答超时 需=%s 已见=%s 任务=%s", need, hits, task["id"])
     delay = max(0.3, min(float(task["reply_delay"] or 1.0), 10.0))
     await asyncio.sleep(delay + random.uniform(0, 0.8))
-    await _send_generated_message(int(chat_id), result["answer"], generated_kind="game_poem")
+    try:
+        await _send_generated_message(int(chat_id), result["answer"], generated_kind="game_poem")
+    except errors.UserBannedInChannelError:
+        return _game_mark_failed(db, task, chat_id, "该群禁止你发言（UserBannedInChannelError），答案没发出：%s" % result["answer"])
+    except errors.ChatWriteForbiddenError:
+        return _game_mark_failed(db, task, chat_id, "没有该群发言权限（ChatWriteForbiddenError），答案没发出：%s" % result["answer"])
+    except errors.ChatAdminRequiredError:
+        return _game_mark_failed(db, task, chat_id, "需要管理员权限才能发言，答案没发出：%s" % result["answer"])
+    except Exception as exc:
+        return _game_mark_failed(db, task, chat_id, "发送失败（%s）：%s" % (type(exc).__name__, result["answer"]))
     stamp = now_local().strftime("%Y-%m-%d %H:%M:%S")
     db.execute("UPDATE game_tasks SET last_at=?,last_status='success',last_detail=?,total=COALESCE(total,0)+1 WHERE id=?",
                (stamp, "%s（%s，%s ms%s）" % (result["answer"], result["channel"], result.get("elapsed_ms", 0),
@@ -8308,6 +8402,17 @@ async def _game_poem_handle(task, event, chat_id):
               answer=result["answer"], channel=result["channel"], elapsed_ms=result.get("elapsed_ms", 0))
     _game_last_answer[(str(chat_id), task["id"])] = getattr(event, "id", 0) or 0
     log.info("群游戏作答 任务=%s 答案=%s 通道=%s", task["id"], result["answer"], result["channel"])
+
+
+_GAME_DBG_AT = {}
+
+
+def _game_dbg(kind, key, msg, *args):
+    now = time.time()
+    if now - _GAME_DBG_AT.get((kind, key), 0) < 60:
+        return
+    _GAME_DBG_AT[(kind, key)] = now
+    log.info(msg, *args)
 
 
 async def on_game_event(event):
@@ -8324,14 +8429,17 @@ async def on_game_event(event):
         return
     chat_id = str(event.chat_id)
     labels = _game_sender_labels(event)
+    if not tasks:
+        _game_dbg("notask", str(getattr(runtime, "id", "?")), "群游戏 本账号无任务 账号=%s 群=%s", getattr(runtime, "id", "?"), chat_id)
     for task in tasks:
         scope = str(task["chat"] or "").strip()
         if scope and scope.lstrip("-") != chat_id.lstrip("-"):
             continue
-        if not _game_sender_allowed(task, labels):
-            continue
         keyword = str(task["trigger_kw"] or "").strip()
         if keyword and keyword not in text:
+            continue
+        if not _game_sender_allowed(task, labels):
+            _game_dbg("sender", "%s:%s" % (chat_id, task["id"]), "群游戏 出题人未匹配 任务=%s 群=%s 实际=%s 要求=%s", task["id"], chat_id, labels[:2], task["sender_filter"])
             continue
         if _game_recent.get((chat_id, task["id"])) == getattr(event, "id", 0):
             continue
@@ -8340,6 +8448,13 @@ async def on_game_event(event):
             await _game_poem_handle(task, event, chat_id)
         except Exception:
             log.exception("群游戏处理失败 任务=%s", task["id"])
+            try:
+                stamp = now_local().strftime("%Y-%m-%d %H:%M:%S")
+                db.execute("UPDATE game_tasks SET last_at=?,last_status='failed',last_detail=? WHERE id=?",
+                           (stamp, "处理异常，详见日志", task["id"]))
+                db.commit()
+            except Exception:
+                pass
         continue
     # 被质疑时用 AI 水群顶一句
     for task in tasks:
@@ -9091,6 +9206,33 @@ def _validated_flock_job(body, exclude_id=None, legacy=False):
                 raise HTTPException(409, "启用的 AI 水群任务不能在同一群内时间重叠")
     return (name, int(body.enabled), ",".join(groups), body.start_time, body.end_time,
             prompt, provider_ids, reaction, *budgets, int(body.knowledge_on_demand), int(body.end_next_day))
+
+
+class FlockActiveIn(BaseModel):
+    enabled: bool = False
+    start: str = "19:00"
+    end: str = "23:00"
+
+
+@app.get("/api/ai/flock/active")
+async def get_flock_active():
+    start, end = _flock_active_window()
+    return {"enabled": _flock_active_on(), "start": start, "end": end,
+            "active_now": _flock_active_now()}
+
+
+@app.put("/api/ai/flock/active")
+async def put_flock_active(body: FlockActiveIn):
+    start_text = str(body.start or "").strip()[:5]
+    end_text = str(body.end or "").strip()[:5]
+    if _win_minutes(start_text) is None or _win_minutes(end_text) is None:
+        raise HTTPException(400, "时间格式应为 HH:MM")
+    set_setting("flock_active_enabled", "1" if body.enabled else "0")
+    set_setting("flock_active_start", start_text)
+    set_setting("flock_active_end", end_text)
+    start, end = _flock_active_window()
+    return {"enabled": _flock_active_on(), "start": start, "end": end,
+            "active_now": _flock_active_now()}
 
 
 @app.get("/api/ai/flock/jobs")
@@ -10071,6 +10213,67 @@ async def list_game_tasks():
     return {"items": [dict(row) for row in rows]}
 
 
+@app.get("/api/game-tasks/{tid}/probe")
+async def probe_game_task(tid: int, limit: int = 8):
+    """排查用：拉该群最近消息，逐条给出 chat/keyword/sender 三段判定。"""
+    runtime = get_runtime()
+    if runtime is None:
+        return {"success": False, "error": "账号未运行"}
+    rows = get_account_db().execute("SELECT * FROM game_tasks WHERE id=?", (tid,)).fetchall()
+    if not rows:
+        return {"success": False, "error": "任务不存在"}
+    task = rows[0]
+    chat = str(task["chat"] or "").strip()
+    items = []
+    msgs = []
+    if chat:
+        try:
+            msgs = await runtime.client.get_messages(int(chat), limit=max(1, min(limit, 100)))
+        except Exception as exc:
+            return {"success": False, "error": "拉取消息失败: %s" % exc}
+    kw = str(task["trigger_kw"] or "").strip()
+    for msg in msgs:
+        text = (getattr(msg, "raw_text", "") or "").strip()
+        try:
+            sender = await msg.get_sender()
+        except Exception:
+            sender = None
+        uname = getattr(sender, "username", None)
+        labels = []
+        if uname:
+            labels.append(str(uname).lower())
+        name = " ".join(part for part in (getattr(sender, "first_name", None), getattr(sender, "last_name", None)) if part)
+        if name:
+            labels.append(name.strip().lower())
+        items.append({
+            "id": getattr(msg, "id", None),
+            "date": msg.date.strftime("%Y-%m-%d %H:%M:%S") if getattr(msg, "date", None) else "",
+            "sender_id": getattr(sender, "id", None),
+            "username": uname,
+            "name": name,
+            "bot": bool(getattr(sender, "bot", False)),
+            "labels": labels,
+            "keyword_ok": (kw in text) if kw else True,
+            "sender_ok": _game_sender_allowed(task, labels),
+            "text": text[:120],
+        })
+    _can = None
+    if chat:
+        try:
+            _p = await runtime.client.get_permissions(int(chat), "me")
+            _can = getattr(_p, "can_send_messages", True)
+        except Exception as exc:
+            _can = "查询失败:%s" % exc
+    try:
+        state = {"id": runtime.id, "can_send_messages": _can, "running": dict(getattr(runtime, "running", {}) or {}),
+                 "closing": bool(getattr(runtime, "closing", False)), "stopping": bool(getattr(runtime, "stopping", False)),
+                 "closed": bool(getattr(runtime, "closed", False)),
+                 "connected": bool(runtime.client.is_connected()) if hasattr(runtime, "client") else False}
+    except Exception as exc:
+        state = {"error": str(exc)}
+    return {"success": True, "chat": chat, "task": dict(task), "runtime": state, "items": items}
+
+
 @app.post("/api/game-tasks")
 async def create_game_task(body: GameTaskIn):
     _game_validate(body)
@@ -10618,6 +10821,8 @@ async def get_people_memory():
     stat = db.execute("SELECT COUNT(*), COALESCE(SUM(samples),0), MAX(updated_at), "
                       "COALESCE(SUM(CASE WHEN TRIM(COALESCE(profile,''))<>'' THEN 1 ELSE 0 END),0) "
                       "FROM people_profiles").fetchone() or (0, 0, "", 0)
+    samples = {str(item[0]): int(item[1] or 0)
+               for item in db.execute("SELECT tg_id, samples FROM people_profiles").fetchall()}
     cursors = db.execute("SELECT COUNT(*) FROM settings "
                          "WHERE key LIKE 'flock_people_history_cursor_%'").fetchone()
     return {"enabled": _people_on(), "normal": _people_normal_on(), "white": _people_white_on(),
@@ -10638,6 +10843,8 @@ async def get_people_memory():
                               "last_file": get_setting("friends_upload_last_file", ""),
                               "last_error": get_setting("friends_upload_last_error", "")},
             "profile": _people_profile_on(), "auto_distill": _people_auto_on(),
+            "auto_step": PEOPLE_SAMPLE_STEP,
+            "last_error": get_setting("flock_people_last_error", "") or "",
             "history": get_setting("flock_people_history_enabled", "0") == "1",
             "groups": get_setting("flock_people_groups", "") or "",
             "provider_ids": get_setting("flock_people_provider_ids", "") or "",
@@ -10653,7 +10860,8 @@ async def get_people_memory():
                        "whitelist": str(item[0]) in white,
                        "profile": profiles.get(str(item[0]), ("", 0, "", ""))[0],
                        "note": profiles.get(str(item[0]), ("", 0, "", ""))[2],
-                       "updated_at": profiles.get(str(item[0]), ("", 0, "", ""))[1]} for item in rows]}
+                       "updated_at": profiles.get(str(item[0]), ("", 0, "", ""))[1],
+                       "samples": samples.get(str(item[0]), 0)} for item in rows]}
 
 
 @app.put("/api/ai/flock/people")
