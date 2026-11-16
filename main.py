@@ -3984,9 +3984,28 @@ def _store_learning_samples(samples):
     return len(samples)
 
 
+def _is_bot_sender(sender):
+    """群里的机器人账号：显式 bot 标记，或用户名以 bot 结尾。"""
+    if sender is None:
+        return False
+    try:
+        if getattr(sender, "bot", False):
+            return True
+        return str(getattr(sender, "username", "") or "").lower().endswith("bot")
+    except Exception:
+        return False
+
+
+def _is_bot_event(event):
+    sender = getattr(event, "sender", None) or getattr(getattr(event, "message", None), "sender", None)
+    return _is_bot_sender(sender)
+
+
 async def _collect_learning_event(event, role):
     runtime = get_runtime()
     if not getattr(event, "is_group", False):
+        return
+    if _is_bot_event(event):
         return
     key = str(getattr(event, "chat_id", ""))
     if key not in set(_csv(get_setting("flock_learning_groups", ""))):
@@ -5017,7 +5036,7 @@ async def on_group_message(event):
     if not text.startswith("/"):
         try:
             sender = await event.get_sender()
-            if not getattr(sender, "bot", False):
+            if not _is_bot_sender(sender):
                 direct_to_self = False
                 if getattr(event, "is_reply", False):
                     try:
@@ -5030,7 +5049,7 @@ async def on_group_message(event):
             pass
 
     # 自动水群(从众模式,默认关):5 分钟内同群同文本出现 N 次 → 跟一条话术
-    if get_setting("flock_enabled", "0") == "1" and not text.startswith("/"):
+    if get_setting("flock_enabled", "0") == "1" and not text.startswith("/") and not _is_bot_event(event):
         try:
             count = max(2, min(int(get_setting("flock_count", "5")), 30))
             minutes = max(1, min(int(get_setting("flock_minutes", "5")), 60))
