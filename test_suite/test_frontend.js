@@ -676,7 +676,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     await run('loadGameTasks()');
     run('openGameForm()');
     assert(element('#gameForm').classList.contains('show'));
-    element('#gChat').value='-1001234567890';assert(html.includes('id="gChatSearch"'));assert(html.includes('id="gChatPicker"'));assert(html.includes('pickGameGroup('));assert(html.includes('renderGameGroupOptions'));assert(html.includes('probeGameTask'));assert(html.includes("flockActiveEnabled"));assert(html.includes('saveFlockActive'));assert(html.includes('/api/ai/flock/active'));assert(html.includes('积极模式'));assert(html.includes('data-game-action="probe"'));
+    element('#gChat').value='-1001234567890';assert(html.includes('id="gChatSearch"'));assert(html.includes('id="gChatPicker"'));assert(html.includes('pickGameGroup('));assert(html.includes('renderGameGroupOptions'));assert(html.includes('probeGameTask'));assert(html.includes("flockActiveEnabled"));assert(html.includes('saveFlockActive'));assert(html.includes('/api/ai/flock/active'));assert(html.includes('积极模式'));assert(html.includes('waterAiJobGapMin'));assert(html.includes('waterAiJobGapMax'));assert(html.includes('兜底最少分钟'));assert(html.includes('兜底分钟'));assert(html.includes('AI 水群 · '));assert(html.includes('waterAIGroupName'));assert(html.includes('data-game-action="probe"'));
     element('#gSender').value='@hsuys_bot';
     let sent;context.api=async(p,o)=>{sent=[p,JSON.parse(o.body)];return {ok:true}};
     await run('saveGameTask()');

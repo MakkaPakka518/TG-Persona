@@ -435,13 +435,23 @@ def db_init(database=None):
                      ("hourly_limit", "INTEGER NOT NULL DEFAULT 12"),
                      ("active_minutes", "INTEGER NOT NULL DEFAULT 5"),
                      ("inactive_mode", "INTEGER NOT NULL DEFAULT 0"),
-                     ("budget_messages", "INTEGER NOT NULL DEFAULT 0")):
+                     ("budget_messages", "INTEGER NOT NULL DEFAULT 0"),
+                     ("gap_min", "INTEGER NOT NULL DEFAULT 1"),
+                     ("gap_max", "INTEGER NOT NULL DEFAULT 3")):
         try:
             conn.execute(f"ALTER TABLE ai_flock_jobs ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
             pass
     try:
         conn.execute("ALTER TABLE ai_learning_samples ADD COLUMN role TEXT NOT NULL DEFAULT 'owner'")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        # 旧任务把「间隔」当时长用的，迁移到新拆出的兜底字段，只搬一次。
+        conn.execute("UPDATE ai_flock_jobs SET gap_min=min_messages, gap_max=max_messages "
+                     "WHERE inactive_mode=1 AND gap_min=1 AND gap_max=3 "
+                     "AND min_messages BETWEEN 1 AND 30 AND max_messages BETWEEN 1 AND 30 "
+                     "AND (min_messages<>6 OR max_messages<>8)")
     except sqlite3.OperationalError:
         pass
     try:
@@ -473,6 +483,14 @@ def db_init(database=None):
 def add_hit(action, ok, *, chat_id="", rule_id=0, msg_id=0, content="", reply="",
             grp_name="", sender="", detail=None):
     """统一写命中日志:kind(动作) + 成败 + 结构化详情(前端展开用)"""
+    if not grp_name and chat_id:
+        try:
+            row = get_account_db().execute(
+                "SELECT name FROM watched_groups WHERE chat_id=?", (str(chat_id),)).fetchone()
+            if row and row[0]:
+                grp_name = str(row[0])
+        except Exception:
+            pass
     try:
         detail_json = persona_store.json_text(detail or {})
     except Exception:
@@ -1218,12 +1236,11 @@ def _flock_reply(value, registration=False):
     head, sep, body = raw.partition("|")
     head = head.strip()
     if re.fullmatch(r"(?i)(?:no_reply|skip)\s*\d{0,2}", head):
-        found = re.search(r"\d{1,2}", head)
-        minutes = max(2, min(int(found.group()) if found else 5, 30))
-        return "NO_REPLY|" + str(minutes)
+        # 等待时长只由面板兜底区间决定，模型写的分钟数一律丢弃。
+        return "NO_REPLY|0"
     minutes = 0
     if sep and re.fullmatch(r"\d{1,2}", head):
-        minutes = max(2, min(int(head), 30))
+        minutes = max(1, min(int(head), 30))
         raw = body
     text = " ".join(part.strip() for part in raw.replace("|", " ").splitlines() if part.strip())
     # 注册水群维持短句人设；主水群不再限制字数，只留 Telegram 单条的安全阈值。
@@ -1244,8 +1261,7 @@ def _flock_split(reply):
     """把规范化后的水群输出拆成 (kind, 下次分钟, 正文)。"""
     text = str(reply or "").strip()
     if text.upper().startswith("NO_REPLY"):
-        found = re.search(r"\d{1,2}", text)
-        return "skip", max(2, min(int(found.group()) if found else 5, 30)), ""
+        return "skip", 0, ""
     head, sep, body = text.partition("|")
     head = head.strip()
     # 只有带 "N|" 前缀时 head 才是分钟数，否则整段都是正文。
@@ -1922,45 +1938,131 @@ def _flock_hb_save(job_id, chat_id, data):
     set_setting(_flock_hb_key(job_id, chat_id), json.dumps(data, ensure_ascii=False))
 
 
-def _flock_hb_gap(source, minutes):
-    """心跳模式下把面板的"最少/最多间隔"当作兜底唤醒分钟，模型给的数字夹在区间内。"""
-    low = max(2, min(int(source.get("min_messages") or 2), 30))
-    high = max(low, min(int(source.get("max_messages") or low), 30))
-    if minutes:
-        return max(low, min(int(minutes), high))
+def _flock_hb_gap(source, minutes=None):
+    """兜底唤醒分钟：只认面板的"兜底等待"区间，模型给的数字一律不采用。"""
+    low = max(1, min(int(source.get("gap_min") or 1), 30))
+    high = max(low, min(int(source.get("gap_max") or low), 30))
     return random.randint(low, high)
 
 
-def _flock_hb_skip(source, chat_id, minutes):
-    """记一次静默：连续静默到第 4 次就把间隔压回最小，避免它彻底消失。"""
+def _flock_hb_skip(source, chat_id, minutes=None):
+    """记一次静默：等待只取面板兜底区间，第 2 次开始减半、第 3 次压到最小。"""
     job_id = source["job_id"]
     data = _flock_hb_load(job_id, chat_id)
     now = time.time()
     streak = int(data.get("skip_streak") or 0) + 1
-    gap = _flock_hb_gap(source, minutes)
-    if streak >= 4:
-        gap = max(2, min(int(source.get("min_messages") or 2), 30))
+    gap = _flock_hb_gap(source)
+    low = max(1, min(int(source.get("gap_min") or 1), 30))
+    if streak >= 3:
+        gap = low
+    elif streak >= 2:
+        gap = max(low, int(round(gap / 2)))
     data["skip_streak"] = streak
     data["next_wake_at"] = now + gap * 60
     _flock_hb_save(job_id, chat_id, data)
     return streak
 
 
-def _flock_hb_after_reply(source, chat_id, minutes):
-    """记一次发言，并按兜底间隔和连发情况算出下次唤醒时刻。"""
+def _flock_hb_after_reply(source, chat_id, minutes=None):
+    """记一次发言，按面板兜底区间算下次唤醒；模型给的分钟数不采用。"""
     job_id = source["job_id"]
     data = _flock_hb_load(job_id, chat_id)
     now = time.time()
     data["last_spoke_at"] = now
     data["skip_streak"] = 0
     data["recent"] = [item for item in data.get("recent", []) if now - item < 3600] + [now]
-    gap = _flock_hb_gap(source, minutes)
-    # 15 分钟内连发 3 条就强制冷 10 分钟，别把群聊变成单口相声。
-    if len(data["recent"]) >= 3 and now - data["recent"][-3] < 900:
-        gap = max(gap, 10)
+    gap = _flock_hb_gap(source)
     data["next_wake_at"] = now + gap * 60
     _flock_hb_save(job_id, chat_id, data)
     return len(data["recent"])
+
+
+async def _flock_ensure_entity(chat_id):
+    """解析群实体：账号刚重启时 Telethon 缓存为空，直接按 chat_id 取会报 Cannot find any entity。"""
+    runtime = get_runtime()
+    if getattr(runtime, "client", None) is None:
+        return None
+    try:
+        return await asyncio.wait_for(runtime.client.get_entity(int(str(chat_id))), timeout=8)
+    except Exception:
+        pass
+    try:
+        await asyncio.wait_for(_fetch_all_dialogs(), timeout=40)
+    except Exception:
+        log.warning("水群实体扫描失败 群=%s", chat_id)
+        return None
+    try:
+        return await asyncio.wait_for(runtime.client.get_entity(int(str(chat_id))), timeout=8)
+    except Exception:
+        log.warning("水群实体解析失败 群=%s", chat_id)
+        return None
+
+
+def _flock_heartbeat_targets():
+    """兜底唤醒到点的工作群：只取生效中、不干预模式的任务，避免与消息触发抢跑。"""
+    targets, seen = [], set()
+    now = time.time()
+    try:
+        rows = get_account_db().execute("SELECT id, groups FROM ai_flock_jobs WHERE enabled=1 ORDER BY id").fetchall()
+    except sqlite3.Error:
+        return targets
+    for row in rows:
+        for chat in _csv(row["groups"]):
+            chat = str(chat).strip()
+            if not chat or chat in seen:
+                continue
+            try:
+                source = _ai_flock_source(chat)
+            except Exception:
+                continue
+            if not source or source.get("kind") != "scheduled":
+                continue
+            if source.get("job_id") != row["id"] or not source.get("inactive_mode"):
+                continue
+            data = _flock_hb_load(source["job_id"], chat)
+            wake = float(data.get("next_wake_at") or 0)
+            if wake and now >= wake:
+                seen.add(chat)
+                targets.append((source, chat, data))
+    return targets
+
+
+async def _flock_heartbeat_loop():
+    """兜底心跳：不依赖群消息，到点主动唤醒，安静群也能自己开口。"""
+    await asyncio.sleep(6)
+    while True:
+        try:
+            await asyncio.sleep(10)
+            runtime = get_runtime()
+            if getattr(runtime, "client", None) is None:
+                continue
+            tg_state = runtime.tg_state or {}
+            if not tg_state.get("me"):
+                continue
+            if getattr(runtime, "ai_flock_busy", False):
+                continue
+            for source, chat, data in _flock_heartbeat_targets():
+                if chat in runtime.ai_flock_busy_groups:
+                    continue
+                if len(runtime.ai_flock_busy_groups) >= 2:
+                    break
+                now = time.time()
+                data["next_wake_at"] = now + _flock_hb_gap(source) * 60
+                _flock_hb_save(source["job_id"], chat, data)
+                if await _flock_ensure_entity(chat) is None:
+                    data["next_wake_at"] = time.time() + 120
+                    _flock_hb_save(source["job_id"], chat, data)
+                    log.info("水群兜底心跳 群=%s 暂不可解析，2 分钟后再试", chat)
+                    continue
+                runtime.ai_flock_status[chat] = {"job_id": source["job_id"], "chat_id": chat,
+                                                 "stage": "heartbeat", "reason": "兜底心跳唤醒",
+                                                 "updated_at": time.time()}
+                log.info("水群兜底心跳 群=%s 任务=%s", chat, source.get("job_id"))
+                runtime.spawn(_run_ai_flock(chat, ""))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("水群兜底心跳异常")
 
 
 def _message_clock(message):
@@ -1996,6 +2098,8 @@ async def _flock_sender_label(message):
 
 def _flock_rhythm_hint(source):
     """按面板配置的启用时间给一句"刚起/快睡了"的定性提示，不写死任何具体时刻。"""
+    if source.get("active_mode"):
+        return ""
     start_min = _win_minutes(source.get("start_time"))
     end_min = _win_minutes(source.get("end_time"))
     if start_min is None or end_min is None:
@@ -2737,10 +2841,16 @@ def _flock_apply_active(src):
         return src
     src["active_mode"] = 1
     limit = int(src.get("hourly_limit") or 0)
-    if limit > 0:
+    if limit <= 0:
+        src["hourly_limit"] = 12
+    else:
         src["hourly_limit"] = min(60, max(limit * 2, limit + 10))
     src["active_minutes"] = min(60, max(10, int(src.get("active_minutes") or 5) * 2))
-    src["inactive_mode"] = 0
+    # 积极时段不夺走心跳：inactive_mode 保持开启，消息与兜底心跳两条路径并存。
+    src["min_messages"] = 1
+    src["max_messages"] = 2
+    src["gap_min"] = 1
+    src["gap_max"] = 3
     return src
 
 def _flock_time_spans(start_time, end_time, end_next_day=0):
@@ -2800,6 +2910,8 @@ def _ai_flock_source(chat_id):
                     "end_next_day": job["end_next_day"],
                     "inactive_mode": (job["inactive_mode"] if "inactive_mode" in job.keys() else 0),
                     "budget_messages": (job["budget_messages"] if "budget_messages" in job.keys() else 0),
+                    "gap_min": (job["gap_min"] if "gap_min" in job.keys() else 1),
+                    "gap_max": (job["gap_max"] if "gap_max" in job.keys() else 3),
                     **{field: job[field] for field in ("min_messages", "max_messages", "hourly_limit", "active_minutes")}}
             return _flock_apply_active(src)
     return None
@@ -2878,6 +2990,12 @@ def _ai_flock_test_source(job_id, chat_id):
 
 def _flock_stage(progress, stage, reason=""):
     progress.update(stage=stage, reason=reason, updated_at=time.time())
+    try:
+        chat = str(progress.get("chat_id") or "")
+        if chat and progress.get("job_id"):
+            get_runtime().ai_flock_status[chat] = progress
+    except Exception:
+        pass
     persona_store.event(get_account_db(), stage, {"reason": reason})
 
 
@@ -2905,7 +3023,7 @@ def _flock_frequency_ready(chat_id, direct_to_self=False):
     active = now < state["active_until"]
     reason = ""
     # 不干预模式下每小时条数由活跃额度接管，这里不再重复拦截。
-    if (not source.get("inactive_mode") and source["hourly_limit"] > 0
+    if ((source.get("active_mode") or not source.get("inactive_mode")) and source["hourly_limit"] > 0
             and _flock_hourly_count(source, key) >= source["hourly_limit"]):
         reason = "最近一小时已达 %s 条发言上限" % source["hourly_limit"]
     elif now - runtime.ai_flock_last.get(key, -1e9) < (20 if active else 60):
@@ -2932,13 +3050,21 @@ def _flock_frequency_ready(chat_id, direct_to_self=False):
         recent = [item for item in data.get("recent", []) if now_epoch - item < 3600]
         if budget > 0 and len(recent) >= budget:
             progress = {"job_id": job_id, "chat_id": key}
-            _flock_stage(progress, "resting", "最近一小时说了 %s 条，先歇一会" % len(recent))
+            recover_at = recent[max(0, len(recent) - budget)] + 3600
+            _flock_stage(progress, "resting", "最近一小时说了 %s 条（上限 %s），约 %s 恢复" % (
+                len(recent), budget, time.strftime("%H:%M", time.localtime(recover_at))))
             runtime.ai_flock_status[key] = progress
             return False
+        if source.get("active_mode"):
+            # 积极时段：消息一到就接，不再等心跳；丢弃模型自决，交给提示词与人设。
+            data["next_wake_at"] = now_epoch + _flock_hb_gap(source) * 60
+            _flock_hb_save(job_id, key, data)
+            return True
         if now_epoch < wake_at:
             progress = {"job_id": job_id, "chat_id": key}
             _flock_stage(progress, "waiting_wake",
-                         "等它自己决定下次开口，还有约 %d 分钟" % max(1, int((wake_at - now_epoch) // 60)))
+                         "下次唤醒 %s（约 %d 分钟后）" % (time.strftime("%H:%M", time.localtime(wake_at)),
+                                          max(1, int(round((wake_at - now_epoch) / 60)))))
             runtime.ai_flock_status[key] = progress
             return False
         # 先占住一个兜底间隔，模型返回后会用自己的数字覆盖，避免并发重复触发。
@@ -3048,7 +3174,8 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
     try:
         if not testing:
             await asyncio.sleep(random.uniform(8.0, 25.0) if registration else random.uniform(2.0, 5.0))
-        messages = await asyncio.wait_for(runtime.client.get_messages(chat_id, limit=context_messages), timeout=15)
+        entity = await _flock_ensure_entity(chat_id) or chat_id
+        messages = await asyncio.wait_for(runtime.client.get_messages(entity, limit=context_messages), timeout=15)
         if registration:
             usable = [message for message in reversed(list(messages or []))
                       if str(getattr(message, "raw_text", "") or "").strip()
@@ -3104,7 +3231,7 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
                             "每条记录格式是「时间 发送者：内容」，发送者不同就是不同的人，"
                             "不要把不同人的话当成同一个人说的，也不要把别人的话当成自己说的。"
                             "消息前面的时间是发送时刻，超过两小时的就别接了，那已经是旧话题。")
-            if source.get("inactive_mode"):
+            if source.get("inactive_mode") and not source.get("active_mode"):
                 last_spoke = _flock_hb_load(source.get("job_id"), key).get("last_spoke_at") if source.get("job_id") else 0
                 gap_text = ""
                 if last_spoke:
@@ -3177,10 +3304,16 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
                             "这是明确的主动发言请求，不使用人格中的低概率插话或等待他人提问规则。"
                             "只输出最终消息，不要介绍测试过程：\n" + json.dumps(trigger_text, ensure_ascii=False))
         else:
-            instruction += ("\n当前触发消息：" + json.dumps(trigger, ensure_ascii=False)
-                            + ("。这是直接回复你的消息，可以自然接话。" if direct_to_self else "。根据聊天语境决定是否参与。"))
+            if trigger:
+                instruction += ("\n当前触发消息：" + json.dumps(trigger, ensure_ascii=False)
+                                + ("。这是直接回复你的消息，可以自然接话。" if direct_to_self else "。根据聊天语境决定是否参与。"))
+            else:
+                instruction += ("\n这一轮没有新消息，是你自己想起来看一眼群里最近的聊天。自己判断要不要开口，"
+                                "要开口就接着最近的话题自然说一句，不要复述别人的话。")
             # 心跳模式下"该不该说"已经交给模型，这段不能再说"程序已决定让你说"。
-            if not registration and not source.get("inactive_mode"):
+            if source.get("active_mode"):
+                instruction += "\n本轮是积极时段，程序已按消息间隔与小时上限放行：直接开口，不要输出 NO_REPLY 或 SKIP。"
+            elif not registration and not source.get("inactive_mode"):
                 instruction += "\n程序已按消息间隔与小时上限决定本次尝试接话，不再重复进行概率抽签。只在确实不适合接话时输出NO_REPLY。"
             # 群聊记录放最后，JSON 后面不再挂文字，避免影响解析。
             if not registration:
@@ -3231,8 +3364,11 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
         kind, next_minutes, reply_text = _flock_split(reply)
         if kind == "skip":
             if source.get("inactive_mode") and source.get("job_id") and not testing:
-                streak = _flock_hb_skip(source, key, next_minutes)
-                reason_text = "模型选择不说，%s 分钟后再看（已连续 %s 次）" % (next_minutes, streak)
+                streak = _flock_hb_skip(source, key)
+                wake_at = float(_flock_hb_load(source["job_id"], key).get("next_wake_at") or 0)
+                reason_text = "模型选择不说，%s 再看（%s 分钟后，已连续 %s 次）" % (
+                    time.strftime("%H:%M", time.localtime(wake_at)) if wake_at else "稍后",
+                    max(1, int(round((wake_at - time.time()) / 60))) if wake_at else 1, streak)
             else:
                 reason_text = "模型明确选择不回复（NO_REPLY），不换线路强迫发言"
             runtime.ai_flock_last[key] = time.monotonic()
@@ -3288,7 +3424,7 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
         _record_memory_usage("skill", [item for item in used_ids if item.startswith("s")])
         _record_memory_usage("study", [item for item in used_ids if item.startswith(("t", "k"))])
         if source.get("inactive_mode") and source.get("job_id") and not testing:
-            _flock_hb_after_reply(source, key, next_minutes)
+            _flock_hb_after_reply(source, key)
         runtime.ai_flock_last[key] = time.monotonic()
         call_trace["elapsed_ms"] = round((time.monotonic() - started) * 1000)
         _flock_stage(progress, "sent", "消息已发送")
@@ -8692,9 +8828,11 @@ async def lifespan(app):
         backup_task = asyncio.create_task(auto_backup_loop())
         knowledge_task = asyncio.create_task(knowledge_upload_loop())
         friends_task = asyncio.create_task(friends_upload_loop())
+        flock_task = asyncio.create_task(_flock_heartbeat_loop())
         yield
     finally:
-        for task in (locals().get("backup_task"), locals().get("knowledge_task"), locals().get("friends_task")):
+        for task in (locals().get("backup_task"), locals().get("knowledge_task"),
+                     locals().get("friends_task"), locals().get("flock_task")):
             try:
                 task.cancel()
             except AttributeError:
@@ -9163,12 +9301,16 @@ class AIFlockJobInput(BaseModel):
     active_minutes: int = Field(5, ge=0, le=30)
     inactive_mode: int = Field(0, ge=0, le=1)
     budget_messages: int = Field(0, ge=0, le=60)
+    gap_min: int = Field(1, ge=1, le=30)
+    gap_max: int = Field(3, ge=1, le=30)
 
 
 def _validated_flock_job(body, exclude_id=None, legacy=False):
     name, prompt = body.name.strip(), body.prompt.strip()
     if not name:
         raise HTTPException(400, "任务名称不能为空")
+    if not 1 <= body.gap_min <= body.gap_max <= 30:
+        raise HTTPException(400, "兜底等待须为 1–30 分钟且下限不大于上限")
     if (not 1 <= body.min_messages <= body.max_messages <= 100
             or body.hourly_limit not in (-1,) and not 1 <= body.hourly_limit <= 60
             or not 0 <= body.active_minutes <= 30):
@@ -9270,10 +9412,10 @@ async def create_ai_flock_job(body: AIFlockJobInput):
     cur = get_account_db().execute(
         "INSERT INTO ai_flock_jobs(name,enabled,groups,start_time,end_time,prompt,provider_ids,reaction,"
         "context_messages,message_chars,skill_chars,max_tokens,knowledge_chars,knowledge_on_demand,end_next_day,"
-        "min_messages,max_messages,hourly_limit,active_minutes,inactive_mode,budget_messages,created_at,updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "min_messages,max_messages,hourly_limit,active_minutes,inactive_mode,budget_messages,gap_min,gap_max,"
+        "created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (*values, body.min_messages, body.max_messages, body.hourly_limit, body.active_minutes,
-         body.inactive_mode, body.budget_messages, now, now))
+         body.inactive_mode, body.budget_messages, body.gap_min, body.gap_max, now, now))
     get_account_db().commit()
     return {"ok": True, "id": cur.lastrowid}
 
@@ -9289,9 +9431,10 @@ async def update_ai_flock_job(job_id: int, body: AIFlockJobInput):
     get_account_db().execute(
         "UPDATE ai_flock_jobs SET name=?,enabled=?,groups=?,start_time=?,end_time=?,prompt=?,provider_ids=?,reaction=?,"
         "context_messages=?,message_chars=?,skill_chars=?,max_tokens=?,knowledge_chars=?,knowledge_on_demand=?,end_next_day=?,"
-        "min_messages=?,max_messages=?,hourly_limit=?,active_minutes=?,inactive_mode=?,budget_messages=?,updated_at=? WHERE id=?",
+        "min_messages=?,max_messages=?,hourly_limit=?,active_minutes=?,inactive_mode=?,budget_messages=?,"
+        "gap_min=?,gap_max=?,updated_at=? WHERE id=?",
         (*values, body.min_messages, body.max_messages, body.hourly_limit, body.active_minutes,
-         body.inactive_mode, body.budget_messages, int(time.time()), job_id))
+         body.inactive_mode, body.budget_messages, body.gap_min, body.gap_max, int(time.time()), job_id))
     get_account_db().commit()
     for key in list(get_runtime().ai_flock_frequency):
         if key[0] == job_id:
