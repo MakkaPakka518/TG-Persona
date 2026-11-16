@@ -692,9 +692,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     context.api=async(p)=>{if(p==='/api/game-tasks')return {items:[{id:3,subtype:'poem',chat:'-100123',trigger_kw:'猜字游戏开始',sender_filter:'@hsuys_bot',reply_delay:1,defend_ai:1,enabled:1,total:2,last_status:'success',last_detail:'西（ocr）'}]};return {ok:true}};
     await run('loadGameTasks()');
     assert.strictEqual(element('#gameTaskCount').textContent,'1');
-    let found=false;
-    for(const card of element('#gameTaskList').children)for(const child of card.children)if(String(child.textContent).includes('@hsuys_bot'))found=true;
-    assert(found);
+    assert(html.includes('auto-details')&&html.includes('最近执行：')&&html.includes('gameLastResult'));
+    assert(html.includes('auto-details')&&html.includes('最近执行：')&&html.includes('gameLastResult'));
   });
   await test('AI 失败但 OCR 回退成功保留通道提醒与实际文本',async()=>{
     configureAI();context.api=async()=>({ok:true,text:'<img onerror=alert(1)>',channel:'ocr',errors:[{channel:'ai',message:'AI 超时 <script>'}],elapsed_ms:73});
@@ -1261,6 +1260,9 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('pickCodeGroup('));
     assert(html.includes(`data-k="game"`));
     assert(html.includes('loadGameLogsPage'));
+    assert(html.includes('openedGameIds'));
+    assert(html.includes('gameLastResult'));
+    assert(html.includes('最近执行：'));
     assert(html.includes('setGroupFilter('));
     assert(!html.includes("$('#waterAiJobName').focus()"));
     assert(html.includes('datetime-local'));

@@ -4899,57 +4899,57 @@ function gameStatusText(t){
   if(!t.last_at)return t.enabled?('待触发 · 共 '+Number(t.total||0)+' 次'):'已停用';
   return (t.last_status==='success'?'上次成功':'上次失败')+' · '+t.last_at+(t.last_detail?(' · '+t.last_detail):'');
 }
+const openedGameIds=new Set();
+function toggleGameExpanded(id){if(openedGameIds.has(id))openedGameIds.delete(id);else openedGameIds.add(id);renderGameTasks()}
+function gameLastResult(t){
+  const st=gameLogStats[String(t.id)]||{};
+  const lines=['最近执行：'+(t.last_at||'暂无')];
+  lines.push('结果：'+(t.last_status==='success'?'成功':(t.last_status==='failed'?'失败':'暂无记录')));
+  if(t.last_detail)lines.push('原因：'+t.last_detail);
+  lines.push('累计：成功 '+Number(st.success||t.total||0)+' 次 · 失败 '+Number(st.failed||0)+' 次');
+  lines.push('今日：成功 '+Number(st.today_success||0)+' 次 · 失败 '+Number(st.today_failed||0)+' 次');
+  return lines.join('\n');
+}
 function renderGameTasks(){
   const box=$('#gameTaskList'),empty=$('#gameTaskEmpty'),cnt=$('#gameTaskCount'),cnt2=$('#gamePoemCount');
   if(!box)return;
-  box.innerHTML='';
   const rows=gameTasks.filter(t=>t.subtype==='poem');
   if(cnt)cnt.textContent=String(rows.length);
   if(cnt2)cnt2.textContent=String(rows.length);
   if(empty)empty.style.display=rows.length?'none':'';
-  for(const t of rows){
-    const card=document.createElement('div');
-    card.className='card';
-    card.style.marginTop='10px';
-    const head=document.createElement('div');
-    head.className='flex';
-    head.style.cssText='gap:8px;align-items:center;justify-content:space-between';
-    const title=document.createElement('b');
-    title.textContent='古诗填空 · '+(t.chat||'未设置群');
-    head.appendChild(title);
-    const ops=document.createElement('div');
-    ops.className='flex';
-    ops.style.cssText='gap:6px';
-    const toggle=document.createElement('button');
-    toggle.className='ghost';
-    toggle.type='button';
-    toggle.textContent=t.enabled?'停用':'启用';
-    toggle.onclick=()=>toggleGameTask(t.id);
-    const edit=document.createElement('button');
-    edit.className='ghost';
-    edit.type='button';
-    edit.textContent='编辑';
-    edit.onclick=()=>openGameForm(t.id);
-    const del=document.createElement('button');
-    del.className='ghost';
-    del.type='button';
-    del.textContent='删除';
-    del.onclick=()=>deleteGameTask(t.id);
-    ops.appendChild(toggle);ops.appendChild(edit);ops.appendChild(del);
-    head.appendChild(ops);
-    card.appendChild(head);
-    const meta=document.createElement('div');
-    meta.className='hint';
-    meta.style.marginTop='6px';
-    meta.textContent='关键词：'+(t.trigger_kw||'—')+' · 出题人：'+(t.sender_filter||'不限')+' · 延迟：'+(t.reply_delay||1)+'s'+(t.defend_ai?' · 被质疑 AI 水群':'')+(t.wait_others?' · 等 1-3 人答对后跟（'+Number(t.wait_timeout||30)+'s 内）':'');
-    card.appendChild(meta);
-    const status=document.createElement('div');
-    status.className='hint';
-    const st=gameLogStats[String(t.id)]||{};
-    status.textContent=gameStatusText(t)+' ｜ 今日 成功 '+Number(st.today_success||0)+' · 失败 '+Number(st.today_failed||0)+' ｜ 累计 成功 '+Number(st.success||0)+' · 失败 '+Number(st.failed||0);
-    card.appendChild(status);
-    box.appendChild(card);
-  }
+  const owner=accountContext();
+  box.innerHTML=rows.map(t=>{
+    const open=openedGameIds.has(t.id),st=gameLogStats[String(t.id)]||{};
+    const wait=t.wait_others?' · 等 1–3 人答对后跟（'+Number(t.wait_timeout||30)+'s 内）':'';
+    return `<div class="card auto-card" data-game-card="${t.id}" style="margin-top:10px">
+      <div class="auto-top">
+        <div class="grow"><div class="auto-title">古诗填空 · ${esc(t.chat||'未设置群')}</div>
+          <div class="s" style="font-size:10px">${esc(gameStatusText(t))}</div></div>
+        <div class="auto-tail">
+          <span class="tag ${t.enabled?'ok':'off'}">${t.enabled?'已启用':'已停用'}</span>
+          <button type="button" class="ghost" data-game-action="toggle" data-game-id="${t.id}">${t.enabled?'停用':'启用'}</button>
+          <button type="button" class="ghost" data-game-action="edit" data-game-id="${t.id}">编辑</button>
+          <button type="button" class="danger" data-game-action="delete" data-game-id="${t.id}">删除</button>
+          <button type="button" class="ghost" data-game-action="expand" data-game-id="${t.id}" aria-expanded="${open}" aria-label="${open?'收起':'展开'}任务详情">▸</button>
+        </div>
+      </div>
+      ${open?`<div class="auto-details">
+        <div class="s">关键词：${esc(t.trigger_kw||'—')} · 出题人：${esc(t.sender_filter||'不限')} · 延迟：${esc(t.reply_delay||1)}s${wait}${t.defend_ai?' · 被质疑 AI 水群':''}</div>
+        <div class="s">今日 成功 ${Number(st.today_success||0)} · 失败 ${Number(st.today_failed||0)} ｜ 累计 成功 ${Number(st.success||0)} · 失败 ${Number(st.failed||0)}</div>
+        <pre class="auto-result">${esc(gameLastResult(t))}</pre>
+      </div>`:''}
+    </div>`;
+  }).join('');
+  box.onclick=e=>{
+    const btn=e.target.closest('[data-game-action]');
+    if(!btn||!box.contains(btn)||!isCurrentAccount(owner))return;
+    const id=Number(btn.dataset.gameId),act=btn.dataset.gameAction;
+    if(!Number.isSafeInteger(id))return;
+    if(act==='toggle')toggleGameTask(id);
+    else if(act==='edit')openGameForm(id);
+    else if(act==='delete')deleteGameTask(id);
+    else if(act==='expand')toggleGameExpanded(id);
+  };
 }
 function openGameForm(id){
   gameEditId=id||null;
