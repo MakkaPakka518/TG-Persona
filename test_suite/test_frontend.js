@@ -1242,6 +1242,10 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('近到远翻群历史'));
     assert(html.includes('waterAiPeopleRefHint'));
     assert(html.includes('peopleHistoryStart'));
+    assert(html.includes('消息记忆'));
+    assert(html.includes('人物画像（可选，只对白名单）'));
+    assert(html.includes('peopleGroups'));
+    assert(html.includes('画像监控群'));
     assert(html.includes('datetime-local'));
     assert(html.includes('人物画像命中'));
     assert(html.includes("/api/ai/flock/people"));

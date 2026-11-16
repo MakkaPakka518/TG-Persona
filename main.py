@@ -3292,6 +3292,17 @@ def _people_on():
     return _people_normal_on() or _people_white_on()
 
 
+def _people_water_groups():
+    """AI 水群任务里选中的群：普通人只在这些群记录，人物画像强制纳入。"""
+    groups = set()
+    try:
+        for row in get_account_db().execute("SELECT groups FROM ai_flock_jobs WHERE enabled=1").fetchall():
+            groups.update(item for item in _csv(row[0] or "") if item)
+    except Exception:
+        return groups
+    return groups
+
+
 def _people_track(tg_id):
     return _people_white_on() if str(tg_id or "") in _people_ids() else _people_normal_on()
 
@@ -3359,6 +3370,8 @@ def _people_capture(sender, chat_id, text, ts=None):
     """只存通过信息量过滤的短句；每人按上限滑动保留，旧的直接让位。"""
     tg_id = str(getattr(sender, "id", "") or "")
     if not tg_id or not text or not _people_track(tg_id):
+        return False
+    if tg_id not in _people_ids() and str(chat_id) not in _people_water_groups():
         return False
     lines, _window = _people_limits(tg_id)
     db = get_account_db()
@@ -3498,7 +3511,10 @@ async def _people_history_round():
         return 0
     db = get_account_db()
     watched = {row[0] for row in db.execute("SELECT chat_id FROM watched_groups").fetchall()}
-    groups = [g for g in _csv(get_setting("flock_learning_groups", "")) if g in watched]
+    merged = set(_people_water_groups()) | set(_csv(get_setting("flock_people_groups", "")))
+    groups = [g for g in sorted(merged) if g in watched]
+    if not groups:
+        return 0
     total = 0
     for group in groups:
         cursor = int(get_setting("flock_people_history_cursor_" + group, "0") or 0)
@@ -10312,6 +10328,7 @@ class PeopleMemoryInput(BaseModel):
     history: bool = False
     history_start: str = Field("", max_length=19)
     history_end: str = Field("", max_length=19)
+    groups: str = Field("", max_length=4000)
 
 
 @app.get("/api/ai/flock/people")
@@ -10325,6 +10342,8 @@ async def get_people_memory():
     return {"enabled": _people_on(), "normal": _people_normal_on(), "white": _people_white_on(),
             "profile": _people_profile_on(), "auto_distill": _people_auto_on(),
             "history": get_setting("flock_people_history_enabled", "0") == "1",
+            "groups": get_setting("flock_people_groups", "") or "",
+            "ai_groups": ",".join(sorted(_people_water_groups())),
             "history_start": get_setting("flock_people_history_start", "") or "",
             "history_end": get_setting("flock_people_history_end", "") or "",
             "lines": _people_limits("")[0], "white_lines": PEOPLE_WHITE_LINES,
@@ -10345,6 +10364,7 @@ async def put_people_memory(body: PeopleMemoryInput):
     set_setting("flock_people_normal_enabled", "1" if body.normal else "0")
     set_setting("flock_people_white_enabled", "1" if body.white else "0")
     set_setting("flock_people_history_enabled", "1" if body.history else "0")
+    set_setting("flock_people_groups", ",".join(item for item in _csv(body.groups) if item)[:4000])
     set_setting("flock_people_history_start", str(body.history_start)[:19])
     set_setting("flock_people_history_end", str(body.history_end)[:19])
     set_setting("flock_people_profile_enabled", "1" if body.profile else "0")
