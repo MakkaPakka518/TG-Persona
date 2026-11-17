@@ -4,6 +4,7 @@
 """
 import ast
 import difflib
+import gzip
 import asyncio
 import base64
 from collections import OrderedDict
@@ -12,6 +13,7 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 import hashlib
 import hmac
+import itertools
 import ipaddress
 import io
 import json
@@ -104,7 +106,7 @@ def load_backend():
                         '_CODE_USED_NOTICE_RE', '_CODE_MASK_CHARS', 'KNOWLEDGE_AUTO_MAX_BYTES',
                         'KNOWLEDGE_MAX_BYTES', 'SKILL_MAX_BYTES',
                         '_LE_REPEAT', '_LE_CATEGORY_WORDS', '_LE_NEUTRAL', '_LE_SIGNAL', '_LE_CHARS',
-                        '_LE_REPLAY', '_LE_STATS', '_LE_SAMPLES', '_LE_FLUSH_AT', "PEOPLE_LINES", "PEOPLE_WHITE_LINES", "PEOPLE_BUDGET", "PEOPLE_SAMPLE_STEP", "_PEOPLE_RUNNING", "_PEOPLE_TRACE", "PEOPLE_PERSONA_SECTIONS", "PEOPLE_PERSONA_MAX_CHARS", "PEOPLE_MBTI_OK", "PEOPLE_ZODIAC_OK", "STUDY_LAYER_DETAIL_MAX", "STUDY_LAYER_SUMMARY_MAX", "STUDY_LAYER_MAX_WORK", "STUDY_LAYER_PAGE_MERGED", "RECALL_FLOOR", "RECALL_DUP_RATIO", "RECALL_STABLE_RATIO", "PEOPLE_PROFILE_PROMPT", "_POEM_PUNCT", "POEM_MASK_CHARS",
+                        '_LE_REPLAY', '_LE_STATS', '_LE_SAMPLES', '_LE_FLUSH_AT', "PEOPLE_LINES", "PEOPLE_WHITE_LINES", "PEOPLE_BUDGET", "PEOPLE_SAMPLE_STEP", "_PEOPLE_RUNNING", "_PEOPLE_TRACE", "PEOPLE_PERSONA_SECTIONS", "PEOPLE_PERSONA_MAX_CHARS", "PEOPLE_MBTI_OK", "PEOPLE_ZODIAC_OK", "STUDY_LAYER_DETAIL_MAX", "STUDY_LAYER_SUMMARY_MAX", "STUDY_LAYER_MAX_WORK", "STUDY_LAYER_PAGE_MERGED", "RECALL_FLOOR", "RECALL_DUP_RATIO", "RECALL_STABLE_RATIO", "PEOPLE_PROFILE_PROMPT", "_POEM_PUNCT", "POEM_MASK_CHARS", "POEM_FILL_MASK_CHARS", "_poem_lines", "_poem_lock",
                         'MEMORY_STALE_DAYS', 'SENT_DEDUPE_SECONDS', 'BUBBLE_SPLIT_RATIO',
                         'BUBBLE_SPLIT_RATIO_AFTER_GRAB', 'BUBBLE_MAX_PARTS'}
     selected = []
@@ -116,8 +118,8 @@ def load_backend():
             selected.append(node)
     names = {name: globals()[name] for name in ('ast', 'asyncio', 'base64', 'OrderedDict', 'datetime',
              'timezone', 'timedelta', 'hashlib', 'hmac', 'ipaddress', 'json', 'math', 'random', 're',
-               'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'difflib', 'ContextVar', 'uuid', 'shutil', 'telethon_markdown', 'persona_store', 'persona_features', 'emby_keepalive')}
-    names.update(BaseModel=Model, Optional=Optional, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
+               'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'difflib', 'threading', 'gzip', 'itertools', 'ContextVar', 'uuid', 'shutil', 'telethon_markdown', 'persona_store', 'persona_features', 'emby_keepalive')}
+    names.update(__file__=str(SOURCE), BaseModel=Model, Optional=Optional, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
                   HTTPException=HTTPException, JSONResponse=Response, Response=Response, os=os, io=io,
                   log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=RPCError,
                   AuthKeyUnregisteredError=Unauthorized), ZoneInfo=None,
@@ -851,6 +853,19 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second['signin_success_mask'], 3)
         self.assertTrue((await self.b['list_autos']())['autos'][0]['signed_today'])
         self.assertEqual(self.b['run_signin'].await_count, 2)
+
+    async def test_signin_poem_mode_saved(self):
+        aid = await self.create(signin_recognition_mode='poem', signin_image_action='reply')
+        self.assertEqual(self.row(aid)['signin_recognition_mode'], 'poem')
+        self.assertEqual(self.row(aid)['signin_image_action'], 'reply')
+
+    def test_poem_fill_solver_reads_missing_chars(self):
+        answers, detail = self.b['_poem_solve_fill']('月落乌 霜满天，江枫渔 对愁眠')
+        self.assertEqual(len(answers), 2)
+        self.assertEqual(answers[0], '啼')
+        self.assertTrue(detail)
+        answers, _ = self.b['_poem_solve_fill']('月落乌啼霜满天')
+        self.assertEqual(answers, [])
 
     async def test_db_migration_adds_attempt_and_preserves_legacy_success(self):
         aid = await self.create()

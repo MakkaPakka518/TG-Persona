@@ -40,6 +40,7 @@ import hmac
 import csv
 import difflib
 import io
+import itertools
 import shutil
 import subprocess
 import socket
@@ -7110,7 +7111,7 @@ def _signin_recognition_mode(task):
         mode = str(task["signin_recognition_mode"] or "").strip()
     except (KeyError, IndexError, TypeError):
         mode = ""
-    if mode in ("none", "captcha", "image"):
+    if mode in ("none", "captcha", "image", "poem"):
         return mode
     try:
         return "captcha" if task["signin_captcha"] else "none"
@@ -7237,7 +7238,8 @@ async def run_signin(a):
             message = ("本轮未收到带验证提示的新图片" if recognition_mode == "captcha" else "本轮未收到可识别的新图片")
             return _task_failure(a, message + "；已忽略欢迎图和旧图，未提交识别结果", cmd)
         image_buttons, image_options = [], []
-        image_action = str(a["signin_image_action"] or "reply") if recognition_mode == "image" else "reply"
+        image_action = "click" if recognition_mode == "poem" else (
+            str(a["signin_image_action"] or "reply") if recognition_mode == "image" else "reply")
         if image_action == "click":
             try:
                 image_buttons = await cap_m.get_buttons() or []
@@ -7246,9 +7248,15 @@ async def run_signin(a):
             image_options = _image_options([getattr(button, "text", "") for row in image_buttons for button in row])
             if not image_options:
                 return _task_failure(a, "图片识别未找到可选择的机器人按钮", cmd)
+        poem_answers = []
         try:
             if recognition_mode == "captcha":
                 cap_ans = await recognize_image_text(img, provider_ids=a["ai_provider_ids"])
+            elif recognition_mode == "poem":
+                poem = await recognize_poem_fill(img, image_options, a["ai_provider_ids"])
+                poem_answers = poem["answers"]
+                cap_ans = "".join(poem_answers)
+                log.info("签到古诗填空：%s（%s）", cap_ans, poem["channel"])
             else:
                 cap_ans = await recognize_image_answer(
                     img, a["signin_image_prompt"] or DEFAULT_SIGNIN_IMAGE_PROMPT,
@@ -7260,14 +7268,30 @@ async def run_signin(a):
         try:
             outcome_baseline = await _message_snapshot(ent)
             if image_action == "click":
-                image_button = next((button for row in image_buttons for button in row
-                                     if str(getattr(button, "text", "") or "").strip() == cap_ans), None)
-                if image_button is None:
-                    return _task_failure(a, "图片识别结果无法匹配机器人按钮", cmd)
-                await image_button.click()
-                image_btn_clicked = cap_ans
-                result_min_id = max(captcha_min_id, cap_m.id)
-                log.info("签到图片识别已点击选项: %s", cap_ans)
+                if recognition_mode == "poem":
+                    # 每点一个字就重新取一次按钮：机器人可能点完一个字就改按钮行
+                    for ch in poem_answers:
+                        try:
+                            buttons = await cap_m.get_buttons() or image_buttons
+                        except Exception:
+                            buttons = image_buttons
+                        image_button = _poem_find_button(buttons, ch)
+                        if image_button is None:
+                            return _task_failure(a, "古诗填空答案「%s」在按钮里找不到对应字" % ch, cmd)
+                        await image_button.click()
+                        image_btn_clicked = (image_btn_clicked or "") + ch
+                        await asyncio.sleep(float(a["button_delay"]))
+                    result_min_id = max(captcha_min_id, cap_m.id)
+                    log.info("签到古诗填空已依次点击: %s", cap_ans)
+                else:
+                    image_button = next((button for row in image_buttons for button in row
+                                         if str(getattr(button, "text", "") or "").strip() == cap_ans), None)
+                    if image_button is None:
+                        return _task_failure(a, "图片识别结果无法匹配机器人按钮", cmd)
+                    await image_button.click()
+                    image_btn_clicked = cap_ans
+                    result_min_id = max(captcha_min_id, cap_m.id)
+                    log.info("签到图片识别已点击选项: %s", cap_ans)
             else:
                 cap_sent = await _send_generated_message(ent, cap_ans)
                 min_id = cap_sent.id
@@ -7302,7 +7326,7 @@ async def run_signin(a):
     if a["click_btn"]:
         desc += " + 点按钮"
     if cap_ans:
-        desc += f" + {'验证码' if recognition_mode == 'captcha' else '图片选项' if image_btn_clicked else '图片答案'}「{cap_ans}」"
+        desc += f" + {'验证码' if recognition_mode == 'captcha' else '古诗填空' if recognition_mode == 'poem' else '图片选项' if image_btn_clicked else '图片答案'}「{cap_ans}」"
     if points:
         desc += f" · 积分 {points}"
     if fail:
@@ -9148,6 +9172,125 @@ def _poem_normalize_answer(value):
     return text[:1]
 
 
+POEM_FILL_MASK_CHARS = set(POEM_MASK_CHARS) | set("□▢◻◼◽◾⬜⬛▫▪口囗")
+POEM_FILL_PROMPT = ("你在处理 Telegram 机器人的防机器签到：图片是一首古诗，其中若干字被方框或空白遮住，"
+                    "下方按钮是候选字。请按从左到右、从上到下的顺序，只输出缺失的字，连在一起，"
+                    "例如「啼火」，不要输出完整诗句、标点、解释或思考过程。")
+
+
+def _poem_fill_segments(raw_text):
+    out = []
+    for raw in re.split(r"[，。！？、；：\n\r,;!?]+", str(raw_text or "")):
+        seg = "".join(ch for ch in raw if ch not in _POEM_PUNCT and not ch.isspace())
+        if len(seg) >= 4:
+            out.append(seg)
+    return out
+
+
+def _poem_fill_window(cand, seg):
+    """在候选诗句里对齐取窗口；遮罩位或 OCR 吃掉的字就是要点的答案。"""
+    cand = "".join(ch for ch in str(cand or "") if ch not in _POEM_PUNCT and not ch.isspace())
+    prefix = seg[:3] if len(seg) >= 3 else seg
+    pos = cand.find(prefix)
+    if pos < 0:
+        return None
+    masks = [i for i, ch in enumerate(seg) if ch in POEM_FILL_MASK_CHARS]
+    if masks:
+        win = cand[pos:pos + len(seg)]
+        if len(win) < len(seg):
+            return None
+        suffix = seg[masks[-1] + 1:]
+        if len(suffix) >= 2 and not win.endswith(suffix):
+            return None
+        return tuple(win[i] for i in masks)
+    # 没有遮罩字符：OCR 把方框丢掉了，候选窗口比原文多 1~3 个字
+    if cand[pos:pos + len(seg)] == seg:
+        return None                     # 这一句本来就是完整的，不是填空
+    for extra in (1, 2, 3):
+        win = cand[pos:pos + len(seg) + extra]
+        if len(win) < len(seg) + extra:
+            continue
+        for idx in itertools.combinations(range(len(win)), extra):
+            keep = "".join(ch for i, ch in enumerate(win) if i not in idx)
+            if keep != seg:
+                continue
+            chars = tuple(win[i] for i in idx)
+            if all("\u4e00" <= ch <= "\u9fff" for ch in chars):
+                return chars
+    return None
+
+
+def _poem_solve_segment(seg):
+    cands = _poem_candidates(seg[:3], limit=400) if len(seg) >= 3 else []
+    found = {}
+    for cand in cands:
+        window = _poem_fill_window(cand, seg)
+        if window and window not in found:
+            found[window] = cand
+    if len(found) != 1:
+        return None
+    answers = next(iter(found))
+    return answers, found[answers]
+
+
+def _poem_solve_fill(raw_text, limit=4):
+    """从 OCR 文本里解出所有缺字，按阅读顺序返回。"""
+    answers, lines = [], []
+    for seg in _poem_fill_segments(raw_text):
+        solved = _poem_solve_segment(seg)
+        if not solved:
+            continue
+        answers.extend(solved[0])
+        lines.append(solved[1])
+    if not answers or len(answers) > limit:
+        return [], ""
+    return answers, " / ".join(lines)
+
+
+def _poem_find_button(buttons, char):
+    """在按钮里找候选字：先精确匹配，再容忍按钮文字里带少量修饰。"""
+    for row in buttons or []:
+        for button in row:
+            if str(getattr(button, "text", "") or "").strip() == char:
+                return button
+    for row in buttons or []:
+        for button in row:
+            text = str(getattr(button, "text", "") or "").strip()
+            if len(text) <= 3 and char in text:
+                return button
+    return None
+
+
+async def recognize_poem_fill(image_bytes, options, provider_ids=None):
+    """古诗填空：本地诗库优先，AI 兜底；结果必须全部来自按钮候选。"""
+    options = _image_options(options)
+    errors = []
+    ocr_text = ""
+    if get_setting("ocr_enabled", "1") == "1":
+        try:
+            loop = asyncio.get_running_loop()
+            ocr_text = await asyncio.wait_for(loop.run_in_executor(None, _poem_ocr_text, image_bytes), timeout=45)
+            answers, detail = _poem_solve_fill(ocr_text)
+            if answers and all(ch in options for ch in answers):
+                return {"answers": answers, "channel": "ocr", "detail": detail, "ocr_text": ocr_text}
+            if answers:
+                errors.append({"channel": "ocr", "message": "解出「%s」但按钮里没有" % "".join(answers)})
+        except Exception as error:
+            errors.append({"channel": "ocr", "message": str(error)[:160]})
+            log.warning("古诗填空本地 OCR 失败：%s", str(error)[:160])
+    if get_setting("ai_enabled", "0") == "1":
+        try:
+            text = await recognize_image_answer(
+                image_bytes, POEM_FILL_PROMPT, provider_ids=provider_ids)
+            answers = [ch for ch in str(text or "") if ch in options]
+            if answers and len(answers) <= 4:
+                return {"answers": answers, "channel": "ai", "detail": str(text)[:120], "ocr_text": ocr_text}
+            errors.append({"channel": "ai", "message": "AI 输出无法对应按钮：" + str(text)[:60]})
+        except Exception as error:
+            errors.append({"channel": "ai", "message": _safe_ai_error(error)})
+    raise ValueError("古诗填空识别失败：" + "；".join(item["message"] for item in errors)[:300])
+
+
 async def _poem_answer(image_bytes, provider_ids=None, prompt=""):
     """OCR 优先，AI 兜底；只开哪个就只走哪个。"""
     started = time.perf_counter()
@@ -10590,8 +10733,8 @@ def _valid_auto(body: AutoIn):
         if second_start is None or second_end is None or second_start >= second_end:
             raise HTTPException(400, "第二时间段须为同日且开始早于结束")
         mode = body.signin_recognition_mode.strip()
-        if mode not in ("", "none", "captcha", "image"):
-            raise HTTPException(400, "图片处理模式只能为不识别、验证码识别或图片识别")
+        if mode not in ("", "none", "captcha", "image", "poem"):
+            raise HTTPException(400, "图片处理模式只能为不识别、验证码识别、图片识别或古诗填空")
         if mode == "image" and not body.signin_image_prompt.strip():
             raise HTTPException(400, "图片识别需要填写提示词")
         if mode in ("none", "image") and body.signin_captcha:

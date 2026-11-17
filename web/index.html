@@ -1193,7 +1193,9 @@ section.act,.fold.open .fold-b{animation:none}
             <option value="none" selected>不识别图片</option>
             <option value="captcha">验证码识别</option>
             <option value="image">图片识别并回复物体名称</option>
+            <option value="poem">古诗填空（依次点缺字按钮）</option>
           </select>
+          <div id="sPoemHintWrap" class="hidden hint">适用于「补全诗句」这类防机器签到：自动 OCR / 识别古诗缺的两个字，再按顺序点下方候选按钮。要求机器人把候选字做成按钮；连点间隔用上面的「按钮后等待」。</div>
           <div id="sCaptchaProviderWrap" class="hidden">
             <label>识别使用的 AI API（可多选）</label>
             <div id="sCaptchaProviders" class="grp-pick"></div>
@@ -3008,13 +3010,13 @@ function autoCanRun(a){
   if(a.type!=='custom')return false;
   try{return JSON.parse(a.custom_trigger||'{"mode":"manual"}').mode==='manual'}catch(e){return false}
 }
-function signinRecognitionMode(a){const mode=String(a?.signin_recognition_mode||'');return ['none','captcha','image'].includes(mode)?mode:(a?.signin_captcha?'captcha':'none')}
+function signinRecognitionMode(a){const mode=String(a?.signin_recognition_mode||'');return ['none','captcha','image','poem'].includes(mode)?mode:(a?.signin_captcha?'captcha':'none')}
 function buttonModeLabel(mode){return ({script:'脚本按钮',ai:'AI 选按钮',fallback:'AI 兜底'}[mode]||'脚本按钮')}
 function autoDesc(a){
   if(a.type==='code_register')return `群：${esc(a.groups)}；Bot：${esc(a.target)}；${buttonModeLabel(a.button_mode)}；${Number(a.link_mode)===0?'随机一条':'串行最多 '+esc(String(a.link_limit??4))+' 条'}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒回群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
   if(a.type==='button_register')return `群：${esc(a.groups||'全部监听群')}；开注：${esc(a.announcement_kw)}；群按钮：${esc(a.announcement_button)}；${buttonModeLabel(a.button_mode)}；指令：${esc(a.command||'/start')}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒向原群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
   if(a.type==='signin'){
-    const mode=signinRecognitionMode(a),recognition=mode==='captcha'?' · 验证码识别':mode==='image'?(a.signin_image_action==='click'?' · 图片识别点选':' · 图片识别回复'):'';
+    const mode=signinRecognitionMode(a),recognition=mode==='captcha'?' · 验证码识别':mode==='poem'?' · 古诗填空点选':mode==='image'?(a.signin_image_action==='click'?' · 图片识别点选':' · 图片识别回复'):'';
     const daily=Number(a.signin_total_slots||1)>1?' · 今日 '+Number(a.signin_done_slots||0)+'/'+Number(a.signin_total_slots)+' 次':a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'');
     return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+buttonModeLabel(a.button_mode)+' · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${recognition}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${daily}`;
   }
@@ -3464,7 +3466,7 @@ async function saveAuto(type){
     if(body.icon_url&&!safeHttpUrl(body.icon_url))return toast('图标仅支持安全的 HTTP / HTTPS URL',1);
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
     if(body.signin_second_enabled&&(!validTime(body.signin_second_start)||!validTime(body.signin_second_end)||body.signin_second_start>=body.signin_second_end))return toast('第二时间段须为同日且开始早于结束',1);
-    if(!['none','captcha','image'].includes(body.signin_recognition_mode))return toast('请选择有效的图片处理方式',1);
+    if(!['none','captcha','image','poem'].includes(body.signin_recognition_mode))return toast('请选择有效的图片处理方式',1);
     if(body.signin_recognition_mode==='image'&&!body.signin_image_prompt)return toast('图片识别需要填写提示词',1);
     if(!['reply','click'].includes(body.signin_image_action))return toast('请选择图片识别后的执行方式',1);
     for(const delay of [body.command_delay,body.button_delay,body.result_delay]){
@@ -4146,6 +4148,7 @@ function syncSigninRecognitionFields(){
   const mode=$('#sRecognitionMode').value;
   $('#sCaptchaProviderWrap').classList.toggle('hidden',mode==='none');
   $('#sImagePromptWrap').classList.toggle('hidden',mode!=='image');
+  $('#sPoemHintWrap').classList.toggle('hidden',mode!=='poem');
 }
 async function loadAIProviders(){
   const c=accountContext(),seq=++aiProvidersSeq;
