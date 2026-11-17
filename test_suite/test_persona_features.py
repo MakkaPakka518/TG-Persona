@@ -694,3 +694,74 @@ class StudyLayeringTests(unittest.IsolatedAsyncioTestCase):
         result = await b['_study_layering_pass'](chat_id='-1', force=True)
         self.assertEqual(result['summary'], 0)
         self.assertEqual(len(b['_study_blocks'](self.store['study'])), 10)
+
+
+class TopicRecallTests(unittest.IsolatedAsyncioTestCase):
+    """按话题召回：只取真相关的几条，不为填满预算灌无关记忆。"""
+
+    setUp = test_backend.BackendBase.setUp
+    asyncTearDown = test_backend.BackendBase.asyncTearDown
+    create = test_backend.BackendBase.create
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        b = self.b
+        self.store = {}
+        b['_read_skill'] = lambda: self.store.get('skill', '')
+        b['_read_study'] = lambda: self.store.get('study', '')
+
+    async def test_irrelevant_and_duplicate_entries_are_not_recalled(self):
+        b = self.b
+        content = ''
+        for i in range(8):
+            content = b['_append_study'](content, '- 本群闲聊风格 %d 号，回得短' % i, chat_id='-1')
+        content = b['_append_study'](content, '- 反代必须开 websocket 隧道，不然一直连不上，群里都这么弄', chat_id='-1')
+        self.store['study'] = content
+        self.store['knowledge'] = ''
+        used = []
+        text = b['_reference_markdown'](400, '-1', 'Cloudflare 反代 websocket 连不上')
+        self.assertIn('websocket', text)
+        self.assertLessEqual(text.count('闲聊风格'), 1)
+
+    async def test_knowledge_page_survives_without_topic_hit(self):
+        b = self.b
+        content = b['_append_study']('', '- 这群主要聊代理和影音', chat_id='-1')
+        blocks = b['_study_blocks'](content)
+        page = b['_study_block']('- 这群长期结论：只认 Rex，别的都不推荐', chat_id='-1',
+                                 source='distill', stage='page')
+        self.store['study'] = page + '\n\n' + content
+        self.store['knowledge'] = ''
+        entries = b['_memory_entries'](self.store['study'], 'study')
+        recalled = b['_recall_entries'](entries, '-1', '今天天气不错', {}, budget=400)
+        self.assertTrue(any('长期结论' in e['body'] for e in recalled))
+
+    async def test_no_topic_terms_keeps_previous_order(self):
+        b = self.b
+        content = b['_append_study']('', '- 第一条', chat_id='-1', )
+        content = b['_append_study'](content, '- 第二条', chat_id='-1')
+        entries = b['_memory_entries'](content, 'study')
+        recalled = b['_recall_entries'](entries, '-1', '', {}, budget=400)
+        self.assertEqual(len(recalled), len(entries))
+
+    async def test_rare_term_outweighs_common_term(self):
+        b = self.b
+        common = b['_append_study']('', '- 群里每天都在聊节点和订阅', chat_id='-1')
+        rare = b['_append_study'](common, '- 这个版本 backdroppaths 字段名改过', chat_id='-1')
+        for i in range(4):
+            rare = b['_append_study'](rare, '- 群里继续聊节点 %d' % i, chat_id='-1')
+        self.store['study'] = rare
+        entries = b['_memory_entries'](rare, 'study')
+        recalled = b['_recall_entries'](entries, '-1', 'backdroppaths 字段名', {}, budget=200)
+        self.assertIn('backdroppaths', recalled[0]['body'])
+
+    async def test_knowledge_page_and_pinned_do_not_leak_across_groups(self):
+        b = self.b
+        page = b['_study_block']('- 这群长期结论：只认 Rex', chat_id='-1', source='distill', stage='page')
+        pinned = b['_study_block']('- 另一群置顶结论：只聊电影', chat_id='-2', pinned=True, stage='summary')
+        generic = '- 全局规矩：不说晚点看看'
+        self.store['study'] = generic + '\n\n' + page + '\n\n' + pinned
+        entries = b['_memory_entries'](self.store['study'], 'study')
+        recalled = b['_recall_entries'](entries, '-1', '今天天气不错', {}, budget=800)
+        bodies = [e['body'] for e in recalled]
+        self.assertFalse(any('另一群置顶结论' in body for body in bodies))
+        self.assertTrue(any('全局规矩' in body for body in bodies))

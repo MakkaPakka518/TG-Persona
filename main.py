@@ -1974,7 +1974,7 @@ def _skill_reference(limit, chat_id="", text="", used_sink=None):
     if not entries:
         return ""
     ranked = _rank_memory(entries, chat_id, text, _memory_usage("skill"))
-    return _take_entries(ranked, limit, fallback_pinned=True, used_sink=used_sink)
+    return _take_entries(_dedupe_entries(ranked), limit, fallback_pinned=True, used_sink=used_sink)
 
 
 def _topic_terms(text, limit=300):
@@ -2040,6 +2040,94 @@ def _rank_memory(entries, chat_id="", text="", usage=None, now=None):
     scored = [(entry, _memory_score(entry, terms, key, stamp, usage)) for entry in eligible]
     scored.sort(key=lambda item: item[1], reverse=True)
     return [entry for entry, _ in scored]
+
+
+# 按话题召回：只取和当前话题真有关的几条，不为填满预算把无关记忆灌进去。
+RECALL_FLOOR = 0.55          # 低于第一名分数的这个比例就不引用
+RECALL_DUP_RATIO = 0.72      # 3-gram 重合达到这个比例视为同义条目，只留一条
+RECALL_STABLE_RATIO = 0.4    # 稳定层（固定/知识页）最多占预算的比例
+
+
+def _recall_terms(entries, text):
+    """话题词按稀有度加权：满群都有的词（群里、可以）降权，只有少数条目才提的词升权。"""
+    base = _topic_terms(text)
+    if not base:
+        return []
+    bodies = [str(entry["body"]).casefold() for entry in entries]
+    total = max(1, len(bodies))
+    terms = []
+    for term, weight in base:
+        df = sum(1 for body in bodies if term in body)
+        terms.append((term, weight * (1.0 + math.log(1.0 + total / (1.0 + df)))))
+    return terms
+
+
+def _entry_groups(entry):
+    groups = {str(item) for item in (entry["meta"].get("chat_ids") or [])}
+    if entry["meta"].get("chat_id"):
+        groups.add(str(entry["meta"]["chat_id"]))
+    return groups
+
+
+def _dedupe_entries(entries, ratio=RECALL_DUP_RATIO):
+    """近义条目只留分数最高的一条，避免同类规矩占掉好几份预算。"""
+    kept, grams = [], []
+    for entry in entries:
+        body = str(entry["body"] or "").strip()
+        grams_new = _ngrams(body, 3)
+        if grams_new and any(len(grams_new & other) / len(grams_new) >= ratio for other in grams):
+            continue
+        kept.append(entry)
+        if grams_new:
+            grams.append(grams_new)
+    return kept
+
+
+def _recall_entries(entries, chat_id="", text="", usage=None, budget=None):
+    """返回按话题筛过的条目列表；没有话题词时退回时间/热度排序。"""
+    if not entries:
+        return []
+    terms = _recall_terms(entries, text)
+    now = int(time.time())
+    scored = [(_memory_score(entry, terms, chat_id, now, usage or {}), entry) for entry in entries]
+    scored.sort(key=lambda item: item[0], reverse=True)
+    if not terms:
+        return [entry for _, entry in scored]
+    best = scored[0][0]
+    floor = max(1.0, best * RECALL_FLOOR)
+    stable_budget = int(MEMORY_HARD_CAP_CHARS if budget is None or budget < 0
+                        else max(0, budget) * RECALL_STABLE_RATIO)
+    picked, grams, stable_used, group_extra = [], [], 0, 0
+    for score, entry in scored:
+        body = str(entry["body"] or "").strip()
+        if not body:
+            continue
+        stable = bool(entry["meta"].get("pinned")) or entry["meta"].get("stage") == "page"
+        if stable:
+            # 知识页也要认群：别的群的长期结论不该在这个群的上下文里出现。
+            groups = _entry_groups(entry)
+            if chat_id and groups and str(chat_id) not in groups:
+                continue
+            if stable_used + len(body) > stable_budget and picked:
+                continue
+            stable_used += len(body)
+        else:
+            hit = any(term in body.casefold() for term, _ in terms)
+            if hit:
+                if score < floor:
+                    continue
+            else:
+                # 和话题无关的本群记忆最多补一条当背景，别把预算灌满无关内容。
+                if not (chat_id and str(chat_id) in _entry_groups(entry)) or group_extra >= 1:
+                    continue
+                group_extra += 1
+        grams_new = _ngrams(body, 3)
+        if grams_new and any(len(grams_new & other) / len(grams_new) >= RECALL_DUP_RATIO for other in grams):
+            continue
+        picked.append(entry)
+        if grams_new:
+            grams.append(grams_new)
+    return picked or [entry for _, entry in scored[:1]]
 
 
 def _take_entries(entries, limit, fallback_pinned=False, used_sink=None):
@@ -2844,9 +2932,11 @@ def _knowledge_paragraph_entries(knowledge, terms):
 
 def _reference_documents(limit, chat_id="", text="", knowledge_share=0.5, used_sink=None):
     knowledge = _read_knowledge().strip()
-    study_entries = _memory_entries(_read_study(), "study")
+    # 纠正条目由 _owner_corrections 单独注入，这里排除，避免同一段话被引用两遍。
+    study_entries = [entry for entry in _memory_entries(_read_study(), "study")
+                     if str(entry["meta"].get("source") or "") != "correction"]
     if chat_id or text:
-        study_entries = _rank_memory(study_entries, chat_id, text, _memory_usage("study"))
+        study_entries = _recall_entries(study_entries, chat_id, text, _memory_usage("study"), budget=limit)
     paragraph_entries = _knowledge_paragraph_entries(knowledge, _topic_terms(text))
     auto_entries = (_knowledge_auto_entries(_read_knowledge_auto(), _topic_terms(text))
                     if _knowledge_auto_enabled() else [])
