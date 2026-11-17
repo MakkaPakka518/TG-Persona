@@ -4182,7 +4182,7 @@ function renderPeopleList(c){
     head.appendChild(label);head.appendChild(edit);row.appendChild(head);
     if(!open){
       const preview=document.createElement('div');preview.className='hint memory-preview';
-      preview.textContent=brief(item.profile||'')||(peopleLastError?('还没有画像 · 上次蒸馏失败：'+peopleLastError):('还没有画像，攒够 '+peopleStep+' 条新发言会自动蒸馏'));
+      preview.textContent=brief(item.profile||'')||(peopleLastError?('还没有画像 · 上次蒸馏失败：'+peopleLastError+'（累计 '+Number(item.lines||0)+' 条发言）'):('还没有画像：累计 '+Number(item.lines||0)+' 条发言，凑满 '+peopleStep+' 条未蒸馏的就会自动生成'));
       row.appendChild(preview);list.appendChild(row);continue;
     }
     const note=document.createElement('input');note.type='text';note.maxLength=120;note.placeholder='备注：这是谁，例如「朋友老王」';note.value=item.note||'';

@@ -462,5 +462,44 @@ class FeatureAPITests(unittest.IsolatedAsyncioTestCase):
         rt.client = None
 
 
+class PeopleDistillBudgetTests(unittest.IsolatedAsyncioTestCase):
+    """画像蒸馏不能用 400 Token 就放弃：思考型模型要逐级加预算。"""
+
+    setUp = test_backend.BackendBase.setUp
+    asyncTearDown = test_backend.BackendBase.asyncTearDown
+    create = test_backend.BackendBase.create
+    row = test_backend.BackendBase.row
+
+    async def test_thinking_only_first_try_retries_with_bigger_budget(self):
+        b = self.b
+        calls = []
+
+        async def fake(prompt, max_tokens=512, **kwargs):
+            calls.append(max_tokens)
+            if len(calls) == 1:
+                raise RuntimeError("AI 仅返回思考过程、没有最终正文；请提高最大输出 Token 或降低思考强度")
+            return "这人话少，喜欢直接给答案"
+
+        b['_call_ai_any'] = fake
+        got = await b['_people_distill_batch']('6979146118', [('今天这个 bug 我改了', 1)] * 6)
+        self.assertEqual(got, 6)
+        self.assertEqual(calls[0], 1200)
+        self.assertEqual(calls[-1], 2400)
+        profile = b['conn'].execute("SELECT profile FROM people_profiles WHERE tg_id='6979146118'").fetchone()
+        self.assertIn('喜欢直接给答案', profile[0])
+
+    async def test_other_errors_do_not_retry(self):
+        b = self.b
+        calls = []
+
+        async def fake(prompt, max_tokens=512, **kwargs):
+            calls.append(max_tokens)
+            raise RuntimeError("所有已选择的 AI API 均失败")
+
+        b['_call_ai_any'] = fake
+        self.assertEqual(await b['_people_distill_batch']('6979146118', [('hi', 1)] * 6), 0)
+        self.assertEqual(len(calls), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

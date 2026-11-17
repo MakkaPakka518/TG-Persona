@@ -4011,14 +4011,26 @@ async def _people_distill_batch(tg_id, rows, last_id=None, history_ts=None):
         prompt = PEOPLE_PROFILE_PROMPT + "\n" + body
         if old_profile:
             prompt += ("\n已有画像，请在此基础上合并更新，保留仍然成立的信息：\n" + old_profile)
-        try:
-            people_providers = _csv(get_setting("flock_people_provider_ids", ""))
-            reply = await _call_ai_any(prompt, max_tokens=400, feature="people",
-                                       provider_ids=people_providers or None)
-        except Exception as exc:
-            log.warning("人物画像蒸馏失败 tg=%s", tg_id, exc_info=True)
+        people_providers = _csv(get_setting("flock_people_provider_ids", ""))
+        reply = ""
+        last_error = None
+        # 思考型模型会把 400 Token 全用在思考上、正文为空；逐级加预算重试。
+        for budget in (1200, 2400):
             try:
-                set_setting("flock_people_last_error", "%s %s" % (now_local().strftime("%Y-%m-%d %H:%M:%S"), str(exc)[:120]))
+                reply = await _call_ai_any(prompt, max_tokens=budget, feature="people",
+                                           provider_ids=people_providers or None)
+                break
+            except Exception as exc:
+                last_error = exc
+                if "仅返回思考过程" not in str(exc) or budget == 2400:
+                    break
+                log.info("人物画像蒸馏重试 tg=%s 预算=%s", tg_id, budget * 2)
+        if not reply:
+            log.warning("人物画像蒸馏失败 tg=%s: %s", tg_id, _safe_ai_error(last_error) if last_error else "空正文")
+            try:
+                set_setting("flock_people_last_error", "%s %s" % (
+                    now_local().strftime("%Y-%m-%d %H:%M:%S"),
+                    str(last_error or "空正文")[:120]))
             except Exception:
                 pass
             return 0
