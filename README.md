@@ -315,6 +315,11 @@ location / {
 - `on_game_event` 的异常兜底也补写 `last_at/last_detail`，任何异常都不再让任务计数停在 0。
 - `GET /api/game-tasks/{tid}/probe` 增加 `can_send_messages`，自检时能直接看到本账号在该群能不能发言。
 
+## 1.29.26：号主自画像支持纠正层，修正"不做播放器面板"
+
+- `_owner_persona_distill()` 现在会把 `owner_persona.corrections` 一起带给模型，并声明「材料与此冲突时以纠正为准」。
+- 号主画像里 `identity` 改为「做 Emby 反代和节点，不做播放器面板」，纠正层写入「skill.md 里那句作废」，以后重新蒸馏不会再把播放器面板带回来。
+
 ## 1.29.25：画像改成五段结构化 + 证据等级，加历史回滚、纠正层与号主自画像
 
 **群友画像**

@@ -4211,7 +4211,11 @@ async def _owner_persona_distill():
     material = _owner_persona_material()
     if len(material) < 200:
         raise ValueError("面板里的 md 材料太少，先去记忆页补充")
-    prompt = OWNER_PERSONA_PROMPT + "\n\n已知：MBTI=INFP，星座=金牛座，必须原样填入。\n\n材料：\n" + material
+    corrections = _owner_persona_get()["corrections"].strip()
+    prompt = OWNER_PERSONA_PROMPT + "\n\n已知：MBTI=INFP，星座=金牛座，必须原样填入。\n"
+    if corrections:
+        prompt += ("\n号主手工纠正（优先级最高，材料与此冲突时以这里为准）：\n" + corrections[:400] + "\n")
+    prompt += "\n材料：\n" + material
     providers = _csv(get_setting("flock_people_provider_ids", ""))
     reply = ""
     last_error = None
