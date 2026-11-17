@@ -162,6 +162,7 @@ class AccountRuntime:
     scheduled_task: object = None
     poll_task: object = None
     keepalive_task: object = None
+    emby_ka_task: object = None
     housekeeping_task: object = None
     durable_task: object = None
     summary_task: object = None
@@ -367,7 +368,7 @@ class AccountRuntime:
             self.client = None
             self.handler_registered = False
             self.clear_auto_queue()
-            for name in ("watcher_task", "signin_task", "scheduled_task", "poll_task", "keepalive_task", "housekeeping_task", "health_task", "ai_learning_task", "ai_learning_worker_task", "durable_task", "summary_task"):
+            for name in ("watcher_task", "signin_task", "scheduled_task", "poll_task", "keepalive_task", "emby_ka_task", "housekeeping_task", "health_task", "ai_learning_task", "ai_learning_worker_task", "durable_task", "summary_task"):
                 setattr(self, name, None)
             self.tg_phone = ""
             self.tg_state.update(phase="idle", phone="", me=None, err=None, health_error=None)

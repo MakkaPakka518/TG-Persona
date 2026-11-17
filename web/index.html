@@ -1388,6 +1388,78 @@ section.act,.fold.open .fold-b{animation:none}
       </div>
     </div>
 
+    <div class="card fold" id="embyKaCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z"/><path d="M10 9l5 3-5 3z"/></svg>观看保号（Emby 伪装观看）</span><span class="cnt" id="embyKaCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <div class="hint" style="margin-bottom:10px">用固定的设备身份（Client / Device / 版本 / UA / DeviceId）定时模拟一次真实观看：打开媒体库 → 浏览详情 → 起播缓冲 → 正常观看 / 网络卡顿 / 拖进度条 → 退出，结束后自动清掉播放记录。</div>
+        <div class="hint" style="margin-bottom:10px">设备身份绑定后不再变动。Emby 一般限制设备登录数，每次换 DeviceId 都会多出一台设备，所以这里只允许「新建时挑一次」。</div>
+        <div class="flex" style="gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn addtask" type="button" onclick="openEmbyForm()">＋ 添加保号账号</button>
+          <button class="ghost" type="button" onclick="openKaCenter()">保活中心</button>
+        </div>
+        <div id="embyKaList"></div>
+        <div class="empty" id="embyKaEmpty">暂无观看保号账号，点上面按钮添加</div>
+        <div class="autof" id="embyForm"><div class="autof-card"><div class="autof-head"><b id="embyFormTitle">新增观看保号账号</b><button class="ghost" type="button" onclick="closeEmbyForm()">关闭</button></div>
+          <form onsubmit="saveEmbyAccount();return false">
+            <label for="eName">账号名称</label><input type="text" id="eName" maxlength="60" placeholder="如: 星影主号" required>
+            <label for="eBase">站点地址</label><input type="text" id="eBase" maxlength="300" placeholder="https://emby.example.com" required>
+            <div class="flex">
+              <div style="flex:1"><label for="eUser">用户名</label><input type="text" id="eUser" maxlength="120" autocomplete="off"></div>
+              <div style="flex:1"><label for="ePass">密码</label><input type="password" id="ePass" maxlength="300" autocomplete="off" placeholder="留空不修改"></div>
+            </div>
+            <label for="eApiKey">API Key（可选，优先于账号密码）</label><input type="text" id="eApiKey" maxlength="400" autocomplete="off" placeholder="留空则用上面的账号密码登录">
+            <label for="eTpl">身份模板</label><select id="eTpl" onchange="applyEmbyTemplate(this.value)"><option value="">自定义 / 使用全局默认</option></select>
+            <div class="flex">
+              <div style="flex:1"><label for="eClient">Client</label><input type="text" id="eClient" maxlength="40"></div>
+              <div style="flex:1"><label for="eVersion">Version</label><input type="text" id="eVersion" maxlength="40"></div>
+            </div>
+            <div class="flex">
+              <div style="flex:1"><label for="eDevice">Device</label><input type="text" id="eDevice" maxlength="60"></div>
+              <div style="flex:1"><label for="eDeviceId">DeviceId</label><input type="text" id="eDeviceId" maxlength="64"></div>
+            </div>
+            <label for="eUa">User-Agent</label><input type="text" id="eUa" maxlength="300">
+            <div class="flex" style="gap:8px;margin-top:8px;flex-wrap:wrap">
+              <button class="ghost" type="button" onclick="randomEmbyDeviceId()">随机生成 DeviceId</button>
+              <button class="ghost" type="button" onclick="applyEmbyTemplate('senplayer')">套用 SenPlayer</button>
+            </div>
+            <div class="hint">保存时校验身份自洽：UA 必须以 Client 开头且包含 Version，Client 不能是 Web 身份。</div>
+            <div class="flex">
+              <div style="flex:1"><label for="eInterval">间隔（天）</label><input type="number" id="eInterval" min="0.1" max="60" step="0.1" value="3"></div>
+              <div style="flex:1"><label for="eCap">拉流上限（MB）</label><input type="number" id="eCap" min="20" max="1024" value="400"></div>
+            </div>
+            <label for="eNotify">通知</label><select id="eNotify"><option value="fail">仅失败通知</option><option value="all">成功和失败都通知</option><option value="off">不通知</option></select>
+            <label class="check"><input type="checkbox" id="eClean" checked> 观看结束后清除播放记录（已看状态 / 播放次数 / 续播进度）</label>
+            <label class="check"><input type="checkbox" id="eEnabled" checked> 启用</label>
+            <input type="hidden" id="eId" value="">
+            <div class="flex" style="margin-top:14px">
+              <button class="btn" type="submit">保存</button>
+              <button class="ghost" type="button" onclick="closeEmbyForm()">取消</button>
+            </div>
+          </form>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="autof" id="kaCenter"><div class="autof-card" style="max-width:760px"><div class="autof-head"><b>保活中心</b><button class="ghost" type="button" onclick="closeKaCenter()">关闭</button></div>
+      <div class="hint" id="kaLiveTitle">当前空闲</div>
+      <div style="height:6px;background:var(--hair);border-radius:4px;overflow:hidden;margin:8px 0 12px"><div id="kaLiveBar" style="height:100%;width:0;background:var(--primary);transition:width .3s"></div></div>
+      <div id="kaLiveSteps" class="hint" style="white-space:pre-wrap;line-height:1.7"></div>
+      <h3 class="fold-h" style="margin-top:14px"><span class="lbl">队列</span><span class="cnt" id="kaQueueCount">0</span></h3>
+      <div id="kaQueue"></div>
+      <h3 class="fold-h" style="margin-top:14px"><span class="lbl">设置</span></h3>
+      <div class="flex">
+        <div style="flex:1"><label for="kaConc">并发</label><input type="number" id="kaConc" min="1" max="3" value="1"></div>
+        <div style="flex:1"><label for="kaRetry">失败重试（小时）</label><input type="number" id="kaRetry" min="0.5" max="48" step="0.5" value="4"></div>
+        <div style="flex:1"><label for="kaCapCfg">默认拉流上限（MB）</label><input type="number" id="kaCapCfg" min="20" max="1024" value="400"></div>
+      </div>
+      <div class="flex" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn" type="button" onclick="saveKaSettings()">保存设置</button>
+        <button class="ghost" type="button" onclick="loadKaHistory()">刷新历史</button>
+      </div>
+      <h3 class="fold-h" style="margin-top:14px"><span class="lbl">最近记录</span></h3>
+      <div id="kaHistory"></div>
+    </div></div>
+
     <div class="card fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M20 12v10H4V12M12 22v-7M2 8h20v4H2zM12 2a3 3 0 0 0-3 3v3h6V5a3 3 0 0 0-3-3z"/></svg>抢红包</span><span class="cnt" id="aCntPack">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
@@ -2060,7 +2132,7 @@ function switchAccount(id){
   selectedAccount=id;accountEpoch++;
   try{localStorage.setItem('tgp_selected_id',id)}catch(e){}
   resetAccountCaches();renderAccounts();
-  loadState();loadSettings();loadAutos();loadWebSignins();loadRules();loadRuleGroups();loadDialogs();loadLogs();renderTgCard();
+  loadState();loadSettings();loadAutos();loadWebSignins();loadRules();loadRuleGroups();loadDialogs();loadLogs();renderTgCard();loadEmbyTemplates();loadEmbyAccounts();
 }
 async function manageAccount(action){
   if(accountsBusy)return;
@@ -2683,6 +2755,186 @@ async function delWebSignin(id){
   if(!confirm('删除这条网页签到？'))return;
   try{await api('/api/web-signins/'+id,{method:'DELETE'});toast('已删除');await loadWebSignins()}
   catch(e){toast(e.message||'删除失败',1)}
+}
+// ---------- 观看保号（Emby 伪装观看） ----------
+var embyAccounts=[],embyTemplates=[],embyEditingId=null,kaCenterTimer=null;
+function embyFmt(ts){return ts?fmt(ts):'—'}
+async function loadEmbyTemplates(){
+  try{const d=await api('/api/emby/templates');embyTemplates=d.templates||[]}catch(e){embyTemplates=[]}
+  const sel=$('#eTpl');if(!sel)return;
+  sel.innerHTML='<option value="">自定义 / 使用全局默认</option>'+embyTemplates.map(t=>`<option value="${esc(t.key)}">${esc(t.name)} · ${esc(t.client)}/${esc(t.version)}</option>`).join('');
+}
+async function loadEmbyAccounts(){
+  try{const d=await api('/api/emby/accounts');embyAccounts=d.accounts||[]}catch(e){embyAccounts=[]}
+  renderEmbyAccounts();
+}
+function embyState(a){
+  const now=Date.now()/1000;
+  if(a.circuit_until&&a.circuit_until>now)return ['danger',`熔断至 ${embyFmt(a.circuit_until)}`];
+  if(a.retry_at&&a.retry_at>now)return ['warn',`失败重试 ${embyFmt(a.retry_at)}`];
+  if(!a.enabled)return ['off','已停用'];
+  if(a.last_result==='success')return ['ok',`已启用 · 下次 ${embyFmt(a.next_run_at)}`];
+  if(a.last_result==='fail'||a.last_result==='circuit_open')return ['warn','待重试'];
+  return ['ok',a.next_run_at?`已启用 · 下次 ${embyFmt(a.next_run_at)}`:'已启用 · 待首次执行'];
+}
+function renderEmbyAccounts(){
+  const box=$('#embyKaList');if(!box)return;
+  $('#embyKaCount').textContent=embyAccounts.length;
+  $('#embyKaEmpty').style.display=embyAccounts.length?'none':'block';
+  box.innerHTML=embyAccounts.map(a=>{
+    const [tone,label]=embyState(a);
+    return `<div class="card auto-card">
+      <div class="auto-top">
+        <div class="grow"><div class="auto-title" title="${esc(a.base_url)}">${esc(a.name)}</div>
+          <div class="s" style="font-size:10px">${esc(a.base_url)} · ${esc(a.client||'')}/${esc(a.version||'')} · ${esc(a.device||'')} · ID ${esc(String(a.device_id||'').slice(0,8))}…</div>
+          <div class="s" style="font-size:10px">每 ${esc(String(a.interval_days))} 天 · 上限 ${esc(String(a.stream_cap_mb))}MB · ${a.clean_userdata?'清记录':'保留记录'}${a.mode==='probe'?' · 仅探测':''}</div>
+          ${a.last_detail?`<div class="s" style="font-size:10px">${esc(a.last_detail)}</div>`:''}
+        </div>
+        <div class="auto-tail"><span class="tag ${tone}">${esc(label)}</span></div>
+      </div>
+      <div class="auto-actions">
+        <button type="button" class="ghost" data-emby-action="run" data-emby-id="${a.id}" ${a.enabled?'':'disabled'}>立即观看</button>
+        <button type="button" class="ghost" data-emby-action="probe" data-emby-id="${a.id}">只测连通</button>
+        <button type="button" class="ghost" data-emby-action="toggle" data-emby-id="${a.id}">${a.enabled?'停用':'启用'}</button>
+        <button type="button" class="ghost" data-emby-action="edit" data-emby-id="${a.id}">编辑</button>
+        <button type="button" class="danger" data-emby-action="delete" data-emby-id="${a.id}">删除</button>
+      </div>
+      <div class="s" style="font-size:10px">${a.last_run_at?('最近执行 '+embyFmt(a.last_run_at)):'尚未执行'}</div>
+    </div>`;
+  }).join('');
+  box.onclick=e=>{
+    const btn=e.target.closest('[data-emby-action]');if(!btn)return;
+    const id=Number(btn.dataset.embyId),action=btn.dataset.embyAction;
+    if(action==='run')runEmbyAccount(id);
+    else if(action==='probe')runEmbyAccount(id,true);
+    else if(action==='toggle')toggleEmbyAccount(id);
+    else if(action==='edit')openEmbyForm(id);
+    else if(action==='delete')delEmbyAccount(id);
+  };
+}
+function openEmbyForm(id){
+  embyEditingId=id||null;
+  $('#embyFormTitle').textContent=id?'编辑观看保号账号':'新增观看保号账号';
+  const a=id?embyAccounts.find(x=>x.id===id):null;
+  $('#eId').value=a?a.id:'';
+  $('#eName').value=a?a.name:'';
+  $('#eBase').value=a?a.base_url:'';
+  $('#eUser').value=a?a.username:'';
+  $('#ePass').value='';
+  $('#eApiKey').value=a?(a.api_key||''):'';
+  $('#eTpl').value=a&&a.template_key?a.template_key:'';
+  $('#eClient').value=a?(a.client||''):'';
+  $('#eVersion').value=a?(a.version||''):'';
+  $('#eDevice').value=a?(a.device||''):'';
+  $('#eDeviceId').value=a?(a.device_id||''):'';
+  $('#eUa').value=a?(a.ua||''):'';
+  $('#eInterval').value=a?a.interval_days:3;
+  $('#eCap').value=a?a.stream_cap_mb:400;
+  $('#eNotify').value=a?(a.notify_mode||'fail'):'fail';
+  $('#eClean').checked=a?!!a.clean_userdata:true;
+  $('#eEnabled').checked=a?!!a.enabled:true;
+  if(!id&&!embyTemplates.length)loadEmbyTemplates();
+  $('#embyForm').classList.add('show');
+}
+function closeEmbyForm(){$('#embyForm').classList.remove('show');embyEditingId=null}
+function applyEmbyTemplate(key){
+  if(!key)return;
+  const t=embyTemplates.find(x=>x.key===key);if(!t)return;
+  $('#eClient').value=t.client||'';
+  $('#eVersion').value=t.version||'';
+  $('#eDevice').value=t.device||'';
+  $('#eUa').value=t.ua||'';
+  if(!$('#eDeviceId').value.trim())randomEmbyDeviceId();
+}
+function randomEmbyDeviceId(){
+  let v='';
+  try{v=crypto.randomUUID()}catch(e){}
+  if(!v)v='xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&0x3|0x8)).toString(16)});
+  $('#eDeviceId').value=v;
+}
+async function saveEmbyAccount(){
+  const body={
+    name:$('#eName').value.trim(),base_url:$('#eBase').value.trim(),
+    username:$('#eUser').value.trim(),password:$('#ePass').value,
+    api_key:$('#eApiKey').value.trim(),
+    template_key:$('#eTpl').value,
+    interval_days:Number($('#eInterval').value)||3,
+    stream_cap_mb:Number($('#eCap').value)||400,
+    notify_mode:$('#eNotify').value,
+    clean_userdata:$('#eClean').checked?1:0,
+    enabled:$('#eEnabled').checked?1:0
+  };
+  if(!body.template_key){
+    body.client=$('#eClient').value.trim();body.version=$('#eVersion').value.trim();
+    body.device=$('#eDevice').value.trim();body.ua=$('#eUa').value.trim();
+    body.device_id=$('#eDeviceId').value.trim();
+  }
+  try{
+    if(embyEditingId)await api('/api/emby/accounts/'+embyEditingId,{method:'PUT',body:JSON.stringify(body)});
+    else await api('/api/emby/accounts',{method:'POST',body:JSON.stringify(body)});
+    closeEmbyForm();toast(embyEditingId?'已更新':'已添加');await loadEmbyAccounts();
+  }catch(e){toast(e.message||'保存失败',1)}
+}
+async function toggleEmbyAccount(id){
+  const a=embyAccounts.find(x=>x.id===id);if(!a)return;
+  try{await api('/api/emby/accounts/'+id,{method:'PUT',body:JSON.stringify({enabled:a.enabled?0:1})});await loadEmbyAccounts()}
+  catch(e){toast(e.message||'操作失败',1)}
+}
+async function delEmbyAccount(id){
+  if(!confirm('删除这个保号账号？'))return;
+  try{await api('/api/emby/accounts/'+id,{method:'DELETE'});toast('已删除');await loadEmbyAccounts()}
+  catch(e){toast(e.message||'删除失败',1)}
+}
+async function runEmbyAccount(id,probe){
+  try{
+    await api('/api/emby/accounts/'+id+'/run',{method:'POST',body:JSON.stringify({mode:probe?'probe':'play'})});
+    toast(probe?'已开始连通测试':'已开始观看');openKaCenter();
+  }catch(e){toast(e.message||'启动失败',1)}
+}
+function openKaCenter(){
+  $('#kaCenter').classList.add('show');
+  refreshKaCenter();loadKaHistory();
+  if(!kaCenterTimer)kaCenterTimer=setInterval(refreshKaCenter,2000);
+}
+function closeKaCenter(){
+  $('#kaCenter').classList.remove('show');
+  if(kaCenterTimer){clearInterval(kaCenterTimer);kaCenterTimer=null}
+}
+async function refreshKaCenter(){
+  if(!$('#kaCenter').classList.contains('show'))return;
+  let d;
+  try{d=await api('/api/emby/keepalive/status')}catch(e){return}
+  const live=d.live||{},q=d.queue||[],cfg=d.config||{};
+  $('#kaLiveTitle').textContent=live.running?`${live.account||''} · ${live.current||'执行中'}`:'当前空闲';
+  $('#kaLiveBar').style.width=(live.running?Math.max(3,Math.min(100,live.progress||0)):0)+'%';
+  const steps=(live.steps||[]).slice(-14).map(s=>`${s.ok?'✔':'✖'} ${esc(s.name)}${s.detail?' · '+esc(s.detail):''}`).join('\n');
+  $('#kaLiveSteps').textContent=steps||(live.running?'正在准备…':'最近没有进行中的任务');
+  $('#kaQueueCount').textContent=q.length;
+  $('#kaQueue').innerHTML=q.length?q.map(j=>`<div class="card auto-card" style="padding:10px">
+      <div class="auto-top"><div class="grow"><div class="auto-title">${esc(j.account_name||('账号 '+j.account_id))}</div>
+      <div class="s" style="font-size:10px">${esc(j.kind==='auto'?'定时':(j.kind==='probe'?'连通测试':'手动'))} · ${esc(j.status==='running'?'执行中':'排队中')}${j.started_at?' · 开始 '+embyFmt(j.started_at):''}</div></div>
+      <div class="auto-tail"><button type="button" class="ghost" data-ka-cancel="${j.id}">取消</button></div></div></div>`).join(''):'<div class="hint">队列为空</div>';
+  $('#kaQueue').onclick=e=>{const b=e.target.closest('[data-ka-cancel]');if(b)cancelKaJob(Number(b.dataset.kaCancel))};
+  if(document.activeElement!==$('#kaConc'))$('#kaConc').value=cfg.concurrency||1;
+  if(document.activeElement!==$('#kaRetry'))$('#kaRetry').value=cfg.retry_hours||4;
+  if(document.activeElement!==$('#kaCapCfg'))$('#kaCapCfg').value=cfg.cap_mb||400;
+}
+async function cancelKaJob(id){
+  try{await api('/api/emby/keepalive/cancel/'+id,{method:'POST'});toast('已取消');await refreshKaCenter()}
+  catch(e){toast(e.message||'取消失败',1)}
+}
+async function saveKaSettings(){
+  const body={concurrency:Number($('#kaConc').value)||1,retry_hours:Number($('#kaRetry').value)||4,cap_mb:Number($('#kaCapCfg').value)||400};
+  try{await api('/api/emby/keepalive/settings',{method:'PUT',body:JSON.stringify(body)});toast('设置已保存');await refreshKaCenter()}
+  catch(e){toast(e.message||'保存失败',1)}
+}
+async function loadKaHistory(){
+  try{const d=await api('/api/emby/runs?limit=60');const runs=d.runs||[];
+    $('#kaHistory').innerHTML=runs.length?runs.map(r=>`<div class="card auto-card" style="padding:10px">
+      <div class="auto-top"><div class="grow"><div class="auto-title">${r.ok?'✅':'❌'} ${esc(r.account_name||('账号 '+r.account_id))} · ${esc(r.item||'')}</div>
+      <div class="s" style="font-size:10px">${esc(r.msg||'')}</div>
+      <div class="s" style="font-size:10px">${embyFmt(r.finished_at)}${r.play_sec?' · 观看 '+r.play_sec+'s':''}${r.bytes?' · 拉流 '+(r.bytes/1048576).toFixed(1)+'MB':''}</div></div></div></div>`).join(''):'<div class="hint">还没有执行记录</div>';
+  }catch(e){$('#kaHistory').innerHTML='<div class="hint">读取失败</div>'}
 }
 function renderAutoList(type){
   const [suffix]=AUTO_MAP[type],list=autos.filter(a=>a.type===type&&Number.isSafeInteger(a.id)),box=$('#aList'+suffix),c=accountContext();

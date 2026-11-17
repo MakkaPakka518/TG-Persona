@@ -71,6 +71,7 @@ import updater
 import data_migration
 import persona_store
 import persona_features
+import emby_keepalive
 from custom_workflow import (canonical_steps, canonical_trigger, group_matches,
                              parse_steps, parse_trigger, redact as redact_custom,
                              render_template, search_pattern, uses_credentials,
@@ -512,6 +513,7 @@ def db_init(database=None):
     _migrate_legacy_ai_flock(conn)
     conn.commit()
     persona_store.init(conn)
+    emby_keepalive.init_schema(conn)
 
 
 def add_hit(action, ok, *, chat_id="", rule_id=0, msg_id=0, content="", reply="",
@@ -9482,6 +9484,33 @@ async def keepalive_loop():
         await asyncio.sleep(60)
 
 
+def _emby_ka_notify(kind, name, detail=""):
+    """观看保号结果通知：沿用现有通知通道（notify_on_success / notify_on_fail）"""
+    try:
+        notify_event(kind, name, detail)
+    except Exception:
+        log.warning("观看保号通知失败", exc_info=True)
+
+
+async def emby_keepalive_loop():
+    """观看保号调度：20 秒推进队列；启动时先清理上一次残留的播放在线会话"""
+    runtime = get_runtime()
+    key = runtime.id
+    try:
+        await emby_keepalive.startup_recover(runtime.db, key, _emby_ka_notify)
+    except Exception:
+        log.warning("观看保号启动自愈失败", exc_info=True)
+    try:
+        while True:
+            try:
+                await emby_keepalive.tick(runtime.db, key, _emby_ka_notify)
+            except Exception as e:
+                log.warning("观看保号循环异常: %s", e)
+            await asyncio.sleep(emby_keepalive.TICK_SEC)
+    finally:
+        emby_keepalive.cancel_all(key)
+
+
 @account_locked
 async def _health_check_once():
     """临时网络/RPC 故障不等同于撤销授权,error 状态仍持续复查。"""
@@ -9958,6 +9987,7 @@ async def finish_login(me=None):
                        ("web_signin_task", web_signin_loop),
                        ("scheduled_task", scheduled_register_loop),
                        ("poll_task", poll_loop), ("keepalive_task", keepalive_loop),
+                       ("emby_ka_task", emby_keepalive_loop),
                         ("housekeeping_task", housekeeping_loop), ("health_task", health_loop),
                         ("ai_learning_task", ai_learning_loop), ("durable_task", durable_tasks_loop),
                         ("summary_task", summary_loop)):
@@ -11108,6 +11138,120 @@ async def stop_all_autos(type: str = ""):
     get_account_db().commit()
     _maybe_notify_global_signin_summary()
     return {"ok": True, "stopped": ids}
+
+
+# ---------------- 观看保号（Emby 伪装观看） ----------------
+def _emby_db():
+    return get_account_db()
+
+
+def _emby_error(error: Exception):
+    return HTTPException(400, str(error))
+
+
+@app.get("/api/emby/templates")
+async def emby_templates():
+    return {"templates": emby_keepalive.list_templates(_emby_db())}
+
+
+@app.post("/api/emby/templates")
+async def emby_template_save(body: dict):
+    try:
+        row = emby_keepalive.save_template(_emby_db(), body)
+    except ValueError as error:
+        raise _emby_error(error)
+    return {"ok": True, "template": row}
+
+
+@app.delete("/api/emby/templates/{key}")
+async def emby_template_delete(key: str):
+    try:
+        emby_keepalive.delete_template(_emby_db(), key)
+    except ValueError as error:
+        raise _emby_error(error)
+    return {"ok": True}
+
+
+@app.get("/api/emby/accounts")
+async def emby_accounts():
+    db = _emby_db()
+    return {"accounts": emby_keepalive.list_accounts(db), "config": emby_keepalive.get_config(db)}
+
+
+@app.post("/api/emby/accounts")
+async def emby_account_create(body: dict):
+    try:
+        row = emby_keepalive.create_account(_emby_db(), body)
+    except ValueError as error:
+        raise _emby_error(error)
+    return {"ok": True, "account": row}
+
+
+@app.put("/api/emby/accounts/{account_id}")
+async def emby_account_update(account_id: int, body: dict):
+    try:
+        row = emby_keepalive.update_account(_emby_db(), account_id, body)
+    except ValueError as error:
+        raise _emby_error(error)
+    return {"ok": True, "account": row}
+
+
+@app.delete("/api/emby/accounts/{account_id}")
+async def emby_account_delete(account_id: int):
+    emby_keepalive.delete_account(_emby_db(), account_id)
+    return {"ok": True}
+
+
+@app.post("/api/emby/accounts/{account_id}/run")
+async def emby_account_run(account_id: int, body: dict):
+    db = _emby_db()
+    account = emby_keepalive.get_account(db, account_id)
+    if not account:
+        raise HTTPException(404, "账号不存在")
+    probe = str((body or {}).get("mode") or "") == "probe"
+    try:
+        job_id = emby_keepalive.enqueue(db, account_id, "probe" if probe else "manual")
+    except ValueError as error:
+        raise _emby_error(error)
+    await emby_keepalive.advance(db, get_runtime().id, _emby_ka_notify)
+    return {"ok": True, "job_id": job_id, "mode": "probe" if probe else "play"}
+
+
+@app.get("/api/emby/keepalive/status")
+async def emby_keepalive_status():
+    db = _emby_db()
+    key = get_runtime().id
+    live = emby_keepalive.live_snapshot(key)
+    return {"live": live, "queue": emby_keepalive.queue_snapshot(db),
+            "config": emby_keepalive.get_config(db),
+            "accounts": emby_keepalive.list_accounts(db)}
+
+
+@app.post("/api/emby/keepalive/cancel/{job_id}")
+async def emby_keepalive_cancel(job_id: int):
+    if not emby_keepalive.cancel_job(_emby_db(), job_id):
+        raise HTTPException(404, "任务不存在或已结束")
+    return {"ok": True}
+
+
+@app.get("/api/emby/runs")
+async def emby_runs(account_id: int = 0, limit: int = 60):
+    db = _emby_db()
+    return {"runs": emby_keepalive.history(db, account_id or None, limit)}
+
+
+@app.get("/api/emby/keepalive/settings")
+async def emby_ka_settings():
+    return emby_keepalive.get_config(_emby_db())
+
+
+@app.put("/api/emby/keepalive/settings")
+async def emby_ka_settings_save(body: dict):
+    try:
+        cfg = emby_keepalive.save_config(_emby_db(), body)
+    except ValueError as error:
+        raise _emby_error(error)
+    return {"ok": True, "config": cfg}
 
 
 # ---------- 网页签到 ----------

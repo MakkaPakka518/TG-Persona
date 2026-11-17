@@ -36,6 +36,7 @@ import shutil
 import zlib
 import persona_store
 import persona_features
+import emby_keepalive
 from telethon.extensions import markdown as telethon_markdown
 from account_runtime import AIRequestScheduler
 from custom_workflow import (canonical_steps, canonical_trigger, group_matches, parse_steps,
@@ -115,7 +116,7 @@ def load_backend():
             selected.append(node)
     names = {name: globals()[name] for name in ('ast', 'asyncio', 'base64', 'OrderedDict', 'datetime',
              'timezone', 'timedelta', 'hashlib', 'hmac', 'ipaddress', 'json', 'math', 'random', 're',
-               'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'difflib', 'ContextVar', 'uuid', 'shutil', 'telethon_markdown', 'persona_store', 'persona_features')}
+               'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'difflib', 'ContextVar', 'uuid', 'shutil', 'telethon_markdown', 'persona_store', 'persona_features', 'emby_keepalive')}
     names.update(BaseModel=Model, Optional=Optional, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
                   HTTPException=HTTPException, JSONResponse=Response, Response=Response, os=os, io=io,
                   log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=RPCError,

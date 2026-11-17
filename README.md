@@ -315,6 +315,21 @@ location / {
 - `on_game_event` 的异常兜底也补写 `last_at/last_detail`，任何异常都不再让任务计数停在 0。
 - `GET /api/game-tasks/{tid}/probe` 增加 `can_send_messages`，自检时能直接看到本账号在该群能不能发言。
 
+## 1.29.29：观看保号（Emby 伪装观看）
+
+- 新模块 `emby_keepalive.py`：把 Emby 自动保活从反代侧剥离进来，不依赖反代、不做下载优先、不继承 `@inherit-fake` 身份。
+- 固定设备身份再观看：`Client / Version / Device / UA / DeviceId` 绑定在账号上，保存时校验自洽（UA 必须以 Client 开头且带 Version，Client 不能是 Web 身份）。每一次换 DeviceId 都会在上游多出一台设备，所以只在新建账号时挑一次。
+- 内置 6 套保活专用预设：SenPlayer 6.2.2、EplayerX 10.0.22、Forward 1.3.18、Rex 1.0.1、Hills 1.6.0、Yamby 2.0.0.5；也可自定义，`DeviceId` 支持一键随机生成。
+- 完整模拟观看链路：探活 → 账号密码登录 / API Key → 选片 → `PlaybackInfo` → 首段拉流门禁 → 起播 → 每 10 秒心跳 + 分段拉流 → `Stopped` → 清观看记录。步骤文案按真人写（正在打开媒体库 / 正在浏览详情页 / 视频加载中 / 开始观看 / 起播缓冲 / 网络卡顿 / 拖动进度条 / 正在退出播放 / 已清除观看记录）。
+- 播放节奏按 CF 版映射：片长 15 分钟→90 秒、60 分钟→390 秒，线性插值；计划严格单调递增且总时长等于目标时长，前 1~2 跳慢速缓冲、中间 1~2 次快进，中间随机 2~5 秒卡顿。
+- 拉流上限按 `min(文件 35%, 码率×时长/8, 账号配置上限)`，默认封顶 400MB。
+- 结束后默认清 Emby 观看记录（已看状态 / 播放次数 / 续播进度）；取消或异常退出也会先补发 `Stopped` 再清，避免留下僵尸会话。
+- 队列 + 并发：默认并发 1（面板可调 2，代码上限 3）；等待中的任务可取消；进程重启后 `startup_recover` 收尸上次残留的播放会话。
+- 失败不消耗间隔：失败后按 `retry_hours`（默认 4 小时）重试，连续 4 次失败熔断 12 小时。
+- 面板新增「观看保号（Emby 伪装观看）」卡片与「保活中心」：实时进度、步骤流水、队列、取消、并发/重试/上限设置、最近执行记录；账号支持立即观看、只测连通、启停、编辑、删除。
+- 接口：`/api/emby/templates`、`/api/emby/accounts`、`/api/emby/accounts/{id}/run`、`/api/emby/keepalive/status`、`/api/emby/keepalive/cancel/{job_id}`、`/api/emby/runs`、`/api/emby/keepalive/settings`，全部按账号库隔离。
+- 新增 16 条单测覆盖身份校验、节奏计划、上限计算、队列并发、失败重试、过期 token 重登、自愈补发 Stopped、清记录开关。
+
 ## 1.29.28：按话题召回，不再把记忆全量灌进上下文
 
 - 新增 `_recall_entries()`：话题词按 IDF 加权（满群都有的词降权，只有少数条目才提的词升权），低于第一名 55% 分数的条目不再引用。
