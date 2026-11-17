@@ -727,9 +727,9 @@ async def _run_job(db, key: str, job_id: int, notify=None) -> None:
     try:
         _finish(db, key, account, job_id, result, cfg, notify)
     finally:
-        _set_live(key, running=False, current="", progress=100 if result.get("ok") else 0,
-                  steps=result.get("steps") or [], item=result.get("item") or "",
-                  bytes=result.get("bytes") or 0)
+        # 完成后清空实时快照：历史在 emby_runs，保活中心不该一直挂着上一次任务的步骤
+        _set_live(key, running=False, current="", progress=0, steps=[], item="",
+                  bytes=0, job_id=0, started_at=0)
 
 
 def _finish(db, key: str, account: dict, job_id: int, result: dict, cfg: dict, notify) -> None:
