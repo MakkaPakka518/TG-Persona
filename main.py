@@ -7280,7 +7280,7 @@ async def run_signin(a):
             if image_action == "click":
                 if recognition_mode == "poem":
                     # 每点一个字就重新取一次按钮：机器人可能点完一个字就改按钮行
-                    for ch in poem_answers:
+                    for answer_index, ch in enumerate(poem_answers):
                         try:
                             buttons = await cap_m.get_buttons() or image_buttons
                         except Exception:
@@ -7290,7 +7290,9 @@ async def run_signin(a):
                             return _task_failure(a, "古诗填空答案「%s」在按钮里找不到对应字" % ch, cmd)
                         await image_button.click()
                         image_btn_clicked = (image_btn_clicked or "") + ch
-                        await asyncio.sleep(float(a["button_delay"]))
+                        if answer_index < len(poem_answers) - 1:
+                            # NiuBi 这类 bot 两次点字必须间隔 5s 以上，点快了会吞掉第二次
+                            await asyncio.sleep(max(float(a["button_delay"]), 5.5))
                     result_min_id = max(captcha_min_id, cap_m.id)
                     log.info("签到古诗填空已依次点击: %s", cap_ans)
                 else:
@@ -9335,8 +9337,9 @@ async def recognize_poem_text(poem_text, options, provider_ids=None):
     """文字版古诗填空：诗库优先，AI 兜底；答案必须来自按钮候选。"""
     options = _image_options(options)
     text = _poem_extract_text(poem_text)
+    expected = sum(1 for ch in text if ch in POEM_FILL_MASK_CHARS)
     answers, detail = _poem_solve_fill(text)
-    if answers and all(ch in options for ch in answers):
+    if answers and all(ch in options for ch in answers) and (not expected or len(answers) == expected):
         return {"answers": answers, "channel": "corpus", "detail": detail}
     prompt = ("这是一道机器人防机器签到题：请补全下面这首古诗，诗中空缺的字用方框或空白表示。\n"
               f"题目：{text}\n"
@@ -9345,7 +9348,7 @@ async def recognize_poem_text(poem_text, options, provider_ids=None):
               "不要输出完整诗句、标点、解释或思考过程。")
     reply = await _call_ai_any(prompt, max_tokens=512, provider_ids=provider_ids, feature="other")
     answers = [ch for ch in str(reply or "") if ch in options]
-    if answers and len(answers) <= 4:
+    if answers and len(answers) <= 4 and (not expected or len(answers) == expected):
         return {"answers": answers, "channel": "ai", "detail": str(reply)[:80]}
     raise ValueError("古诗填空 AI 输出无法对应按钮：" + str(reply)[:80])
 

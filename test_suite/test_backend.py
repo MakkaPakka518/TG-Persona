@@ -867,6 +867,15 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['answers'], ['居', '姞'])
         self.assertEqual(result['channel'], 'ai')
 
+    async def test_poem_text_partial_corpus_goes_ai(self):
+        raw = ('请依次点击下方按钮补全诗句：\n\n银░秋光冷画屏，轻罗小░扑流萤。\n\n'
+               '出自：杜牧《秋夕》')
+        self.b['_call_ai_any'] = AsyncMock(return_value='烛扇')
+        result = await self.b['recognize_poem_text'](
+            raw, ['千', '更', '扇', '一', '里', '烛', '上', '穷'], None)
+        self.assertEqual(result['answers'], ['烛', '扇'])
+        self.assertEqual(result['channel'], 'ai')
+
     async def test_poem_text_uses_corpus_without_ai(self):
         raw = '请依次点击下方按钮补全诗句：\n\n月落乌░霜满天\n\n出自：张继《枫桥夜泊》'
         self.b['_call_ai_any'] = AsyncMock(side_effect=AssertionError('不该调用 AI'))
