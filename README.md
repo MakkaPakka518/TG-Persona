@@ -315,6 +315,18 @@ location / {
 - `on_game_event` 的异常兜底也补写 `last_at/last_detail`，任何异常都不再让任务计数停在 0。
 - `GET /api/game-tasks/{tid}/probe` 增加 `can_send_messages`，自检时能直接看到本账号在该群能不能发言。
 
+## 1.29.27：study.md 三层整理（原始条目 → 主题摘要 → 知识页）
+
+- 新增第三层 `page`（知识页）：单群原始条目超过 8 条就把最老的一批压成一条 `summary`；摘要攒够 2 条再合并升格成一页 `page`。
+- 纠正条目（`source=correction`）永不参与合并，号主原话不会被 AI 改写。
+- 引用排序改成 知识页 > 主题摘要 > 原始条目，旧的原始条目不再和稳定结论抢 token；淘汰顺序反过来，先淘汰淡化与原始条目。
+- 号主画像重蒸只读后两层（`_study_layered_text()`）：一层都没有才退回原文，十多万字的原始条目不再整份塞进蒸馏 prompt。
+- 学习写盘后自动整理一次，单次最多调 4 次模型（`STUDY_LAYER_MAX_WORK`），避免把学习预算全花在分层上；学习专用 API 没配时退回默认 API，不会因此停摆。
+- 接口：`GET /api/ai/flock/study/layers`（各层条数与开关）、`POST /api/ai/flock/study/layers`（`enabled` 开关 / `run` 立即整理）。
+- 一条摘要累计吸够 4 条原始笔记（`merged>=4`）就当它成熟，单独升格为知识页，不必等第二条摘要。
+- 蒸馏带完整性闸门：`finish_reason=length` 时 learning 也判失败，预算 800→2400 重试；结果过短或挂在半句上（以「、，：的是和就把在」收尾）直接拒绝并保留原始条目，避免把截断的句子写成结论。
+- 面板「学习」区新增「记忆分层」小节：自动分层开关、立即整理按钮、原始/摘要/知识页条数。
+
 ## 1.29.26：号主自画像支持纠正层，修正"不做播放器面板"
 
 - `_owner_persona_distill()` 现在会把 `owner_persona.corrections` 一起带给模型，并声明「材料与此冲突时以纠正为准」。

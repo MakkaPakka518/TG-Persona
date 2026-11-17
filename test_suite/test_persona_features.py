@@ -597,3 +597,100 @@ class PeopleDistillBudgetTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class StudyLayeringTests(unittest.IsolatedAsyncioTestCase):
+    """study.md 三层：原始条目 → 主题摘要 → 知识页，重蒸只读后两层。"""
+
+    setUp = test_backend.BackendBase.setUp
+    asyncTearDown = test_backend.BackendBase.asyncTearDown
+    create = test_backend.BackendBase.create
+
+    def _walks(self):
+        return self.b['_study_block']('- 群友聊代理和影音，看重地区与 IP 品质', chat_id='-1')
+    self_b = None
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        b = self.b
+        self.store = {}
+        b['_read_study'] = lambda: self.store.get('study', '')
+        b['_write_study'] = lambda content: self.store.__setitem__('study', content)
+
+    async def test_detail_overflow_makes_summary_and_corrections_stay(self):
+        b = self.b
+        blocks = [b['_study_block']('- 原始条目 %d 讲代理和影音' % i, chat_id='-1', created_at=1000 + i)
+                  for i in range(11)]
+        blocks.append(b['_study_block']('主人纠正：rex 不限制同时在线', chat_id='-1', source='correction'))
+        self.store['study'] = '\n\n'.join(blocks)
+        clean = [x for x in b['_study_blocks'](self.store['study']) if x['meta'].get('source') != 'correction']
+        self.assertEqual(len(clean), 11)
+        b['_call_ai_any'] = AsyncMock(return_value='- 这群主要聊代理和影音，看重地区与 IP 品质，习惯多备账号')
+        result = await b['_study_layering_pass'](chat_id='-1', force=True)
+        self.assertEqual(result['summary'], 1)   # 11 条只压最老的 3 条，保留 8 条原文
+        stages = [x['meta'].get('stage') for x in b['_study_blocks'](self.store['study'])
+                  if x['meta'].get('source') != 'correction']
+        self.assertIn('summary', stages)
+        self.assertLessEqual(len([s for s in stages if s == 'detail']), b['STUDY_LAYER_DETAIL_MAX'])
+        self.assertIn('主人纠正：rex 不限制同时在线', self.store['study'])
+
+    async def test_summaries_become_page_and_page_outranks_detail(self):
+        b = self.b
+        blocks = [b['_study_block']('- 摘要 %d 这群聊代理' % i, chat_id='-1', source='distill',
+                                    stage='summary', created_at=1000 + i) for i in range(2)]
+        blocks.append(b['_study_block']('- 原始条目 聊节点延迟', chat_id='-1', created_at=2000))
+        self.store['study'] = '\n\n'.join(blocks)
+        b['_call_ai_any'] = AsyncMock(return_value='- 这群主要聊代理、影音和节点延迟，也关注订阅导入')
+        result = await b['_study_layering_pass'](force=True)
+        self.assertEqual(result['page'], 1)
+        stages = [x['meta'].get('stage') for x in b['_study_blocks'](self.store['study'])]
+        self.assertEqual(stages.count('page'), 1)
+        self.assertEqual(stages.count('summary'), 0)
+        entries = b['_memory_entries'](self.store['study'], 'study')
+        top = b['_rank_memory'](entries, '-1', '', {})[0]
+        self.assertEqual(top['meta'].get('stage'), 'page')
+
+    async def test_layered_text_drops_raw_and_falls_back(self):
+        b = self.b
+        self.store['study'] = b['_study_block']('- 只有原始条目', chat_id='-1')
+        self.assertIn('只有原始条目', b['_study_layered_text']())
+        text = '\n\n'.join([b['_study_block']('- 知识页内容', chat_id='-1', source='distill', stage='page'),
+                            b['_study_block']('- 摘要内容', chat_id='-1', source='distill', stage='summary'),
+                            b['_study_block']('- 原始内容', chat_id='-1')])
+        self.store['study'] = text
+        layered = b['_study_layered_text']()
+        self.assertIn('知识页内容', layered)
+        self.assertIn('摘要内容', layered)
+        self.assertNotIn('原始内容', layered)
+        self.assertLess(layered.index('知识页内容'), layered.index('摘要内容'))
+
+    async def test_layering_can_be_switched_off(self):
+        b = self.b
+        self.store['study'] = '\n\n'.join([b['_study_block']('- 摘要 %d' % i, chat_id='-1', source='distill',
+                                                             stage='summary') for i in range(2)])
+        b['get_setting'] = lambda key, default='': '0' if key == 'study_layering_enabled' else default
+        b['_call_ai_any'] = AsyncMock(return_value='- 不该被调用')
+        result = await b['_study_layering_pass']()
+        self.assertTrue(result['skipped'])
+        self.assertEqual(b['_call_ai_any'].await_count, 0)
+    async def test_ripe_summary_promotes_to_page_without_second_summary(self):
+        b = self.b
+        self.store['study'] = b['_study_block']('- 这群聊抢先版，有 bug 接着修是共识', chat_id='-1',
+                                              source='distill', stage='summary', created_at=1000, merged=4)
+        b['_call_ai_any'] = AsyncMock(
+            return_value='- 这群主要聊抢先版和影音，有 bug 接着修是默认共识，不吵也不闹')
+        result = await b['_study_layering_pass'](force=True)
+        self.assertEqual(result['page'], 1)
+        stages = [x['meta'].get('stage') for x in b['_study_blocks'](self.store['study'])]
+        self.assertEqual(stages, ['page'])
+        self.assertEqual(b['_study_blocks'](self.store['study'])[0]['meta'].get('merged'), 4)
+
+    async def test_truncated_summary_is_rejected_and_originals_kept(self):
+        b = self.b
+        blocks = [b['_study_block']('- 原始条目 %d 讲代理' % i, chat_id='-1', created_at=1000 + i)
+                  for i in range(10)]
+        self.store['study'] = '\n\n'.join(blocks)
+        b['_call_ai_any'] = AsyncMock(return_value='- 这群老对抢先版的心态就是')
+        result = await b['_study_layering_pass'](chat_id='-1', force=True)
+        self.assertEqual(result['summary'], 0)
+        self.assertEqual(len(b['_study_blocks'](self.store['study'])), 10)
