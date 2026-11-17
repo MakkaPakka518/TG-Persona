@@ -315,6 +315,12 @@ location / {
 - `on_game_event` 的异常兜底也补写 `last_at/last_detail`，任何异常都不再让任务计数停在 0。
 - `GET /api/game-tasks/{tid}/probe` 增加 `can_send_messages`，自检时能直接看到本账号在该群能不能发言。
 
+## 1.29.24：人物画像两次都失败要留证据，半句话不再覆盖旧画像
+
+- `_call_ai` 里 `feature="people"` 也把 `finish_reason=length` 视为失败（以前只有 summary / ai_flock / assistant 检查），避免被截断的半句话被当成画像写库。
+- 蒸馏重试条件从「仅返回思考过程」扩展到「画像不完整」，1200 → 2400 两档。
+- 结果不足 40 字直接丢弃并记 `flock_people_last_error`，不再用一句套话覆盖已有画像（线上那条只有 17 字的 TFEL 画像就是这么来的）。
+
 ## 1.29.23：修人物画像蒸馏永远失败（思考型模型吃光 400 Token）
 
 - 根因：`_people_distill_batch()` 只给 `max_tokens=400`，`agnes-3.0-flash` 这类带 reasoning 的线路把预算全用在思考上、正文为空，`_call_ai` 抛「AI 仅返回思考过程」，画像永远写不进 `people_profiles`。面板因此一直显示「还没有画像」，同时「累计 15 条」和「攒够 5 条」两个口径对不上。

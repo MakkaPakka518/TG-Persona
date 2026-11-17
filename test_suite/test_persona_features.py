@@ -478,7 +478,8 @@ class PeopleDistillBudgetTests(unittest.IsolatedAsyncioTestCase):
             calls.append(max_tokens)
             if len(calls) == 1:
                 raise RuntimeError("AI 仅返回思考过程、没有最终正文；请提高最大输出 Token 或降低思考强度")
-            return "这人话少，喜欢直接给答案"
+            return ("性格：技术向的实用主义者，遇到问题直接抛结论不铺垫，喜欢把改动说清楚再说原因，"
+                    "在群里偏反馈型角色，不闲聊，有事说事。")
 
         b['_call_ai_any'] = fake
         got = await b['_people_distill_batch']('6979146118', [('今天这个 bug 我改了', 1)] * 6)
@@ -486,7 +487,27 @@ class PeopleDistillBudgetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0], 1200)
         self.assertEqual(calls[-1], 2400)
         profile = b['conn'].execute("SELECT profile FROM people_profiles WHERE tg_id='6979146118'").fetchone()
-        self.assertIn('喜欢直接给答案', profile[0])
+        self.assertIn('技术向的实用主义者', profile[0])
+
+
+    async def test_truncated_reply_retries_then_keeps_old_profile(self):
+        b = self.b
+        b['conn'].execute("INSERT INTO people_profiles (tg_id,name,note,profile,updated_at,samples,last_id) "
+                          "VALUES ('6979146118','','','旧画像内容保持不动，不该被半句话覆盖',1,3,0)")
+        b['conn'].commit()
+        calls = []
+
+        async def fake(prompt, max_tokens=512, **kwargs):
+            calls.append(max_tokens)
+            if len(calls) < 2:
+                raise RuntimeError("AI 输出达到本次上限（1200），画像不完整；改用更少样本或提高输出上限")
+            return "短"
+
+        b['_call_ai_any'] = fake
+        self.assertEqual(await b['_people_distill_batch']('6979146118', [('hi', 1)] * 6), 0)
+        self.assertEqual(calls, [1200, 2400])
+        profile = b['conn'].execute("SELECT profile FROM people_profiles WHERE tg_id='6979146118'").fetchone()
+        self.assertIn('旧画像内容', profile[0])
 
     async def test_other_errors_do_not_retry(self):
         b = self.b

@@ -1224,7 +1224,9 @@ async def _call_ai_request(cfg, content, max_tokens=512, assistant_mode=False, f
             if max_tokens is not None:
                 raise RuntimeError("总结达到本次输出 Token 上限，请开启“不限制总结长度”或缩短总结范围")
             raise RuntimeError("总结被模型服务商的输出上限截断，请缩短总结范围或换用输出额度更大的模型")
-        if (assistant_mode or feature == "ai_flock") and finish in ("length", "max_tokens"):
+        if (assistant_mode or feature in ("ai_flock", "people")) and finish in ("length", "max_tokens"):
+            if feature == "people":
+                raise RuntimeError("AI 输出达到本次上限（" + str(max_tokens) + "），画像不完整；改用更少样本或提高输出上限")
             raise RuntimeError("AI 输出达到本次上限（" + str(max_tokens) + "），正文不完整；未使用截断内容，请简化描述或换用较少思考的模型")
         if not reply:
             if isinstance(reasoning, str) and reasoning.strip():
@@ -4022,7 +4024,8 @@ async def _people_distill_batch(tg_id, rows, last_id=None, history_ts=None):
                 break
             except Exception as exc:
                 last_error = exc
-                if "仅返回思考过程" not in str(exc) or budget == 2400:
+                retryable = ("仅返回思考过程" in str(exc)) or ("画像不完整" in str(exc))
+                if not retryable or budget == 2400:
                     break
                 log.info("人物画像蒸馏重试 tg=%s 预算=%s", tg_id, budget * 2)
         if not reply:
@@ -4035,6 +4038,15 @@ async def _people_distill_batch(tg_id, rows, last_id=None, history_ts=None):
                 pass
             return 0
         text = str(reply or "").strip()
+        if len(text) < 40:
+            # 太短说明模型没真正总结（常见于被截断或只回一句套话），宁可不覆盖旧画像。
+            log.warning("人物画像过短已丢弃 tg=%s 字数=%s", tg_id, len(text))
+            try:
+                set_setting("flock_people_last_error", "%s 画像只生成 %s 字，已丢弃" % (
+                    now_local().strftime("%Y-%m-%d %H:%M:%S"), len(text)))
+            except Exception:
+                pass
+            return 0
         if not text:
             return 0
         total = int(saved[1] or 0) if saved else 0
