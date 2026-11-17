@@ -121,5 +121,32 @@ class FlockIdleReproTests(unittest.TestCase):
 
 
 
+class FlockFeatureSwitchTests(unittest.TestCase):
+    """三个新功能都必须有任务级开关，关掉时不能有副作用。"""
+
+    def setUp(self):
+        self.b = load_backend()
+
+    def test_skip_reason_off_keeps_plain_no_reply(self):
+        self.assertEqual(self.b['_flock_reply']('SKIP|别人在答了'), 'NO_REPLY|0')
+        self.assertEqual(self.b['_flock_split']('NO_REPLY|0')[:2], ('skip', 0))
+
+    def test_skip_reason_on_keeps_short_note(self):
+        self.assertEqual(self.b['_flock_reply']('SKIP|别人在答了', False, True), 'NO_REPLY|别人在答了')
+        self.assertEqual(self.b['_flock_split']('NO_REPLY|别人在答了')[2], '别人在答了')
+
+    def test_skip_note_is_clamped(self):
+        got = self.b['_flock_reply']('SKIP|' + '很长的理由' * 20, False, True)
+        self.assertLessEqual(len(got.split('|', 1)[1]), 24)
+
+    def test_skip_note_strips_pipes(self):
+        got = self.b['_flock_reply']('SKIP|a|b', False, True)
+        self.assertNotIn('|', got.split('|', 1)[1])
+
+    def test_default_switches_off(self):
+        body = self.b['AIFlockJobInput'](name='x', groups='-1', prompt='聊')
+        self.assertEqual((body.skip_reason, body.group_memory, body.quality_review), (0, 0, 0))
+
+
 if __name__ == '__main__':
     unittest.main()

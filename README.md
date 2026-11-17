@@ -315,6 +315,16 @@ location / {
 - `on_game_event` 的异常兜底也补写 `last_at/last_detail`，任何异常都不再让任务计数停在 0。
 - `GET /api/game-tasks/{tid}/probe` 增加 `can_send_messages`，自检时能直接看到本账号在该群能不能发言。
 
+## 1.29.22：三项可选能力（"不说"留痕 / 群内长记忆 / 发言回评）
+
+三个功能都挂在单个水群任务上，默认关闭，任务编辑里逐个勾选：
+
+- **记录不说理由**（`skip_reason`）：开启后 prompt 允许模型在 SKIP 后面用 `|` 附一句 12 字内理由，`_flock_reply(value, registration, skip_reason)` 清洗成 ≤24 字存成 `NO_REPLY|<理由>`，`_flock_split()` 把它拆出来写进日志「它说的理由」和 `hits.detail.skip_note`；关闭时仍是 `NO_REPLY|0`。
+- **群内长记忆**（`group_memory`）：新表 `ai_flock_memory`，每群一条 ≤300 字近况摘要，`FLOCK_MEMORY_TTL = 6 小时` 内不重复压缩；压缩取最近 40 条真人/号主发言、不足 8 行不压，用 360 Token 输出，注入位置在 skill 之前并计入 `reference_chars.group_memory`。省下的上下文预算可以直接把「上下文消息数」降到 12–14 条。
+- **发言质量回评**（`quality_review`）：新表 `ai_flock_feedback`，每条发出的消息记 `job_id/chat_id/msg_id`，`_flock_feedback_loop()` 每 180 秒扫一次已过 10 分钟的记录，统计被回复数与表情总数，8 天后自动清理；任务卡显示「回评开（近 7 天被回应 X/Y 条）」。
+
+配套：`GET /api/ai/flock/group-memory`、`DELETE /api/ai/flock/group-memory/{chat_id}`、`GET /api/ai/flock/quality`；面板 AI 水群卡片下方可直接刷新/清空群记忆；三列迁移 `skip_reason/group_memory/quality_review` 随启动 ALTER TABLE 自动补齐。
+
 ## 1.29.21：只认真人发言，安静群不再花钱问"要不要开口"
 
 - `_flock_latest_probe()` 取最近 5 条，跳过自己发的（`out`）、机器人转发的（`via_bot`）、系统动作（`action`）、以及 `sender.bot` 为真的消息，只把真人发言当作"有新消息"。
