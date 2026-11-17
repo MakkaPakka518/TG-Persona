@@ -859,6 +859,29 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.row(aid)['signin_recognition_mode'], 'poem')
         self.assertEqual(self.row(aid)['signin_image_action'], 'reply')
 
+    async def test_poem_text_ai_fallback_filters_buttons(self):
+        raw = ("请依次点击下方按钮补全诗句：\n\n有熊有罴，有猫有虎，庆既令░，韩░燕誉。\n\n"
+               "出自：佚名《韩奕》")
+        self.b['_call_ai_any'] = AsyncMock(return_value='居姞')
+        result = await self.b['recognize_poem_text'](raw, ['惘', '姞', '居'], None)
+        self.assertEqual(result['answers'], ['居', '姞'])
+        self.assertEqual(result['channel'], 'ai')
+
+    async def test_poem_text_uses_corpus_without_ai(self):
+        raw = '请依次点击下方按钮补全诗句：\n\n月落乌░霜满天\n\n出自：张继《枫桥夜泊》'
+        self.b['_call_ai_any'] = AsyncMock(side_effect=AssertionError('不该调用 AI'))
+        result = await self.b['recognize_poem_text'](raw, ['时', '啼', '帆', '火'], None)
+        self.assertEqual(result['answers'][0], '啼')
+
+    def test_poem_text_message_extract(self):
+        raw = ("🌸 防机器签到验证 🌸\n\n请依次点击下方按钮补全诗句：\n\n"
+               "有熊有罴，有猫有虎，庆既令░，韩░燕誉。\n\n出自：佚名《韩奕》")
+        self.assertTrue(self.b['_poem_text_message'](raw))
+        self.assertFalse(self.b['_poem_text_message']("欢迎使用，请选择您要使用的功能"))
+        text = self.b['_poem_extract_text'](raw)
+        self.assertEqual(text, '有熊有罴，有猫有虎，庆既令░，韩░燕誉')
+        self.assertNotIn('出自', text)
+
     def test_poem_fill_solver_reads_missing_chars(self):
         answers, detail = self.b['_poem_solve_fill']('月落乌 霜满天，江枫渔 对愁眠')
         self.assertEqual(len(answers), 2)

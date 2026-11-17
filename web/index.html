@@ -1195,7 +1195,7 @@ section.act,.fold.open .fold-b{animation:none}
             <option value="image">图片识别并回复物体名称</option>
             <option value="poem">古诗填空（依次点缺字按钮）</option>
           </select>
-          <div id="sPoemHintWrap" class="hidden hint">适用于「补全诗句」这类防机器签到：自动 OCR / 识别古诗缺的两个字，再按顺序点下方候选按钮。要求机器人把候选字做成按钮；连点间隔用上面的「按钮后等待」。</div>
+          <div id="sPoemHintWrap" class="hidden hint">适用于「补全诗句」这类防机器签到：直接读取机器人发来的诗句文字（不依赖图片），补齐方框/空白处的缺字，再按顺序点下方候选按钮。本地诗库优先，冷门篇目自动走 AI；答案必须命中按钮。连点间隔用上面的「按钮后等待」。</div>
           <div id="sCaptchaProviderWrap" class="hidden">
             <label>识别使用的 AI API（可多选）</label>
             <div id="sCaptchaProviders" class="grp-pick"></div>
