@@ -470,6 +470,78 @@ class PeopleDistillBudgetTests(unittest.IsolatedAsyncioTestCase):
     create = test_backend.BackendBase.create
     row = test_backend.BackendBase.row
 
+
+    async def test_persona_json_parse_keeps_evidence_levels(self):
+        b = self.b
+        payload = ('{"identity":[{"t":"做 REX 模块的开发者","e":"verbatim","q":"我在改 rex 模块"}],'
+                   '"style":[{"t":"句子短，不用波浪号","e":"artifact","q":""},'
+                   '{"t":"喜欢用就这收尾","e":"impression","q":""}],'
+                   '"emotion":[],"relation":[],"rules":[],'
+                   '"conflicts":[{"a":"说自己不爱说话","b":"一天发了两百条"}],'
+                   '"mbti":"infp","zodiac":"金牛座"}')
+        persona = b['_people_persona_parse'](payload)
+        self.assertTrue(persona)
+        self.assertEqual(persona['identity'][0]['e'], 'verbatim')
+        self.assertEqual(persona['identity'][0]['q'], '我在改 rex 模块')
+        self.assertEqual(persona['mbti'], 'INFP')
+        self.assertEqual(persona['zodiac'], '金牛')
+        self.assertEqual(len(persona['conflicts']), 1)
+        rendered = b['_people_persona_render'](persona)
+        self.assertIn('身份：', rendered)
+        self.assertIn('说法不一：', rendered)
+
+    async def test_verbatim_without_quote_downgrades(self):
+        b = self.b
+        persona = b['_people_persona_parse']('{"style":[{"t":"说话很短","e":"verbatim","q":""}]}')
+        self.assertEqual(persona['style'][0]['e'], 'artifact')
+
+    async def test_impression_cap_and_garbage(self):
+        b = self.b
+        persona = b['_people_persona_parse']('{"style":[{"t":"猜1","e":"impression","q":""},{"t":"猜2","e":"impression","q":""},{"t":"猜3","e":"impression","q":""}]}')
+        self.assertEqual(len(persona['style']), 2)
+        self.assertIsNone(b['_people_persona_parse']('不是 JSON'))
+        self.assertIsNone(b['_people_persona_parse']('{"identity":[]}'))
+
+
+    async def test_owner_persona_store_forces_infp_and_taurus(self):
+        b = self.b
+        persona = b['_people_persona_parse']('{"identity":[{"t":"做 REX 模块的人","e":"verbatim","q":"我在改 rex"}],'
+                                            '"style":[{"t":"句子短","e":"artifact","q":""}],"emotion":[],'
+                                            '"relation":[],"rules":[],"conflicts":[],"mbti":"","zodiac":""}')
+        self.assertTrue(persona)
+        persona['mbti'] = 'INFP'
+        persona['zodiac'] = '金牛'
+        b['_owner_persona_store'](persona, 1234)
+        got = b['_owner_persona_get']()
+        self.assertEqual(got['mbti'], 'INFP')
+        self.assertEqual(got['zodiac'], '金牛')
+        self.assertIn('身份：', got['profile'])
+        self.assertIn('句子短', got['brief'])
+        self.assertEqual(got['source_chars'], 1234)
+
+    async def test_distill_uses_corrections_and_stores_structure(self):
+        b = self.b
+        b['conn'].execute("INSERT INTO people_profiles (tg_id,name,note,profile,updated_at,samples,last_id,corrections) "
+                          "VALUES ('6979146118','','','旧文本',0,4,0,'他从不用波浪号')")
+        b['conn'].commit()
+        seen = {}
+
+        async def fake(prompt, max_tokens=512, **kwargs):
+            seen['prompt'] = prompt
+            return ('{"identity":[{"t":"技术向的开发者","e":"verbatim","q":"我改了这个模块"}],'
+                    '"style":[{"t":"说话短","e":"artifact","q":""}],"emotion":[],"relation":[],"rules":[],'
+                    '"conflicts":[],"mbti":"","zodiac":""}')
+
+        b['_call_ai_any'] = fake
+        self.assertEqual(await b['_people_distill_batch']('6979146118', [('我改了这个模块', 1)] * 6), 6)
+        self.assertIn('他从不用波浪号', seen['prompt'])
+        row = b['conn'].execute("SELECT persona_json, profile, samples FROM people_profiles WHERE tg_id='6979146118'").fetchone()
+        self.assertIn('技术向的开发者', row[0])
+        self.assertIn('身份：', row[1])
+        self.assertEqual(row[2], 10)
+        history = b['conn'].execute("SELECT COUNT(*) FROM people_profile_history WHERE tg_id='6979146118'").fetchone()
+        self.assertEqual(history[0], 1)
+
     async def test_thinking_only_first_try_retries_with_bigger_budget(self):
         b = self.b
         calls = []
@@ -478,14 +550,15 @@ class PeopleDistillBudgetTests(unittest.IsolatedAsyncioTestCase):
             calls.append(max_tokens)
             if len(calls) == 1:
                 raise RuntimeError("AI 仅返回思考过程、没有最终正文；请提高最大输出 Token 或降低思考强度")
-            return ("性格：技术向的实用主义者，遇到问题直接抛结论不铺垫，喜欢把改动说清楚再说原因，"
-                    "在群里偏反馈型角色，不闲聊，有事说事。")
+            return ('{"identity":[{"t":"技术向的实用主义者","e":"verbatim","q":"我直接说结论"}],'
+                    '"style":[{"t":"不铺垫，先说结论","e":"artifact","q":""}],"emotion":[],"relation":[],"rules":[],'
+                    '"conflicts":[],"mbti":"","zodiac":""}')
 
         b['_call_ai_any'] = fake
         got = await b['_people_distill_batch']('6979146118', [('今天这个 bug 我改了', 1)] * 6)
         self.assertEqual(got, 6)
-        self.assertEqual(calls[0], 1200)
-        self.assertEqual(calls[-1], 2400)
+        self.assertEqual(calls[0], 1500)
+        self.assertEqual(calls[-1], 3000)
         profile = b['conn'].execute("SELECT profile FROM people_profiles WHERE tg_id='6979146118'").fetchone()
         self.assertIn('技术向的实用主义者', profile[0])
 
@@ -500,12 +573,12 @@ class PeopleDistillBudgetTests(unittest.IsolatedAsyncioTestCase):
         async def fake(prompt, max_tokens=512, **kwargs):
             calls.append(max_tokens)
             if len(calls) < 2:
-                raise RuntimeError("AI 输出达到本次上限（1200），画像不完整；改用更少样本或提高输出上限")
-            return "短"
+                raise RuntimeError("AI 输出达到本次上限（1500），画像不完整；改用更少样本或提高输出上限")
+            return '{"identity":[{"t":"短","e":"artifact","q":""}],"style":[],"emotion":[],"relation":[],"rules":[]}' 
 
         b['_call_ai_any'] = fake
         self.assertEqual(await b['_people_distill_batch']('6979146118', [('hi', 1)] * 6), 0)
-        self.assertEqual(calls, [1200, 2400])
+        self.assertEqual(calls, [1500, 3000])
         profile = b['conn'].execute("SELECT profile FROM people_profiles WHERE tg_id='6979146118'").fetchone()
         self.assertIn('旧画像内容', profile[0])
 

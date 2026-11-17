@@ -1847,6 +1847,15 @@ section.act,.fold.open .fold-b{animation:none}
             <div class="water-ai-toolbar"><button class="btn" type="button" id="peopleSave2" onclick="savePeople()">保存画像设置</button><button class="ghost" type="button" id="peopleDistill" onclick="distillPeople()">生成画像</button></div>
             <div class="water-ai-toolbar" style="margin-top:10px"><label class="chk" for="friendsUploadEnabled"><input type="checkbox" id="friendsUploadEnabled"> friends.md 定时导出到 TG</label><input id="friendsUploadTime" type="time" value="23:00" style="width:120px"><button class="btn" type="button" id="friendsUploadSave" onclick="saveFriendsUpload()">保存导出设置</button><button class="ghost" type="button" onclick="runFriendsUpload()">立即导出</button><button class="ghost" type="button" onclick="rebuildFriends()">重建 friends.md</button></div>
             <div class="hint" id="friendsUploadState">friends.md 是白名单人物画像的汇总文件，AI 水群会引用它。</div>
+            <div class="memory-row" id="ownerPersonaBlock" style="margin-top:12px">
+              <div class="memory-head"><div class="hint"><b>号主自画像</b>（从 skill.md / study.md / knowledge.md / friends.md 蒸馏，水群时按这个说话）</div>
+                <button class="ghost memory-edit" type="button" id="ownerPersonaDistill" onclick="distillOwnerPersona()">重新蒸馏</button></div>
+              <div class="memory-actions"><select class="ghost" id="ownerPersonaMbti"></select><select class="ghost" id="ownerPersonaZodiac"></select></div>
+              <div class="hint" id="ownerPersonaState">读取中…</div>
+              <div class="hint memory-preview" id="ownerPersonaBody" style="white-space:pre-wrap"></div>
+              <textarea id="ownerPersonaCorrections" rows="2" maxlength="600" placeholder="号主纠正：水群时不许做的事，例如「别用波浪号」「别主动喊人名字」"></textarea>
+              <button class="ghost" type="button" onclick="saveOwnerPersona()">保存标签与纠正</button>
+            </div>
             <div class="learning-status state-waiting" id="peopleStatusBox" role="status" aria-live="polite"><span class="learning-status-dot" aria-hidden="true"></span><div class="learning-status-main"><div class="learning-status-title" id="peopleStatusTitle">人物画像 · 读取中</div><div class="learning-status-meta" id="peopleStatusDetail"></div></div></div>
             <div id="peopleList"></div>
         </div>
@@ -4168,6 +4177,62 @@ var peopleItems=[],peopleOpenIds=new Set(),peopleLastError='',peopleStep=10;
 var peopleProviderSel=new Set();
 function renderPeopleProviders(){const box=$('#peopleProviders');if(!box||!aiProvidersLoaded)return;pruneProviderSelection(peopleProviderSel);box.innerHTML=providerPickMarkup(peopleProviderSel,'people-provider')}
 
+var PEOPLE_SECTIONS=[['rules','硬规则'],['identity','身份'],['style','说话风格'],['emotion','情感模式'],['relation','人际行为']];
+function personaText(item){
+  const persona=item&&item.persona;
+  if(!persona)return String(item&&item.profile||'');
+  const marks={verbatim:'原话',artifact:'归纳',impression:'印象'};
+  const lines=[];
+  for(const [key,label] of PEOPLE_SECTIONS){
+    const items=(persona[key]||[]).map(x=>({t:String(x&&x.t||''),e:String(x&&x.e||'artifact'),q:String(x&&x.q||'')})).filter(x=>x.t);
+    if(!items.length)continue;
+    lines.push(label+'：'+items.map(x=>x.t+(x.e==='verbatim'&&x.q?'（原话「'+x.q+'」）':'（'+marks[x.e]+'）')).join('；'));
+  }
+  const conflicts=(persona.conflicts||[]).map(x=>String(x&&x.a||'')+' / '+String(x&&x.b||''));
+  if(conflicts.length)lines.push('说法不一：'+conflicts.join('；'));
+  const tags=[];if(item.mbti)tags.push(item.mbti);if(item.zodiac)tags.push(item.zodiac+'座');
+  if(tags.length)lines.push('标签：'+tags.join(' · '));
+  return lines.join('\n')||String(item.profile||'');
+}
+async function loadPersonHistory(tg,c,box){
+  try{
+    const d=await api('/api/ai/flock/people/'+encodeURIComponent(tg)+'/history',{_account:c});if(!isCurrentAccount(c))return;
+    const items=d.items||[];box.replaceChildren();
+    if(!items.length){box.textContent='还没有历史版本';return}
+    for(const v of items){
+      const line=document.createElement('div');line.className='memory-actions';
+      const text=document.createElement('div');text.className='hint';text.textContent=v.time+' · '+Number(v.samples||0)+' 条样本 · '+(v.reason==='manual'?'手动编辑':'蒸馏')+' · 预览 '+(v.profile||'').slice(0,40);
+      const back=document.createElement('button');back.type='button';back.className='ghost';back.textContent='回滚';
+      back.onclick=()=>{if(!window.confirm('回滚到 '+v.time+' 这一版？当前画像会被替换'))return;
+        api('/api/ai/flock/people/'+encodeURIComponent(tg)+'/rollback',{method:'POST',_account:c,body:JSON.stringify({created_at:v.created_at})}).then(()=>{toast('已回滚');loadPeople()}).catch(e=>toast('回滚失败：'+e.message,1))};
+      line.appendChild(text);line.appendChild(back);box.appendChild(line);
+    }
+  }catch(e){box.textContent='历史读取失败：'+e.message}
+}
+var OWNER_MBTI=['INTJ','INTP','ENTJ','ENTP','INFJ','INFP','ENFJ','ENFP','ISTJ','ISFJ','ESTJ','ESFJ','ISTP','ISFP','ESTP','ESFP'];
+var OWNER_ZODIAC=['白羊','金牛','双子','巨蟹','狮子','处女','天秤','天蝎','射手','摩羯','水瓶','双鱼'];
+function fillOwnerSelects(){const mbti=$('#ownerPersonaMbti'),zodiac=$('#ownerPersonaZodiac');if(!mbti||!zodiac||mbti.options.length)return;for(const v of OWNER_MBTI){const o=document.createElement('option');o.value=v;o.textContent=v;mbti.appendChild(o)}for(const v of OWNER_ZODIAC){const o=document.createElement('option');o.value=v;o.textContent=v+'座';zodiac.appendChild(o)}}
+async function loadOwnerPersona(c){
+  const c2=c||accountContext();fillOwnerSelects();
+  try{
+    const d=await api('/api/ai/owner/persona',{_account:c2});if(!isCurrentAccount(c2))return;
+    $('#ownerPersonaMbti').value=d.mbti||'INFP';$('#ownerPersonaZodiac').value=d.zodiac||'金牛';
+    $('#ownerPersonaCorrections').value=d.corrections||'';
+    $('#ownerPersonaBody').textContent=d.profile||'还没有自画像，点「重新蒸馏」用面板里的 md 生成一份';
+    $('#ownerPersonaState').textContent=d.updated?('最近蒸馏 '+d.updated+' · 材料 '+Number(d.source_chars||0)+' 字'):'还没有自画像';
+  }catch(e){$('#ownerPersonaState').textContent='自画像读取失败：'+e.message}
+}
+async function distillOwnerPersona(){
+  const c=accountContext(),btn=$('#ownerPersonaDistill');if(!btn||btn.disabled)return;btn.disabled=true;$('#ownerPersonaState').textContent='正在读取 md 并蒸馏…';
+  try{await api('/api/ai/owner/persona/distill',{method:'POST',_account:c,body:JSON.stringify({})});if(!isCurrentAccount(c))return;toast('号主自画像已更新');await loadOwnerPersona(c)}
+  catch(e){if(isCurrentAccount(c))$('#ownerPersonaState').textContent='蒸馏失败：'+e.message}
+  finally{btn.disabled=false}
+}
+async function saveOwnerPersona(){
+  const c=accountContext();
+  try{await api('/api/ai/owner/persona',{method:'PUT',_account:c,body:JSON.stringify({profile:'',mbti:$('#ownerPersonaMbti').value,zodiac:$('#ownerPersonaZodiac').value,corrections:$('#ownerPersonaCorrections').value})});if(!isCurrentAccount(c))return;toast('已保存');await loadOwnerPersona(c)}
+  catch(e){if(isCurrentAccount(c))toast('保存失败：'+e.message,1)}
+}
 function renderPeopleList(c){
   const list=$('#peopleList');if(!list)return;list.replaceChildren();
   const brief=t=>{const s=String(t||'').replace(/\s+/g,' ').trim();return s.length>72?s.slice(0,72)+'…':s};
@@ -4176,27 +4241,41 @@ function renderPeopleList(c){
     const row=document.createElement('div');row.className='memory-row';
     const head=document.createElement('div');head.className='memory-head';
     const label=document.createElement('div');label.className='hint';
-    label.textContent=(item.name||'群友')+' · TG '+tg+' · 保留 '+Number(item.lines||0)+' 条'+(item.samples?('（累计 '+Number(item.samples)+' 条）'):'')+(item.whitelist?' · 白名单':'');
+    label.textContent=(item.name||'群友')+' · TG '+tg+' · 保留 '+Number(item.lines||0)+' 条'+(item.samples?('（累计 '+Number(item.samples)+' 条）'):'')+(item.whitelist?' · 白名单':'')+(item.mbti?' · '+item.mbti:'')+(item.zodiac?' · '+item.zodiac+'座':'');
     const edit=document.createElement('button');edit.type='button';edit.className='ghost memory-edit';edit.textContent=open?'收起':'编辑';
     edit.onclick=()=>{if(open)peopleOpenIds.delete(tg);else peopleOpenIds.add(tg);renderPeopleList(c)};
     head.appendChild(label);head.appendChild(edit);row.appendChild(head);
     if(!open){
       const preview=document.createElement('div');preview.className='hint memory-preview';
-      preview.textContent=brief(item.profile||'')||(peopleLastError?('还没有画像 · 上次蒸馏失败：'+peopleLastError+'（累计 '+Number(item.lines||0)+' 条发言）'):('还没有画像：累计 '+Number(item.lines||0)+' 条发言，凑满 '+peopleStep+' 条未蒸馏的就会自动生成'));
+      preview.textContent=brief(personaText(item))||(peopleLastError?('还没有画像 · 上次蒸馏失败：'+peopleLastError+'（累计 '+Number(item.lines||0)+' 条发言）'):('还没有画像：累计 '+Number(item.lines||0)+' 条发言，凑满 '+peopleStep+' 条未蒸馏的就会自动生成'));
       row.appendChild(preview);list.appendChild(row);continue;
     }
+    const tags=document.createElement('div');tags.className='memory-actions';
+    const mbti=document.createElement('select');mbti.className='ghost';
+    mbti.replaceChildren();for(const [value,text] of [['','MBTI 未填'],['INTJ','INTJ'],['INTP','INTP'],['ENTJ','ENTJ'],['ENTP','ENTP'],['INFJ','INFJ'],['INFP','INFP'],['ENFJ','ENFJ'],['ENFP','ENFP'],['ISTJ','ISTJ'],['ISFJ','ISFJ'],['ESTJ','ESTJ'],['ESFJ','ESFJ'],['ISTP','ISTP'],['ISFP','ISFP'],['ESTP','ESTP'],['ESFP','ESFP']]){const o=document.createElement('option');o.value=value;o.textContent=text;mbti.appendChild(o)}
+    mbti.value=item.mbti||'';
+    const zodiac=document.createElement('select');zodiac.className='ghost';
+    zodiac.replaceChildren();for(const value of ['','白羊','金牛','双子','巨蟹','狮子','处女','天秤','天蝎','射手','摩羯','水瓶','双鱼']){const o=document.createElement('option');o.value=value;o.textContent=value?value+'座':'星座未填';zodiac.appendChild(o)}
+    zodiac.value=item.zodiac||'';
+    tags.appendChild(mbti);tags.appendChild(zodiac);
+    const corrections=document.createElement('textarea');corrections.rows=2;corrections.maxLength=600;corrections.placeholder='纠正：他说话不是这样的，例如「他从不用波浪号」「他管谁都叫老哥」——优先级高于蒸馏结果';corrections.value=item.corrections||'';
+    const history=document.createElement('div');history.className='hint';history.dataset.peopleHistory=tg;
+    const histBtn=document.createElement('button');histBtn.type='button';histBtn.className='ghost';histBtn.textContent='历史版本';
+    histBtn.onclick=()=>loadPersonHistory(tg,c,history);
     const note=document.createElement('input');note.type='text';note.maxLength=120;note.placeholder='备注：这是谁，例如「朋友老王」';note.value=item.note||'';
     const body=document.createElement('textarea');body.rows=4;body.value=item.profile||'';body.placeholder='画像：AI 蒸馏出的印象，可手动改写';
     const actions=document.createElement('div');actions.className='memory-actions';
     const save=document.createElement('button');save.type='button';save.className='ghost';save.textContent='保存备注和画像';
-    save.onclick=()=>{peopleOpenIds.delete(tg);savePerson(tg,note.value,body.value,c)};
+    save.onclick=()=>{peopleOpenIds.delete(tg);savePerson(tg,note.value,body.value,c,{mbti:mbti.value,zodiac:zodiac.value,corrections:corrections.value})};
     const del=document.createElement('button');del.type='button';del.className='ghost';del.textContent='删除记录';
     del.onclick=()=>{if(!window.confirm('删除这个人的记忆和画像？'))return;api('/api/ai/flock/people/'+encodeURIComponent(tg),{method:'DELETE',_account:c}).then(()=>loadPeople()).catch(e=>{$('#peopleStatus').textContent='删除失败：'+e.message})};
-    actions.appendChild(save);actions.appendChild(del);row.appendChild(note);row.appendChild(body);row.appendChild(actions);list.appendChild(row);
+    actions.appendChild(save);actions.appendChild(del);actions.appendChild(histBtn);row.appendChild(tags);row.appendChild(note);row.appendChild(body);row.appendChild(corrections);row.appendChild(history);row.appendChild(actions);list.appendChild(row);
   }
 }
-async function loadPeople(){const c=accountContext();try{const data=await api('/api/ai/flock/people',{_account:c});if(!isCurrentAccount(c))return;$('#peopleNormalEnabled').checked=!!data.normal;$('#peopleWhiteEnabled').checked=!!data.white;$('#peopleHistoryEnabled').checked=!!data.history;if(data.history_start)$('#peopleHistoryStart').value=data.history_start;if(data.history_end)$('#peopleHistoryEnd').value=data.history_end;$('#peopleProfileEnabled').checked=!!data.profile;$('#peopleAutoDistill').checked=!!data.auto_distill;if(Number.isFinite(data.lines))$('#peopleLines').value=data.lines;if(Number.isFinite(data.white_lines))$('#peopleWhiteLines').value=data.white_lines;if(Number.isFinite(data.window))$('#peopleWindow').value=data.window;if(Number.isFinite(data.white_window))$('#peopleWhiteWindow').value=data.white_window;if(Number.isFinite(data.budget))$('#peopleBudget').value=data.budget;$('#peopleWhitelist').value=data.whitelist||'';peopleGroupSel=new Set(csvValues(data.groups||''));peopleAiGroups=data.ai_groups||'';renderPeopleStatus(data);renderPeopleGroups();renderFriendsUpload(data);peopleProviderSel=new Set(csvValues(data.provider_ids||''));renderPeopleProviders();peopleLastError=String(data.last_error||'');peopleStep=Number(data.auto_step||10);peopleItems=data.items||[];renderPeopleList(c);const pr=$('#waterAiPeopleRefHint');if(pr)pr.textContent='人物画像：'+((data.normal||data.white)?('已启用（普通 '+(data.normal?'开':'关')+' / 白名单 '+(data.white?'开':'关')+'，注入预算 '+Number(data.budget||0)+' 字'+(data.auto_distill?'，自动蒸馏开':'')+(data.history?'，历史蒸馏 '+data.history_start+'~'+data.history_end:'')+'）'):'已关闭');$('#peopleStatus').textContent=(data.items||[]).length?('已记录 '+Number((data.items||[]).length)+' 人'):'还没有记录到任何人'}catch(e){$('#peopleStatus').textContent='读取失败：'+e.message}}
-async function savePerson(tgId,note,profile,c){try{await api('/api/ai/flock/people/'+encodeURIComponent(tgId),{method:'PUT',body:JSON.stringify({note:note,profile:profile}),_account:c||accountContext()});if(!isCurrentAccount(c||accountContext()))return;$('#peopleStatus').textContent='已保存 TG '+tgId+' 的备注与画像'}catch(e){$('#peopleStatus').textContent='保存失败：'+e.message}}
+async function loadPeople(){const c=accountContext();loadOwnerPersona(c);try{const data=await api('/api/ai/flock/people',{_account:c});if(!isCurrentAccount(c))return;$('#peopleNormalEnabled').checked=!!data.normal;$('#peopleWhiteEnabled').checked=!!data.white;$('#peopleHistoryEnabled').checked=!!data.history;if(data.history_start)$('#peopleHistoryStart').value=data.history_start;if(data.history_end)$('#peopleHistoryEnd').value=data.history_end;$('#peopleProfileEnabled').checked=!!data.profile;$('#peopleAutoDistill').checked=!!data.auto_distill;if(Number.isFinite(data.lines))$('#peopleLines').value=data.lines;if(Number.isFinite(data.white_lines))$('#peopleWhiteLines').value=data.white_lines;if(Number.isFinite(data.window))$('#peopleWindow').value=data.window;if(Number.isFinite(data.white_window))$('#peopleWhiteWindow').value=data.white_window;if(Number.isFinite(data.budget))$('#peopleBudget').value=data.budget;$('#peopleWhitelist').value=data.whitelist||'';peopleGroupSel=new Set(csvValues(data.groups||''));peopleAiGroups=data.ai_groups||'';renderPeopleStatus(data);renderPeopleGroups();renderFriendsUpload(data);peopleProviderSel=new Set(csvValues(data.provider_ids||''));renderPeopleProviders();peopleLastError=String(data.last_error||'');peopleStep=Number(data.auto_step||10);peopleItems=data.items||[];renderPeopleList(c);const pr=$('#waterAiPeopleRefHint');if(pr)pr.textContent='人物画像：'+((data.normal||data.white)?('已启用（普通 '+(data.normal?'开':'关')+' / 白名单 '+(data.white?'开':'关')+'，注入预算 '+Number(data.budget||0)+' 字'+(data.auto_distill?'，自动蒸馏开':'')+(data.history?'，历史蒸馏 '+data.history_start+'~'+data.history_end:'')+'）'):'已关闭');$('#peopleStatus').textContent=(data.items||[]).length?('已记录 '+Number((data.items||[]).length)+' 人'):'还没有记录到任何人'}catch(e){$('#peopleStatus').textContent='读取失败：'+e.message}}
+async function savePerson(tgId,note,profile,c,extra){
+  const body={note:note,profile:profile,mbti:(extra&&extra.mbti)||'',zodiac:(extra&&extra.zodiac)||'',corrections:(extra&&extra.corrections)||''};
+  try{await api('/api/ai/flock/people/'+encodeURIComponent(tgId),{method:'PUT',body:JSON.stringify(body),_account:c||accountContext()});if(!isCurrentAccount(c||accountContext()))return;$('#peopleStatus').textContent='已保存 TG '+tgId+' 的备注与画像'}catch(e){$('#peopleStatus').textContent='保存失败：'+e.message}}
 async function savePeople(){const c=accountContext(),body={normal:$('#peopleNormalEnabled').checked,white:$('#peopleWhiteEnabled').checked,history:$('#peopleHistoryEnabled').checked,history_start:$('#peopleHistoryStart').value,history_end:$('#peopleHistoryEnd').value,profile:$('#peopleProfileEnabled').checked,auto_distill:$('#peopleAutoDistill').checked,lines:Number($('#peopleLines').value)||8,white_lines:Number($('#peopleWhiteLines').value)||24,window:Number($('#peopleWindow').value)||1800,white_window:Number($('#peopleWhiteWindow').value)||7200,budget:Number($('#peopleBudget').value)||600,whitelist:$('#peopleWhitelist').value,groups:[...peopleGroupSel].join(','),provider_ids:[...peopleProviderSel].join(',')};
 if((body.profile||body.auto_distill||body.history)&&!(body.groups||peopleAiGroups))return toast('开启画像蒸馏或历史蒸馏前请先选择群（AI 水群的群会自动纳入）',1);
 if(!validBeijingWindow(body.history,body.history_start,body.history_end,'历史蒸馏'))return;try{await api('/api/ai/flock/people',{method:'PUT',body:JSON.stringify(body),_account:c});if(!isCurrentAccount(c))return;$('#peopleStatus').textContent='已保存';await loadPeople()}catch(e){$('#peopleStatus').textContent='保存失败：'+e.message}}

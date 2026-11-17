@@ -315,6 +315,20 @@ location / {
 - `on_game_event` 的异常兜底也补写 `last_at/last_detail`，任何异常都不再让任务计数停在 0。
 - `GET /api/game-tasks/{tid}/probe` 增加 `can_send_messages`，自检时能直接看到本账号在该群能不能发言。
 
+## 1.29.25：画像改成五段结构化 + 证据等级，加历史回滚、纠正层与号主自画像
+
+**群友画像**
+- `people_profiles.profile` 从一段"性格：…"改成五段结构：硬规则 / 身份 / 说话风格 / 情感模式 / 人际行为，存在新列 `persona_json`，渲染文本仍写 `profile` 供 friends.md 与旧接口使用。
+- 每条必须带证据等级：`verbatim`（原话，必须抄回 `q`）/ `artifact`（归纳）/ `impression`（推测，合计 ≤2 条）；自相矛盾写进 `conflicts`，不取平均值。
+- 新增 `mbti`、`zodiac`、`corrections` 三列。标签只认 16 型与 12 星座，手动填的值不会被蒸馏覆盖；`corrections` 是号主手工纠正，优先级高于任何推断，同时注入蒸馏 prompt 与水群语境。
+- 新表 `people_profile_history`：每次覆盖前留快照（最近 12 版），面板可「历史版本」→「回滚」；手动改画像也会先留一版。
+- 水群注入只取「说话风格 + 情感模式」摘要（≤160 字），不再塞整段画像，省 Token。
+
+**号主自画像**
+- 新表 `owner_persona`：把 `skill.md` / `study.md` / `knowledge.md` / `friends.md` 按同一套五段结构蒸馏成"号主本人画像"，MBTI 与星座由本人给定（INFP / 金牛），蒸馏时强制写入。
+- 面板人物画像区新增「号主自画像」块：可看五段结构、改 MBTI/星座、写纠正、一键重新蒸馏；水群时以 ≤280 字注入，`flock_owner_persona_enabled` 可关。
+- 新接口：`GET/PUT /api/ai/owner/persona`、`POST /api/ai/owner/persona/distill`、`GET /api/ai/flock/people/{tg}/history`、`POST /api/ai/flock/people/{tg}/rollback`。
+
 ## 1.29.24：人物画像两次都失败要留证据，半句话不再覆盖旧画像
 
 - `_call_ai` 里 `feature="people"` 也把 `finish_reason=length` 视为失败（以前只有 summary / ai_flock / assistant 检查），避免被截断的半句话被当成画像写库。

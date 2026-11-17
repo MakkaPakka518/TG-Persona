@@ -219,7 +219,24 @@ def db_init(database=None):
             tg_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
             note TEXT NOT NULL DEFAULT '', profile TEXT NOT NULL DEFAULT '',
             updated_at INTEGER NOT NULL DEFAULT 0, samples INTEGER NOT NULL DEFAULT 0,
-            last_id INTEGER NOT NULL DEFAULT 0
+            last_id INTEGER NOT NULL DEFAULT 0,
+            persona_json TEXT NOT NULL DEFAULT '',
+            mbti TEXT NOT NULL DEFAULT '',
+            zodiac TEXT NOT NULL DEFAULT '',
+            corrections TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS owner_persona (
+            id TEXT PRIMARY KEY, profile TEXT NOT NULL DEFAULT '',
+            persona_json TEXT NOT NULL DEFAULT '', mbti TEXT NOT NULL DEFAULT '',
+            zodiac TEXT NOT NULL DEFAULT '', corrections TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL DEFAULT 0, source_chars INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS people_profile_history (
+            tg_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+            profile TEXT NOT NULL DEFAULT '', persona_json TEXT NOT NULL DEFAULT '',
+            mbti TEXT NOT NULL DEFAULT '', zodiac TEXT NOT NULL DEFAULT '',
+            samples INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY(tg_id, created_at)
         );
         CREATE TABLE IF NOT EXISTS memory_refs (
             block_id TEXT PRIMARY KEY, file TEXT NOT NULL,
@@ -428,7 +445,11 @@ def db_init(database=None):
             pass
     for col, ddl in (("note", "TEXT NOT NULL DEFAULT ''"),
                      ("last_id", "INTEGER NOT NULL DEFAULT 0"),
-                     ("history_ts", "INTEGER NOT NULL DEFAULT 0")):
+                     ("history_ts", "INTEGER NOT NULL DEFAULT 0"),
+                     ("persona_json", "TEXT NOT NULL DEFAULT ''"),
+                     ("mbti", "TEXT NOT NULL DEFAULT ''"),
+                     ("zodiac", "TEXT NOT NULL DEFAULT ''"),
+                     ("corrections", "TEXT NOT NULL DEFAULT ''")):
         try:
             conn.execute(f"ALTER TABLE people_profiles ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
@@ -3497,6 +3518,13 @@ async def _run_ai_flock_body(chat_id, trigger_text, direct_to_self=False, *, tes
                 await _flock_memory_refresh(key, source, messages)
             except Exception:
                 log.debug("群记忆刷新异常", exc_info=True)
+        if not registration and get_setting("flock_owner_persona_enabled", "1") == "1":
+            owner = _owner_persona_get()
+            if owner["brief"]:
+                instruction += ("\n以下是号主本人的画像（你就是他，按这个说话与情绪）：\n"
+                                + owner["brief"] + "\n")
+                references["owner"] = owner["brief"]
+                log.info("号主画像注入 字数=%d", len(owner["brief"]))
         skill_slice = _skill_reference(skill_chars, key, trigger_text, used_sink=used_ids)
         if not registration and not source["prompt"].strip() and not skill_slice.strip():
             if testing:
@@ -3973,35 +4001,269 @@ def _people_block(pairs, budget=None):
                           (tg_id,)).fetchall()
         if len(rows) < 2:
             continue
-        profile = db.execute("SELECT note, profile FROM people_profiles WHERE tg_id=?", (tg_id,)).fetchone()
+        profile = db.execute("SELECT note, profile, persona_json, mbti, zodiac, corrections "
+                             "FROM people_profiles WHERE tg_id=?", (tg_id,)).fetchone()
         name = next((str(item[0]) for item in rows if item[0]), "群友")
         said = " / ".join(str(item[1])[:40] for item in rows[::-1])
         head = "- %s（TG %s）" % (name, tg_id)
         if profile and profile[0]:
             head += "｜备注：" + str(profile[0])[:60]
-        if profile and len(profile) > 1 and profile[1]:
-            head += "｜印象：" + str(profile[1])[:200]
+        tags = []
+        if profile and len(profile) > 3 and profile[3]:
+            tags.append(str(profile[3])[:4].upper())
+        if profile and len(profile) > 4 and profile[4]:
+            tags.append(str(profile[4])[:6] + "座")
+        if tags:
+            head += "｜" + "·".join(tags)
+        persona = None
+        if profile and len(profile) > 2 and profile[2]:
+            try:
+                persona = json.loads(str(profile[2]))
+            except Exception:
+                persona = None
+        brief = _people_persona_brief(persona, 160) if persona else ""
+        if not brief and profile and len(profile) > 1:
+            brief = str(profile[1])[:160]
+        if brief:
+            head += "｜说话与情绪：" + brief
+        if profile and len(profile) > 5 and str(profile[5] or "").strip():
+            head += "｜号主纠正（必须遵守）：" + str(profile[5]).strip()[:120]
         blocks.append(head + "｜最近说过：" + said)
     return "\n".join(blocks)[:max(0, budget)]
 
 
-PEOPLE_PROFILE_PROMPT = ("你在给 AI 助手维护群友的画像。按下面三块写，每块 2-4 句，可以分条，但不要写成流水账：\n"
-                          "性格：他是什么样的人，脾气、态度、在群里扮演的角色；\n"
-                          "说话方式：口头禅、句子长短、常用词、爱用的表情、开玩笑的方式；\n"
-                          "近3天：他这几天在群里做过或聊过的事，提纯成几条，不要逐条复述原话。\n"
-                          "全文不超过 400 字。不评价人品，不编造事实，不要额外标题和解释。")
+PEOPLE_PERSONA_SECTIONS = (("rules", "硬规则"), ("identity", "身份"), ("style", "说话风格"),
+                           ("emotion", "情感模式"), ("relation", "人际行为"))
+PEOPLE_PERSONA_MAX_CHARS = 900
+PEOPLE_MBTI_OK = ("INTJ", "INTP", "ENTJ", "ENTP", "INFJ", "INFP", "ENFJ", "ENFP",
+                  "ISTJ", "ISFJ", "ESTJ", "ESFJ", "ISTP", "ISFP", "ESTP", "ESFP")
+PEOPLE_ZODIAC_OK = ("白羊", "金牛", "双子", "巨蟹", "狮子", "处女", "天秤", "天蝎", "射手", "摩羯", "水瓶", "双鱼")
+
+PEOPLE_PROFILE_PROMPT = (
+    "你在维护某个群友的画像。只输出一个 JSON 对象，不要解释、不要 markdown、不要代码块。\n"
+    "固定字段："
+    '{"rules":[],"identity":[],"style":[],"emotion":[],"relation":[],"conflicts":[],"mbti":"","zodiac":""}\n'
+    "rules 硬规则：他明确讨厌或不能接受的事，最多 3 条。\n"
+    "identity 身份：他是谁、在群里干什么，最多 3 条。\n"
+    "style 说话风格：口头禅、句子长短、标点习惯、表情，最多 4 条。\n"
+    "emotion 情感模式：什么时候兴奋、什么时候回避、对什么较真，最多 3 条。\n"
+    "relation 人际行为：对谁怎么说话、会不会主动带话题，最多 3 条。\n"
+    '每条必须是 {"t":"不超过 24 字的中文描述","e":"verbatim|artifact|impression","q":"原话片段，最多 20 字"}\n'
+    "证据规则：原话里出现过的才可标 verbatim 并把原话抄进 q；从多条消息归纳的标 artifact，q 留空；"
+    "纯推测标 impression，q 留空，且 impression 合计不超过 2 条。没有证据的条目宁可不写。\n"
+    "前后说法不一致时不要取平均值，写进 conflicts，每条 "
+    '{"a":"一种说法","b":"另一种说法"}，最多 3 条。\n'
+    "mbti 只填四个字母、zodiac 只填星座名（白羊/金牛/双子/巨蟹/狮子/处女/天秤/天蝎/射手/摩羯/水瓶/双鱼），"
+    "没有明显依据就留空字符串，禁止瞎猜。"
+)
+
+
+def _people_clean_text(value, limit):
+    return " ".join(str(value or "").split())[:limit]
+
+
+def _people_persona_parse(text):
+    """把模型返回的 JSON 清洗成固定结构；解析不出来返回 None。"""
+    raw = str(text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```[a-zA-Z]*\s*|```$", "", raw, flags=re.M).strip()
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        data = json.loads(raw[start:end + 1])
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    persona = {}
+    total = 0
+    impressions = 0
+    for key, _label in PEOPLE_PERSONA_SECTIONS:
+        items = data.get(key)
+        if isinstance(items, str):
+            items = [items]
+        if not isinstance(items, list):
+            items = []
+        clean = []
+        for item in items[:8]:
+            if isinstance(item, str):
+                item = {"t": item, "e": "artifact"}
+            if not isinstance(item, dict):
+                continue
+            body = _people_clean_text(item.get("t"), 40)
+            if not body:
+                continue
+            evidence = str(item.get("e") or "artifact").strip().lower()
+            if evidence not in ("verbatim", "artifact", "impression"):
+                evidence = "artifact"
+            quote = _people_clean_text(item.get("q"), 30)
+            if evidence == "verbatim" and not quote:
+                evidence = "artifact"
+            if evidence == "impression":
+                impressions += 1
+                if impressions > 2:
+                    continue
+            clean.append({"t": body, "e": evidence, "q": quote})
+        persona[key] = clean[:4]
+        total += len(persona[key])
+    conflicts = []
+    raw_conflicts = data.get("conflicts")
+    for item in raw_conflicts[:4] if isinstance(raw_conflicts, list) else []:
+        if not isinstance(item, dict):
+            continue
+        left = _people_clean_text(item.get("a"), 40)
+        right = _people_clean_text(item.get("b"), 40)
+        if left and right:
+            conflicts.append({"a": left, "b": right})
+    persona["conflicts"] = conflicts[:3]
+    mbti = re.sub(r"[^A-Z]", "", str(data.get("mbti") or "").upper())[:4]
+    persona["mbti"] = mbti if mbti in PEOPLE_MBTI_OK else ""
+    zodiac = _people_clean_text(data.get("zodiac"), 6)
+    if zodiac.endswith("座"):
+        zodiac = zodiac[:-1]
+    persona["zodiac"] = zodiac if zodiac in PEOPLE_ZODIAC_OK else ""
+    if not total:
+        return None
+    return persona
+
+
+def _people_persona_render(persona):
+    """结构化画像转成人读文本，写进 profile 列，保持旧接口兼容。"""
+    if not isinstance(persona, dict):
+        return ""
+    parts = []
+    for key, label in PEOPLE_PERSONA_SECTIONS:
+        items = [str(item.get("t") or "") for item in persona.get(key) or [] if isinstance(item, dict)]
+        items = [item for item in items if item]
+        if items:
+            parts.append(label + "：" + "；".join(items))
+    conflicts = persona.get("conflicts") or []
+    if conflicts:
+        parts.append("说法不一：" + "；".join("%s / %s" % (item.get("a"), item.get("b"))
+                                                for item in conflicts if isinstance(item, dict)))
+    return "\n".join(parts)[:PEOPLE_PERSONA_MAX_CHARS]
+
+
+OWNER_PERSONA_PROMPT = (
+    "你在整理号主本人的数字分身档案。材料是号主自己维护的 skill.md（说话风格与人格）、study.md（学到的经验）、"
+    "knowledge.md（知识积累）、friends.md（对群友的认识）。只输出一个 JSON 对象，不要解释、不要 markdown：\n"
+    '{"rules":[],"identity":[],"style":[],"emotion":[],"relation":[],"conflicts":[],"mbti":"","zodiac":""}\n'
+    "每条是 {\"t\":\"不超过 24 字的中文描述\",\"e\":\"verbatim|artifact|impression\",\"q\":\"原话片段，最多 20 字\"}。\n"
+    "rules 硬规则：他明确不接受、反感或禁止的事，最多 3 条。\n"
+    "identity 身份：他是谁、在群里是什么角色、做什么的，最多 3 条。\n"
+    "style 说话风格：口头禅、句子长短、标点与表情习惯，最多 4 条。\n"
+    "emotion 情感模式：什么时候兴奋、什么时候懒得回、对什么较真，最多 3 条。\n"
+    "relation 人际行为：对群友和对陌生人怎么说话、会不会主动带话题，最多 3 条。\n"
+    "证据：材料里出现过的原句才能标 verbatim 并把原句抄进 q；归纳出来的标 artifact；纯推测标 impression，"
+    "impression 合计不超过 2 条。没有材料支持就不要写。\n"
+    "材料自相矛盾时写进 conflicts，每条 {\"a\":\"一种说法\",\"b\":\"另一种说法\"}，最多 3 条。\n"
+    "mbti 与 zodiac 由号主本人给定，必须原样填写，不允许改动或替换。"
+)
+
+
+def _owner_persona_get():
+    try:
+        row = get_account_db().execute(
+            "SELECT profile, persona_json, mbti, zodiac, corrections, updated_at, source_chars "
+            "FROM owner_persona WHERE id='owner'").fetchone()
+    except sqlite3.Error:
+        row = None
+    if not row:
+        return {"profile": "", "persona": None, "mbti": "", "zodiac": "", "corrections": "",
+                "updated_at": 0, "source_chars": 0, "brief": ""}
+    persona = None
+    if row[1]:
+        try:
+            persona = json.loads(str(row[1]))
+        except Exception:
+            persona = None
+    return {"profile": str(row[0] or ""), "persona": persona, "mbti": str(row[2] or ""),
+            "zodiac": str(row[3] or ""), "corrections": str(row[4] or ""),
+            "updated_at": int(row[5] or 0), "source_chars": int(row[6] or 0),
+            "brief": _people_persona_brief(persona, 280) if persona else str(row[0] or "")[:280]}
+
+
+def _owner_persona_store(persona, source_chars=0):
+    rendered = _people_persona_render(persona)
+    db = get_account_db()
+    db.execute("INSERT INTO owner_persona(id,profile,persona_json,mbti,zodiac,updated_at,source_chars) "
+               "VALUES('owner',?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET profile=excluded.profile,"
+               "persona_json=excluded.persona_json,mbti=excluded.mbti,zodiac=excluded.zodiac,"
+               "updated_at=excluded.updated_at,source_chars=excluded.source_chars",
+               (rendered, json.dumps(persona, ensure_ascii=False), str(persona.get("mbti") or ""),
+                str(persona.get("zodiac") or ""), int(time.time()), int(source_chars)))
+    db.commit()
+    return rendered
+
+
+def _owner_persona_material():
+    parts = []
+    for label, text in (("skill.md", _read_skill()), ("study.md", _read_study()),
+                        ("knowledge.md", _read_knowledge()), ("friends.md", _read_friends())):
+        body = " ".join(str(text or "").split())
+        if body:
+            parts.append("[%s]\n%s" % (label, body[:6000]))
+    return "\n\n".join(parts)
+
+
+async def _owner_persona_distill():
+    material = _owner_persona_material()
+    if len(material) < 200:
+        raise ValueError("面板里的 md 材料太少，先去记忆页补充")
+    prompt = OWNER_PERSONA_PROMPT + "\n\n已知：MBTI=INFP，星座=金牛座，必须原样填入。\n\n材料：\n" + material
+    providers = _csv(get_setting("flock_people_provider_ids", ""))
+    reply = ""
+    last_error = None
+    for budget in (2000, 4000):
+        try:
+            reply = await _call_ai_any(prompt, max_tokens=budget, feature="owner_persona",
+                                       provider_ids=providers or None)
+            break
+        except Exception as exc:
+            last_error = exc
+            retryable = ("仅返回思考过程" in str(exc)) or ("画像不完整" in str(exc))
+            if not retryable or budget == 4000:
+                break
+    if not reply:
+        raise ValueError(str(last_error or "模型没有返回内容")[:160])
+    persona = _people_persona_parse(reply)
+    if not persona:
+        raise ValueError("号主画像 JSON 解析失败")
+    persona["mbti"] = "INFP"
+    persona["zodiac"] = "金牛"
+    _owner_persona_store(persona, len(material))
+    log.info("号主画像已更新 字数=%d 材料=%d", len(_people_persona_render(persona)), len(material))
+    return persona
+
+
+def _people_persona_brief(persona, limit=200):
+    """只取说话风格 + 情感模式，够水群接话用，省 Token。"""
+    if not isinstance(persona, dict):
+        return ""
+    items = []
+    for key in ("style", "emotion"):
+        for item in persona.get(key) or []:
+            if isinstance(item, dict) and item.get("t"):
+                items.append(str(item["t"]))
+    return "；".join(items)[:limit]
 
 
 async def _people_distill_batch(tg_id, rows, last_id=None, history_ts=None):
-    """把一批发言合并进旧画像。rows=[(text, created_at)]。"""
+    """把一批发言合并进旧画像：输出五段结构化 JSON，带证据等级与矛盾记录。"""
     tg_id = str(tg_id or "")
     if not tg_id or not rows or tg_id in _PEOPLE_RUNNING:
         return 0
     _PEOPLE_RUNNING.add(tg_id)
     try:
         db = get_account_db()
-        saved = db.execute("SELECT profile, samples FROM people_profiles WHERE tg_id=?", (tg_id,)).fetchone()
+        saved = db.execute("SELECT profile, persona_json, samples, mbti, zodiac, corrections "
+                           "FROM people_profiles WHERE tg_id=?", (tg_id,)).fetchone()
         old_profile = str(saved[0] or "") if saved else ""
+        old_persona = str(saved[1] or "") if saved else ""
+        corrections = str(saved[5] or "") if saved else ""
+        old_mbti = str(saved[3] or "") if saved else ""
+        old_zodiac = str(saved[4] or "") if saved else ""
         now = int(time.time())
         fresh = [str(t) for t, ts in rows if int(ts or 0) >= now - 3 * 86400]
         stale = [str(t) for t, ts in rows if int(ts or 0) < now - 3 * 86400]
@@ -4011,13 +4273,17 @@ async def _people_distill_batch(tg_id, rows, last_id=None, history_ts=None):
         if fresh:
             body += "近 3 天的发言：\n" + "\n".join("- " + t[:50] for t in fresh[:20]) + "\n"
         prompt = PEOPLE_PROFILE_PROMPT + "\n" + body
-        if old_profile:
-            prompt += ("\n已有画像，请在此基础上合并更新，保留仍然成立的信息：\n" + old_profile)
+        if corrections.strip():
+            prompt += ("\n号主手工纠正（优先级最高，与任何推断冲突时以这里为准，不能改写）：\n"
+                       + corrections.strip()[:400] + "\n")
+        if old_persona.strip():
+            prompt += "\n已有画像 JSON，在此基础上合并，保留仍然成立的条目，不要丢失证据：\n" + old_persona[:1200]
+        elif old_profile.strip():
+            prompt += "\n已有画像（旧格式，请转成新结构后合并）：\n" + old_profile[:600]
         people_providers = _csv(get_setting("flock_people_provider_ids", ""))
         reply = ""
         last_error = None
-        # 思考型模型会把 400 Token 全用在思考上、正文为空；逐级加预算重试。
-        for budget in (1200, 2400):
+        for budget in (1500, 3000):
             try:
                 reply = await _call_ai_any(prompt, max_tokens=budget, feature="people",
                                            provider_ids=people_providers or None)
@@ -4025,36 +4291,46 @@ async def _people_distill_batch(tg_id, rows, last_id=None, history_ts=None):
             except Exception as exc:
                 last_error = exc
                 retryable = ("仅返回思考过程" in str(exc)) or ("画像不完整" in str(exc))
-                if not retryable or budget == 2400:
+                if not retryable or budget == 3000:
                     break
                 log.info("人物画像蒸馏重试 tg=%s 预算=%s", tg_id, budget * 2)
-        if not reply:
-            log.warning("人物画像蒸馏失败 tg=%s: %s", tg_id, _safe_ai_error(last_error) if last_error else "空正文")
+        persona = _people_persona_parse(reply)
+        if not reply or not persona:
+            log.warning("人物画像蒸馏失败 tg=%s: %s", tg_id,
+                        "JSON 解析失败" if reply else (_safe_ai_error(last_error) if last_error else "空正文"))
             try:
                 set_setting("flock_people_last_error", "%s %s" % (
                     now_local().strftime("%Y-%m-%d %H:%M:%S"),
-                    str(last_error or "空正文")[:120]))
+                    "画像 JSON 解析失败，已保留旧版本" if reply else str(last_error or "空正文")[:120]))
             except Exception:
                 pass
             return 0
-        text = str(reply or "").strip()
-        if len(text) < 40:
-            # 太短说明模型没真正总结（常见于被截断或只回一句套话），宁可不覆盖旧画像。
-            log.warning("人物画像过短已丢弃 tg=%s 字数=%s", tg_id, len(text))
+        rendered = _people_persona_render(persona)
+        if len(rendered) < 12:
+            log.warning("人物画像过短已丢弃 tg=%s 字数=%s", tg_id, len(rendered))
             try:
                 set_setting("flock_people_last_error", "%s 画像只生成 %s 字，已丢弃" % (
-                    now_local().strftime("%Y-%m-%d %H:%M:%S"), len(text)))
+                    now_local().strftime("%Y-%m-%d %H:%M:%S"), len(rendered)))
             except Exception:
                 pass
             return 0
-        if not text:
-            return 0
-        total = int(saved[1] or 0) if saved else 0
-        db.execute("""INSERT INTO people_profiles (tg_id, name, note, profile, updated_at, samples, last_id)
-                      VALUES (?, '', '', ?, ?, ?, 0)
+        total = int(saved[2] or 0) if saved else 0
+        mbti = old_mbti or persona.get("mbti") or ""
+        zodiac = old_zodiac or persona.get("zodiac") or ""
+        persona_json = json.dumps(persona, ensure_ascii=False)
+        # 覆盖前留快照，蒸歪了能回滚。
+        db.execute("INSERT OR REPLACE INTO people_profile_history(tg_id,created_at,profile,persona_json,"
+                   "mbti,zodiac,samples,reason) VALUES(?,?,?,?,?,?,?,?)",
+                   (tg_id, now, old_profile, old_persona, old_mbti, old_zodiac, total, "distill"))
+        db.execute("DELETE FROM people_profile_history WHERE tg_id=? AND created_at<?",
+                   (tg_id, now - 12))
+        db.execute("""INSERT INTO people_profiles (tg_id, name, note, profile, updated_at, samples, last_id,
+                      persona_json, mbti, zodiac)
+                      VALUES (?, '', '', ?, ?, ?, 0, ?, ?, ?)
                       ON CONFLICT(tg_id) DO UPDATE SET profile=excluded.profile, updated_at=excluded.updated_at,
-                      samples=excluded.samples""",
-                   (tg_id, text[:500], int(time.time()), total + len(rows)))
+                      samples=excluded.samples, persona_json=excluded.persona_json,
+                      mbti=excluded.mbti, zodiac=excluded.zodiac""",
+                   (tg_id, rendered, now, total + len(rows), persona_json, mbti, zodiac))
         try:
             set_setting("flock_people_last_error", "")
         except Exception:
@@ -11300,6 +11576,16 @@ async def get_people_memory():
                       "ORDER BY COUNT(*) DESC LIMIT 60").fetchall()
     profiles = {str(item[0]): (item[1] or "", int(item[2] or 0), item[3] or "", item[4] or "")
                 for item in db.execute("SELECT tg_id, profile, updated_at, note, name FROM people_profiles").fetchall()}
+    structured = {}
+    for item in db.execute("SELECT tg_id, persona_json, mbti, zodiac, corrections FROM people_profiles").fetchall():
+        persona = None
+        if item[1]:
+            try:
+                persona = json.loads(str(item[1]))
+            except Exception:
+                persona = None
+        structured[str(item[0])] = {"persona": persona, "mbti": str(item[2] or ""),
+                                    "zodiac": str(item[3] or ""), "corrections": str(item[4] or "")}
     white = _people_ids()
     stat = db.execute("SELECT COUNT(*), COALESCE(SUM(samples),0), MAX(updated_at), "
                       "COALESCE(SUM(CASE WHEN TRIM(COALESCE(profile,''))<>'' THEN 1 ELSE 0 END),0) "
@@ -11344,7 +11630,11 @@ async def get_people_memory():
                        "profile": profiles.get(str(item[0]), ("", 0, "", ""))[0],
                        "note": profiles.get(str(item[0]), ("", 0, "", ""))[2],
                        "updated_at": profiles.get(str(item[0]), ("", 0, "", ""))[1],
-                       "samples": samples.get(str(item[0]), 0)} for item in rows]}
+                       "samples": samples.get(str(item[0]), 0),
+                       "persona": structured.get(str(item[0]), {}).get("persona"),
+                       "mbti": structured.get(str(item[0]), {}).get("mbti", ""),
+                       "zodiac": structured.get(str(item[0]), {}).get("zodiac", ""),
+                       "corrections": structured.get(str(item[0]), {}).get("corrections", "")} for item in rows]}
 
 
 @app.put("/api/ai/flock/people")
@@ -11372,20 +11662,127 @@ async def put_people_memory(body: PeopleMemoryInput):
 
 class PeopleEditInput(BaseModel):
     note: str = Field("", max_length=120)
-    profile: str = Field("", max_length=400)
+    profile: str = Field("", max_length=900)
+    mbti: str = Field("", max_length=8)
+    zodiac: str = Field("", max_length=8)
+    corrections: str = Field("", max_length=600)
 
 
 @app.put("/api/ai/flock/people/{tg_id}")
 async def put_people_profile(tg_id: str, body: PeopleEditInput):
     db = get_account_db()
+    row = db.execute("SELECT profile, persona_json, samples FROM people_profiles WHERE tg_id=?", (tg_id,)).fetchone()
+    old_profile = str(row[0] or "") if row else ""
+    old_persona = str(row[1] or "") if row else ""
+    samples = int(row[2] or 0) if row else 0
+    profile = body.profile.strip()
+    manual = bool(profile) and profile != old_profile
+    if manual and (old_profile or old_persona):
+        db.execute("INSERT OR REPLACE INTO people_profile_history(tg_id,created_at,profile,persona_json,"
+                   "mbti,zodiac,samples,reason) VALUES(?,?,?,?,?,?,?,?)",
+                   (tg_id, int(time.time()), old_profile, old_persona, "", "", samples, "manual"))
+    mbti = re.sub(r"[^A-Z]", "", str(body.mbti or "").upper())[:4]
+    mbti = mbti if mbti in PEOPLE_MBTI_OK else ""
+    zodiac = body.zodiac.strip()[:6]
+    if zodiac.endswith("座"):
+        zodiac = zodiac[:-1]
+    zodiac = zodiac if zodiac in PEOPLE_ZODIAC_OK else ""
     name = db.execute("SELECT MAX(name) FROM people_memory WHERE tg_id=?", (tg_id,)).fetchone()
-    db.execute("""INSERT INTO people_profiles (tg_id, name, note, profile, updated_at, samples)
-                  VALUES (?, ?, ?, ?, ?, COALESCE((SELECT samples FROM people_profiles WHERE tg_id=?), 0))
+    db.execute("""INSERT INTO people_profiles (tg_id, name, note, profile, updated_at, samples,
+                  persona_json, mbti, zodiac, corrections)
+                  VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
                   ON CONFLICT(tg_id) DO UPDATE SET note=excluded.note, profile=excluded.profile,
-                  updated_at=excluded.updated_at""",
-               (tg_id, str((name or [""])[0] or ""), body.note.strip(), body.profile.strip(),
-                int(time.time()), tg_id))
+                  updated_at=excluded.updated_at, mbti=excluded.mbti, zodiac=excluded.zodiac,
+                  corrections=excluded.corrections,
+                  persona_json=CASE WHEN ? THEN '' ELSE persona_json END""",
+               (tg_id, str((name or [""])[0] or ""), body.note.strip(), profile or old_profile,
+                int(time.time()), "" if manual else old_persona, mbti, zodiac,
+                body.corrections.strip(), 1 if manual else 0))
     db.commit()
+    return {"ok": True}
+
+
+class OwnerPersonaInput(BaseModel):
+    profile: str = Field("", max_length=900)
+    mbti: str = Field("INFP", max_length=8)
+    zodiac: str = Field("金牛", max_length=8)
+    corrections: str = Field("", max_length=600)
+
+
+@app.get("/api/ai/owner/persona")
+async def get_owner_persona():
+    data = _owner_persona_get()
+    data["enabled"] = get_setting("flock_owner_persona_enabled", "1") == "1"
+    data["updated"] = (time.strftime("%Y-%m-%d %H:%M", time.localtime(data["updated_at"]))
+                       if data["updated_at"] else "")
+    return data
+
+
+@app.put("/api/ai/owner/persona")
+async def put_owner_persona(body: OwnerPersonaInput):
+    db = get_account_db()
+    mbti = re.sub(r"[^A-Z]", "", str(body.mbti or "").upper())[:4]
+    mbti = mbti if mbti in PEOPLE_MBTI_OK else "INFP"
+    zodiac = body.zodiac.strip()[:6]
+    if zodiac.endswith("座"):
+        zodiac = zodiac[:-1]
+    zodiac = zodiac if zodiac in PEOPLE_ZODIAC_OK else "金牛"
+    profile = body.profile.strip()
+    if profile:
+        persona = _people_persona_parse(profile)
+        if persona:
+            persona["mbti"] = mbti
+            persona["zodiac"] = zodiac
+            profile = _people_persona_render(persona)
+        db.execute("UPDATE owner_persona SET profile=?, persona_json=?, mbti=?, zodiac=?, corrections=?, "
+                   "updated_at=? WHERE id='owner'",
+                   (profile, json.dumps(persona, ensure_ascii=False) if persona else "",
+                    mbti, zodiac, body.corrections.strip(), int(time.time())))
+        if not persona:
+            db.execute("UPDATE owner_persona SET profile=? WHERE id='owner'", (profile,))
+    else:
+        db.execute("UPDATE owner_persona SET mbti=?, zodiac=?, corrections=?, updated_at=? WHERE id='owner'",
+                   (mbti, zodiac, body.corrections.strip(), int(time.time())))
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/ai/owner/persona/distill")
+async def post_owner_persona_distill():
+    persona = await _owner_persona_distill()
+    return {"ok": True, "profile": _people_persona_render(persona)}
+
+
+@app.get("/api/ai/flock/people/{tg_id}/history")
+async def get_people_history(tg_id: str):
+    rows = get_account_db().execute(
+        "SELECT created_at, profile, mbti, zodiac, samples, reason FROM people_profile_history "
+        "WHERE tg_id=? ORDER BY created_at DESC LIMIT 12", (tg_id,)).fetchall()
+    return {"items": [{"created_at": int(row[0] or 0),
+                       "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(int(row[0] or 0))),
+                       "profile": str(row[1] or ""), "mbti": str(row[2] or ""),
+                       "zodiac": str(row[3] or ""), "samples": int(row[4] or 0),
+                       "reason": str(row[5] or "")} for row in rows]}
+
+
+class PeopleRollbackInput(BaseModel):
+    created_at: int
+
+
+@app.post("/api/ai/flock/people/{tg_id}/rollback")
+async def post_people_rollback(tg_id: str, body: PeopleRollbackInput):
+    db = get_account_db()
+    row = db.execute("SELECT profile, persona_json, mbti, zodiac, samples FROM people_profile_history "
+                     "WHERE tg_id=? AND created_at=?", (tg_id, int(body.created_at))).fetchone()
+    if not row:
+        raise HTTPException(404, "这个版本不存在")
+    db.execute("UPDATE people_profiles SET profile=?, persona_json=?, mbti=?, zodiac=?, updated_at=? "
+               "WHERE tg_id=?", (str(row[0] or ""), str(row[1] or ""), str(row[2] or ""),
+                                 str(row[3] or ""), int(time.time()), tg_id))
+    db.execute("DELETE FROM people_profile_history WHERE tg_id=? AND created_at=?",
+               (tg_id, int(body.created_at)))
+    db.commit()
+    _sync_friends_md()
     return {"ok": True}
 
 
