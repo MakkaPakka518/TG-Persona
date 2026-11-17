@@ -1389,7 +1389,7 @@ section.act,.fold.open .fold-b{animation:none}
     </div>
 
     <div class="card fold" id="embyKaCard">
-      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z"/><path d="M10 9l5 3-5 3z"/></svg>观看保号（Emby 伪装观看）</span><span class="cnt" id="embyKaCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z"/><path d="M10 9l5 3-5 3z"/></svg>观看保号</span><span class="cnt" id="embyKaCount">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
         <div class="hint" style="margin-bottom:10px">用固定的设备身份（Client / Device / 版本 / UA / DeviceId）定时模拟一次真实观看：打开媒体库 → 浏览详情 → 起播缓冲 → 正常观看 / 网络卡顿 / 拖进度条 → 退出，结束后自动清掉播放记录。</div>
         <div class="hint" style="margin-bottom:10px">设备身份绑定后不再变动。Emby 一般限制设备登录数，每次换 DeviceId 都会多出一台设备，所以这里只允许「新建时挑一次」。</div>
@@ -2760,7 +2760,7 @@ async function delWebSignin(id){
   try{await api('/api/web-signins/'+id,{method:'DELETE'});toast('已删除');await loadWebSignins()}
   catch(e){toast(e.message||'删除失败',1)}
 }
-// ---------- 观看保号（Emby 伪装观看） ----------
+// ---------- 观看保号 ----------
 var embyAccounts=[],embyTemplates=[],embyEditingId=null,kaCenterTimer=null;
 function embyFmt(ts){return ts?fmt(ts):'—'}
 function embyRel(ts){
