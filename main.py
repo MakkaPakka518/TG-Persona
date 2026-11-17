@@ -9343,7 +9343,7 @@ async def recognize_poem_text(poem_text, options, provider_ids=None):
               f"按钮候选字：{json.dumps(options, ensure_ascii=False)}\n"
               "请按从左到右的顺序只输出缺失的字，连在一起（例如「居姞」），"
               "不要输出完整诗句、标点、解释或思考过程。")
-    reply = await _call_ai_any(prompt, max_tokens=64, provider_ids=provider_ids, feature="other")
+    reply = await _call_ai_any(prompt, max_tokens=512, provider_ids=provider_ids, feature="other")
     answers = [ch for ch in str(reply or "") if ch in options]
     if answers and len(answers) <= 4:
         return {"answers": answers, "channel": "ai", "detail": str(reply)[:80]}
