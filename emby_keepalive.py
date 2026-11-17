@@ -296,13 +296,16 @@ def cap_bytes(size_bytes: int, bit_rate: int, play_sec: int, cap_mb: int = 400) 
 
 
 def next_run_offset_ms(days: float) -> int:
-    """成功后的下次时间：间隔的 50% ~ (间隔-1) 天内随机，不落当天"""
-    days = max(0.1, _as_float(days, 3))
-    lo = max(0.1, days * 0.5)
-    hi = days - 1
-    if hi < lo:
-        hi = lo
-    return int((lo + random.random() * (hi - lo)) * 86400000)
+    """成功后的下次时间：天数设置只是上限，实际在「上限的 50% ~ 上限」之间随机。
+
+    连续随机（不取整到天），所以每次连「日期」和「几点几分」都会变，
+    不会出现每 14 天准点看一次这种一眼就假的规律。
+    """
+    days = max(0.1, min(60, _as_float(days, 3)))
+    lo = days * 0.5
+    hi = max(lo, days)
+    offset_days = lo + random.random() * (hi - lo)
+    return max(1, int(offset_days * 86400000))
 
 
 def fmt_pos(ticks) -> str:
@@ -1087,8 +1090,37 @@ async def _abort_job(db, job_row, note: str) -> None:
         log.warning("观看保号自愈失败 job=%s", job_row["id"], exc_info=True)
 
 
+RECOVER_DELAY_RANGE = (300, 600)   # 服务刚起来先等 5~10 分钟，避开重启后的网络抖动
+
+
+def delay_overdue_accounts(db) -> int:
+    """服务重启/升级后，把已经到期的账号往后推 5~10 分钟再跑。
+
+    刚恢复时网络、DNS、上游鉴权都可能还没热，直接跑很容易失败，
+    失败一次又要等 retry_hours，反而更慢。延迟会写回 next_run_at，
+    所以反复重启也不会把排队越推越远（延迟后就不再是「已到期」）。
+    """
+    now = _now()
+    delayed = 0
+    for row in db.execute("SELECT * FROM emby_accounts WHERE enabled=1").fetchall():
+        if row["retry_at"] and now < row["retry_at"]:
+            continue
+        if row["circuit_until"] and now < row["circuit_until"]:
+            continue
+        next_at = row["next_run_at"] or 0
+        if next_at and now >= next_at:
+            wait = random.randint(*RECOVER_DELAY_RANGE)
+            db.execute("UPDATE emby_accounts SET next_run_at=?, last_detail=? WHERE id=?",
+                       (now + wait,
+                        "服务刚恢复，延迟 %d 分钟再开始（避开刚启动时的网络波动）" % max(1, wait // 60),
+                        row["id"]))
+            delayed += 1
+    db.commit()
+    return delayed
+
+
 async def startup_recover(db, key: str, notify=None) -> int:
-    """进程重启后清理上一次残留的 running 任务"""
+    """进程重启后清理上一次残留的 running 任务，并把到期账号延后 5~10 分钟"""
     rows = db.execute("SELECT * FROM emby_jobs WHERE status='running'").fetchall()
     count = 0
     for row in rows:
@@ -1106,6 +1138,7 @@ async def startup_recover(db, key: str, notify=None) -> int:
         db.execute("DELETE FROM emby_jobs WHERE id=?", (row["id"],))
         count += 1
     db.commit()
+    delay_overdue_accounts(db)
     return count
 
 

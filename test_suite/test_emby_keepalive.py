@@ -154,11 +154,18 @@ class RhythmTests(unittest.TestCase):
         self.assertEqual(ka.cap_bytes(10 * 1024 * 1024, 8 * 1000 * 1000, 90, 400), need)
         self.assertEqual(ka.cap_bytes(0, 0, 90, 120), 120 * 1024 * 1024)
 
-    def test_next_run_not_on_same_day(self):
+    def test_next_run_within_half_to_full_interval(self):
         for _ in range(50):
-            offset = ka.next_run_offset_ms(3)
-            self.assertGreaterEqual(offset, int(1.4 * 86400000))
-            self.assertLessEqual(offset, int(2.0 * 86400000) + 1)
+            offset = ka.next_run_offset_ms(20)
+            self.assertGreaterEqual(offset, int(10 * 86400000))
+            self.assertLessEqual(offset, int(20 * 86400000) + 1)
+
+    def test_next_run_is_varied_not_fixed(self):
+        offsets = [ka.next_run_offset_ms(20) for _ in range(40)]
+        self.assertGreater(len(set(offsets)), 30)
+        # 每次连坐落的时钟都不一样，不会永远同一时刻
+        hours = {((o // 3600000) % 24) for o in offsets}
+        self.assertGreater(len(hours), 6)
 
 
 class RunTests(unittest.IsolatedAsyncioTestCase):
@@ -239,6 +246,25 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(count, 1)
         paths = [p for _m, p, _q in self.fake.requests]
         self.assertIn("/emby/Sessions/Playing/Stopped", paths)
+
+    async def test_startup_delays_overdue_account(self):
+        account = account_row(self.db)
+        now = int(time.time())
+        self.db.execute("UPDATE emby_accounts SET next_run_at=? WHERE id=?", (now - 120, account["id"]))
+        self.db.commit()
+        await ka.startup_recover(self.db, "test")
+        row = ka.get_account(self.db, account["id"])
+        self.assertGreaterEqual(row["next_run_at"], int(time.time()) + 295)
+        self.assertLessEqual(row["next_run_at"], int(time.time()) + 605)
+        self.assertIn("服务刚恢复", row["last_detail"])
+
+    async def test_startup_keeps_future_schedule(self):
+        account = account_row(self.db)
+        future = int(time.time()) + 86400
+        self.db.execute("UPDATE emby_accounts SET next_run_at=? WHERE id=?", (future, account["id"]))
+        self.db.commit()
+        await ka.startup_recover(self.db, "test")
+        self.assertEqual(ka.get_account(self.db, account["id"])["next_run_at"], future)
 
     async def test_failure_sets_retry_without_consuming_interval(self):
         account = account_row(self.db)
