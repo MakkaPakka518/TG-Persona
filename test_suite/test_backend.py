@@ -564,6 +564,16 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await self.b['run_custom'](self.row(aid)))
         self.assertEqual(self.b['conn'].execute('SELECT ok FROM hits ORDER BY id DESC').fetchone()[0], 1)
 
+    async def test_extended_nested_branch_repeat(self):
+        aid = await self.create(type='custom', custom_steps=json.dumps([
+            {'t': 'if', 'left': 'ok', 'op': 'equals', 'right': 'ok',
+             'then': [{'t': 'repeat', 'times': 2, 'steps': [{'t': 'wait', 'ms': 1}]}],
+             'else': [{'t': 'wait', 'ms': 999}]},
+        ]))
+        with patch.object(asyncio, 'sleep', new=AsyncMock()):
+            self.assertTrue(await self.b['run_custom'](self.row(aid)))
+        self.assertEqual(self.b['conn'].execute('SELECT ok FROM hits ORDER BY id DESC').fetchone()[0], 1)
+
     async def test_extended_while_and_ai_generate(self):
         aid = await self.create(type='custom', custom_steps=json.dumps([
             {'t': 'set', 'name': 'flag', 'value': '1'},
