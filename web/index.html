@@ -492,7 +492,10 @@ label.custom-check{display:flex;align-items:center;gap:9px;min-height:44px;margi
 label.custom-check input{width:20px;height:20px;flex:none}
 .custom-add-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.custom-add-grid button{min-width:0;padding-inline:8px}
 .custom-step-card{min-width:0;margin:10px 0;padding:13px;border:1px solid var(--hair2);border-radius:11px;background:rgba(6,25,20,.22)}
-.custom-step-card>b{display:block;margin-bottom:9px}.custom-step-card label{overflow-wrap:anywhere}
+.custom-step-card>b{display:block;margin-bottom:6px}.custom-step-card label{overflow-wrap:anywhere}
+.custom-step-summary{font-size:12px;line-height:1.6;color:var(--sub);margin:0 0 10px;overflow-wrap:anywhere}
+.field-hint{font-size:11px;line-height:1.55;color:var(--sub);margin:5px 0 0;overflow-wrap:anywhere}
+.value-chips{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0 4px}.value-chips button{min-height:34px!important;padding:4px 9px!important;font-size:11px;border-radius:8px}
 .custom-step-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}.custom-step-actions button{min-width:0;padding-inline:6px}
 .custom-template-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:stretch}
 #stepCards:empty{display:none}#stepCards>.empty{margin-top:8px}
@@ -1340,29 +1343,40 @@ section.act,.fold.open .fold-b{animation:none}
             <label for="cTriggerCooldown">同群冷却（秒）</label><input type="number" id="cTriggerCooldown" min="0" max="86400" step="1" inputmode="numeric" value="0">
             <div class="hint">消息文本和按钮条件至少填写一项；冷却范围 0–86400 秒。</div>
           </div>
-          <label for="cUser">用户名（选填）</label><input type="text" id="cUser" autocomplete="off" placeholder="编辑时留空沿用已保存值">
-          <label for="cSecret">安全码（选填）</label><input type="password" id="cSecret" autocomplete="new-password" placeholder="编辑时留空沿用已保存值">
-          <div class="hint">两项会单独安全保存，不进入任务列表、日志或导出文件。步骤使用 {credential.user} 或 {credential.secret} 时，未保存凭证的任务必须同时填写两项。</div>
-          <label>步骤卡片（按顺序执行，支持条件/循环，最多 120 步）</label>
+          <label for="cUser">用户名（只有注册任务才填）</label><input type="text" id="cUser" autocomplete="off" placeholder="编辑时留空沿用已保存值">
+          <label for="cSecret">安全码（只有注册任务才填）</label><input type="password" id="cSecret" autocomplete="new-password" placeholder="编辑时留空沿用已保存值">
+          <div class="hint">只有任务需要自动发送账号/安全码时才填；签到、水群、抢注一般不用管。两项会单独安全保存，不进入任务列表、日志或导出文件。</div>
+          <label>步骤卡片（从上到下执行，点下面的按钮添加）</label>
+          <div class="hint" style="margin:0 0 10px">不知道从哪开始：先点“发一句话”给机器人发 /start，再点“等一会儿”，然后点“点一下按钮”，最后点“等对方回复”判断成功。每张卡片下面都会用一句人话说明它在做什么。</div>
           <div id="stepCards"></div>
           <div id="stepError" class="hint" role="alert"></div>
           <div class="custom-add-grid">
-            <button class="ghost" type="button" onclick="fillStep('send')">＋ 发送消息</button>
-            <button class="ghost" type="button" onclick="fillStep('wait')">＋ 等待</button>
-            <button class="ghost" type="button" onclick="fillStep('click')">＋ 点击按钮</button>
-            <button class="ghost" type="button" onclick="fillStep('wait_reply')">＋ 等待回复</button>
-            <button class="ghost" type="button" onclick="fillStep('extract')">＋ 提取内容</button>
-            <button class="ghost" type="button" onclick="fillStep('captcha')">＋ 验证码</button>
-            <button class="ghost" type="button" onclick="fillStep('set')">＋ 设置变量</button>
-            <button class="ghost" type="button" onclick="fillStep('if')">＋ 如果 / 否则</button>
-            <button class="ghost" type="button" onclick="fillStep('repeat')">＋ 重复</button>
-            <button class="ghost" type="button" onclick="fillStep('while')">＋ 直到条件</button>
-            <button class="ghost" type="button" onclick="fillStep('ai_generate')">＋ AI 生成文本</button>
+            <button class="ghost" type="button" onclick="fillStep('send')">＋ 发一句话</button>
+            <button class="ghost" type="button" onclick="fillStep('wait')">＋ 等一会儿</button>
+            <button class="ghost" type="button" onclick="fillStep('click')">＋ 点一下按钮</button>
+            <button class="ghost" type="button" onclick="fillStep('wait_reply')">＋ 等对方回复</button>
+            <button class="ghost" type="button" onclick="fillStep('extract')">＋ 从回复里取内容</button>
+            <button class="ghost" type="button" onclick="fillStep('captcha')">＋ 识别验证码/图片</button>
+            <button class="ghost" type="button" onclick="fillStep('set')">＋ 记住一个值</button>
+            <button class="ghost" type="button" onclick="fillStep('if')">＋ 如果…就…否则…</button>
+            <button class="ghost" type="button" onclick="fillStep('repeat')">＋ 重复做几次</button>
+            <button class="ghost" type="button" onclick="fillStep('while')">＋ 一直做到条件满足</button>
+            <button class="ghost" type="button" onclick="fillStep('ai_generate')">＋ 让 AI 写一段</button>
           </div>
-          <div class="hint">可用变量：{trigger.text}、{trigger.chat_id}、{trigger.message_id}、{trigger.sender}、{trigger.button_text}、{trigger.button_url}、{trigger.bot}、{trigger.payload}、{credential.user}、{credential.secret}、{last.text}、{var.name}。随机占位符：{num:N}、{word:N}、{alpha:N}、{uuid}。</div>
-          <label for="stepTemplate">流程模板</label>
-          <div class="custom-template-row"><select id="stepTemplate"><option value="basic">基础 Bot 流程</option><option value="registration">监听注册链接流程</option><option value="scheduled">定时 Bot 流程</option></select><button class="ghost" type="button" onclick="applyStepTemplate()">替换为模板</button></div>
-          <details id="stepAdvanced" style="margin-top:12px"><summary>高级：严格格式原始 JSON</summary>
+          <details class="hint" style="margin-top:10px"><summary>不知道怎么填“变量”？点开看常用写法</summary>
+            <div style="margin-top:8px;line-height:1.8">
+              <div><b>{last.text}</b>：对方最新一条回复</div>
+              <div><b>{trigger.text}</b>：触发这条任务的消息内容</div>
+              <div><b>{trigger.button_text}</b>：触发时那个按钮的文字</div>
+              <div><b>{trigger.bot}</b>：触发消息里的机器人用户名</div>
+              <div><b>{var.code}</b>：你前面用“记住一个值”或“取内容”存下来的内容，名字自己起</div>
+              <div><b>{credential.user}</b> / <b>{credential.secret}</b>：任务里填的用户名/安全码，只有注册类任务才用</div>
+              <div style="margin-top:6px">大多数签到任务只需要 target 和 /start，不用碰变量。</div>
+            </div>
+          </details>
+          <label for="stepTemplate">流程模板（可以直接套一个再改）</label>
+          <div class="custom-template-row"><select id="stepTemplate"><option value="basic">新手：发 /start → 等 2 秒 → 点签到 → 等结果</option><option value="registration">注册链接：监听群 → 点注册 → 填账号</option><option value="scheduled">定时：到点发 /start → 点签到</option></select><button class="ghost" type="button" onclick="applyStepTemplate()">替换为模板</button></div>
+          <details id="stepAdvanced" style="margin-top:12px"><summary>高级：原始 JSON（一般不用点）</summary>
             <textarea id="cSteps" rows="7" oninput="readStepJSON()" placeholder="[]"></textarea>
             <div class="hint">仅接受 send、wait、click、wait_reply、extract、captcha、set、if、repeat、while、ai_generate 格式；字段类型和名称必须完全符合步骤卡片。</div>
           </details>
@@ -3177,13 +3191,13 @@ const STEP_HINTS={
   wait:{t:'wait',ms:2000},
   click:{t:'click',to:'target',text:'',emoji:'',index:0,any:false,ai:false,mode:'script',fresh:true,timeout_ms:30000},
   wait_reply:{t:'wait_reply',from:'target',success:'成功',fail:'',regex:false,timeout_ms:30000,save:''},
-  extract:{t:'extract',from:'last.text',regex:'',group:1,save:'value'},
+  extract:{t:'extract',from:'last.text',regex:'(.+)',group:1,save:'value'},
   captcha:{t:'captcha',from:'target',length:4,send_to:'target',template:'{captcha}'},
   set:{t:'set',name:'value',value:''},
-  if:{t:'if',left:'{last.text}',op:'contains',right:'',then:[{t:'wait',ms:1000}],else:[]},
+  if:{t:'if',left:'{last.text}',op:'contains',right:'成功',then:[{t:'wait',ms:1000}],else:[]},
   repeat:{t:'repeat',times:2,steps:[{t:'wait',ms:1000}]},
-  while:{t:'while',left:'{last.text}',op:'contains',right:'',max:20,steps:[{t:'wait',ms:1000}]},
-  ai_generate:{t:'ai_generate',prompt:'',save:'ai_text',max_tokens:512}
+  while:{t:'while',left:'{last.text}',op:'contains',right:'成功',max:20,steps:[{t:'wait',ms:1000}]},
+  ai_generate:{t:'ai_generate',prompt:'根据对方最新回复，写一句自然、简短的中文回复',save:'ai_text',max_tokens:512}
 };
 const STEP_FIELDS={
   send:['t','to','text','reply'],wait:['t','ms'],click:['t','to','text','emoji','index','any','ai','mode','fresh','timeout_ms'],
@@ -3191,17 +3205,77 @@ const STEP_FIELDS={
   set:['t','name','value'],if:['t','left','op','right','then','else'],repeat:['t','times','steps'],
   while:['t','left','op','right','max','steps'],ai_generate:['t','prompt','save','max_tokens']
 };
-const STEP_NAMES={send:'发送消息',wait:'等待',click:'点击按钮',wait_reply:'等待回复',extract:'提取内容',captcha:'识别验证码',
-  set:'设置变量',if:'如果 / 否则',repeat:'重复',while:'直到条件',ai_generate:'AI 生成文本'};
+const STEP_NAMES={send:'发一句话',wait:'等一会儿',click:'点一下按钮',wait_reply:'等对方回复',extract:'从回复里取内容',captcha:'识别验证码/图片',
+  set:'记住一个值',if:'如果…就…否则…',repeat:'重复做几次',while:'一直做到条件满足',ai_generate:'让 AI 写一段'};
+const STEP_DESCS={
+  send:'给指定聊天发一句话。大多数签到任务第一步就是给机器人发 /start。',
+  wait:'先等几秒，避免发得太快。',
+  click:'在目标聊天里点一个按钮，可以按按钮文字、表情或第几个来找。',
+  wait_reply:'等机器人或对方回复；可以设置收到什么算成功、什么算失败。',
+  extract:'从最新回复或指定内容里取一段文字，存成变量，后面可以继续用。',
+  captcha:'识别图片或验证码，再按模板发回去；不会识别就留空。',
+  set:'把一个固定值或模板结果记下来，后面用 {var.名字} 取用。',
+  if:'先判断一个条件，成立就做“条件成立时”的步骤，不成立就做“否则”的步骤。',
+  repeat:'把里面的步骤原样重复做几次。',
+  while:'只要条件一直成立，就反复做里面的步骤；最多做指定次数，防止死循环。',
+  ai_generate:'让 AI 根据你的提示写一段文字，存成变量，后面可以发出去。'
+};
 const STEP_ADD_TYPES=Object.keys(STEP_NAMES);
-const CONDITION_OPS=[['contains','包含'],['equals','等于'],['not_contains','不包含'],['regex','正则匹配'],['empty','为空'],['truthy','非空']];
+const CONDITION_OPS=[['contains','里面包含'],['equals','和它完全一样'],['not_contains','里面不包含'],['regex','符合正则规则（高级）'],['empty','是空的'],['truthy','不是空的']];
+
+const OP_TEXT=Object.fromEntries(CONDITION_OPS);
+function clipText(value,max=26){const text=String(value??'').trim();return text.length>max?text.slice(0,max)+'…':text}
+function leftText(value){
+  const text=String(value??'').trim();
+  if(text==='{last.text}'||text==='last.text')return '对方最新回复';
+  if(text==='{trigger.text}'||text==='trigger.text')return '触发消息内容';
+  if(text==='{trigger.button_text}'||text==='trigger.button_text')return '刚点的按钮文字';
+  if(text==='{trigger.bot}')return '触发消息里的机器人';
+  if(text==='')return '（还没填）';
+  return text;
+}
+function destText(value){
+  const text=String(value??'').trim();
+  if(text==='target'||text==='')return '当前任务目标';
+  if(text==='source')return '触发消息来源';
+  return leftText(text);
+}
+function condSentence(left,op,right){
+  const name=leftText(left),verb=OP_TEXT[op]||'满足';
+  if(op==='empty'||op==='truthy')return name+' '+verb;
+  return name+' '+verb+'“'+clipText(right||'（空）')+'”';
+}
+function stepSummary(s){
+  if(!s||typeof s!=='object')return '';
+  if(s.t==='send')return '给'+destText(s.to)+'发“'+clipText(s.text||'（空）')+'”'+(s.reply?'，并作为回复发出':'');
+  if(s.t==='wait')return '等 '+(Number(s.ms||0)/1000)+' 秒';
+  if(s.t==='click')return '在'+destText(s.to)+'点按钮“'+clipText(s.text||s.emoji||('第 '+(s.index??0)+' 个'))+'”';
+  if(s.t==='wait_reply')return '等'+destText(s.from)+'回复，最多 '+(Number(s.timeout_ms||0)/1000)+' 秒'+(s.success?'；收到“'+clipText(s.success)+'”算成功':'');
+  if(s.t==='extract')return '从 '+leftText(s.from)+' 里取内容，存成变量 '+(s.save||'（还没命名）');
+  if(s.t==='captcha')return '从'+destText(s.from)+'识别 '+Number(s.length||4)+' 位验证码，再发给'+destText(s.send_to);
+  if(s.t==='set')return '把“'+clipText(s.value||'（空）')+'”记成变量 '+(s.name||'（还没命名）');
+  if(s.t==='if')return '如果 '+condSentence(s.left,s.op,s.right)+'，就做“条件成立时”的步骤；否则做另一组';
+  if(s.t==='repeat')return '把里面的步骤重复 '+Number(s.times||0)+' 次';
+  if(s.t==='while')return '只要 '+condSentence(s.left,s.op,s.right)+'，就反复做里面的步骤，最多 '+Number(s.max||0)+' 次';
+  if(s.t==='ai_generate')return '让 AI 按提示写一段，存成变量 '+(s.save||'（还没命名）');
+  return '';
+}
+function fieldChips(parent,step,key){
+  const row=document.createElement('div');row.className='value-chips';
+  for(const [label,value] of [['对方最新回复','{last.text}'],['触发消息内容','{trigger.text}'],['刚点的按钮文字','{trigger.button_text}'],['我记住的值','{var.name}']]){
+    const button=document.createElement('button');button.type='button';button.className='ghost';button.textContent=label;
+    button.addEventListener('click',()=>{step[key]=value;syncStepJSON();renderStepCards()});
+    row.appendChild(button);
+  }
+  parent.appendChild(row);
+}
 function cloneJSON(value){return JSON.parse(JSON.stringify(value))}
 function nextScheduleTrigger(){
   const date=new Date(Date.now()+3600000),pad=value=>String(value).padStart(2,'0');
   return {mode:'schedule',at:`${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`};
 }
 const STEP_TEMPLATES={
-  basic:()=>({trigger:{mode:'manual'},steps:[STEP_HINTS.send,STEP_HINTS.wait,{...STEP_HINTS.click,text:'开始'},STEP_HINTS.wait_reply]}),
+  basic:()=>({trigger:{mode:'manual'},steps:[STEP_HINTS.send,STEP_HINTS.wait,{...STEP_HINTS.click,text:'签到'},STEP_HINTS.wait_reply]}),
   registration:()=>({trigger:{mode:'group',groups:[],sender:'any',logic:'any',text:'',text_regex:false,button:'注册',button_regex:false,cooldown:30},steps:[
     {...STEP_HINTS.send,to:'{trigger.bot}',text:'/start {trigger.payload}'},
     {...STEP_HINTS.wait_reply,from:'{trigger.bot}',success:'注册'},
@@ -3212,7 +3286,7 @@ const STEP_TEMPLATES={
     {...STEP_HINTS.send,to:'{trigger.bot}',text:'{credential.secret}'},
     {...STEP_HINTS.wait_reply,from:'{trigger.bot}',success:'成功',fail:'失败'}
   ],target:'{trigger.bot}'}),
-  scheduled:()=>({trigger:nextScheduleTrigger(),steps:[STEP_HINTS.send,STEP_HINTS.wait,{...STEP_HINTS.click,text:'开始'},STEP_HINTS.wait_reply]})
+  scheduled:()=>({trigger:nextScheduleTrigger(),steps:[STEP_HINTS.send,STEP_HINTS.wait,{...STEP_HINTS.click,text:'签到'},STEP_HINTS.wait_reply]})
 };
 function triggerIssue(trigger){
   if(!trigger||typeof trigger!=='object'||Array.isArray(trigger))return '触发条件必须是 JSON 对象';
@@ -3390,6 +3464,8 @@ function stepField(parent,step,key,labelText,type='text',options={}){
     step[key]=v;syncStepJSON();
   });
   parent.appendChild(label);
+  if(options.hint){const hint=document.createElement('div');hint.className='field-hint';hint.textContent=options.hint;parent.appendChild(hint)}
+  return input;
 }
 function stepSelect(parent,step,key,labelText,choices){
   const label=document.createElement('label'),select=document.createElement('select');label.textContent=labelText;
@@ -3398,46 +3474,90 @@ function stepSelect(parent,step,key,labelText,choices){
 }
 function branchAdder(list,labelText){
   const row=document.createElement('div');row.className='custom-step-actions';row.style.flexWrap='wrap';
-  const select=document.createElement('select');select.style.maxWidth='180px';
+  const select=document.createElement('select');select.style.maxWidth='220px';
   for(const key of STEP_ADD_TYPES){const option=document.createElement('option');option.value=key;option.textContent=STEP_NAMES[key];select.appendChild(option)}
   const button=document.createElement('button');button.type='button';button.className='ghost';button.textContent='＋ '+labelText;
   button.addEventListener('click',()=>{list.push(cloneJSON(STEP_HINTS[select.value]));syncStepJSON();renderStepCards()});
   row.append(select,button);return row;
 }
 function renderStepList(list,box,prefix,depth){
-  if(!list.length){const empty=document.createElement('div');empty.className='hint';empty.textContent='这个块还没有步骤';box.appendChild(empty);return}
+  if(!list.length){const empty=document.createElement('div');empty.className='hint';empty.textContent='这里还没有步骤，点下面的按钮添加一条';box.appendChild(empty);return}
   list.forEach((s,i)=>{
     const card=document.createElement('div');card.className='custom-step-card';if(depth)card.style.marginLeft='14px';
-    const title=document.createElement('b'),type=s&&typeof s==='object'&&STEP_FIELDS[s.t]?s.t:'';title.textContent=(prefix?prefix+'.':'')+(i+1)+'. '+(STEP_NAMES[type]||'无效步骤');card.appendChild(title);
-    if(type==='send'){stepField(card,s,'to','发送目标（target、source、用户名、群 ID 或模板）');stepField(card,s,'text','消息文本','textarea');stepField(card,s,'reply','作为回复发送','checkbox')}
-    if(type==='wait')stepField(card,s,'ms','等待（秒）','number',{milliseconds:true,step:.001,decimal:true,max:3600});
-    if(type==='click'){
-      stepField(card,s,'to','目标（target、用户名、群 ID 或模板）');stepField(card,s,'text','按钮文字');stepField(card,s,'emoji','按钮表情');stepField(card,s,'index','按钮序号（0 为第一个）','number',{min:0,max:100,step:1});
-      stepSelect(card,s,'mode','按钮处理模式',[['script','脚本模式'],['ai','AI 模式'],['fallback','AI 兜底']]);
-      const checks=document.createElement('div');checks.className='custom-checks';stepField(checks,s,'any','匹配任意按钮','checkbox');stepField(checks,s,'fresh','只使用最新按钮','checkbox');card.appendChild(checks);
-      stepField(card,s,'timeout_ms','等待按钮上限（秒）','number',{milliseconds:true,step:.001,decimal:true,min:1,max:3600});
+    const valid=s&&typeof s==='object'&&STEP_FIELDS[s.t];
+    const title=document.createElement('b');title.textContent=(depth?'小步 '+(i+1)+' · ':'第 '+(i+1)+' 步 · ')+(valid?STEP_NAMES[s.t]:'无效步骤');card.appendChild(title);
+    const summary=document.createElement('div');summary.className='custom-step-summary';summary.textContent=valid?stepSummary(s):'这条步骤格式不对，删掉重新添加';card.appendChild(summary);
+    const type=valid?s.t:'';
+    if(type==='send'){
+      stepField(card,s,'to','发给谁（大多数任务填 target）',{hint:'target = 当前任务目标；也可以填 @用户名、群 ID，或 {var.xxx}'});
+      stepField(card,s,'text','要发的内容','textarea',{hint:'可以直接写 /start、签到，也可以混用变量，例如“{trigger.text}”'});
+      stepField(card,s,'reply','作为回复发出去','checkbox');
     }
-    if(type==='wait_reply'){stepField(card,s,'from','回复来源（target、source、用户名、群 ID 或模板）');stepField(card,s,'success','成功条件（留空且失败条件也为空时接受任意新回复）');stepField(card,s,'fail','失败条件');stepField(card,s,'regex','条件使用正则','checkbox');stepField(card,s,'timeout_ms','最长等待（秒）','number',{milliseconds:true,step:.001,decimal:true,min:1,max:3600});stepField(card,s,'save','保存为变量名（选填，之后用 {var.name}）')}
-    if(type==='extract'){stepField(card,s,'from','提取来源（如 last.text、trigger.text 或模板）');stepField(card,s,'regex','提取正则');stepField(card,s,'group','正则分组','number',{min:0,max:20,step:1});stepField(card,s,'save','保存为变量名')}
-    if(type==='captcha'){stepField(card,s,'from','验证码所在聊天（target、source、用户名、群 ID 或模板）');stepField(card,s,'length','验证码长度','number',{min:1,max:16,step:1});stepField(card,s,'send_to','发送目标（target、source、用户名、群 ID 或模板）');stepField(card,s,'template','发送模板（可留空只保存结果；使用 {captcha} 或 {code}）')}
-    if(type==='set'){stepField(card,s,'name','变量名（之后用 {var.name}）');stepField(card,s,'value','变量值（支持模板）','textarea')}
+    if(type==='wait')stepField(card,s,'ms','等几秒','number',{milliseconds:true,step:.001,decimal:true,max:3600,hint:'填 2 就是等 2 秒；机器人反应慢就填 3~5 秒'});
+    if(type==='click'){
+      stepField(card,s,'to','在哪个聊天点按钮（通常填 target）',{hint:'target = 当前任务目标；也可以填 @用户名、群 ID，或 {var.xxx}'});
+      stepField(card,s,'text','按钮上写什么字（不知道就留空）',{hint:'例如“签到”“开始”“领取”。留空时按下面的序号找按钮'});
+      stepField(card,s,'emoji','按钮里的表情（可选）',{hint:'按钮文字是表情时填这里，例如 🎁；普通文字按钮不用填'});
+      stepField(card,s,'index','第几个按钮（0 表示第一个）','number',{min:0,max:100,step:1,hint:'只有不按文字找、才需要填这个；一般留 0'});
+      stepSelect(card,s,'mode','怎么找按钮',[['script','按文字/序号找（普通）'],['ai','让 AI 帮我选'],['fallback','先按文字找，找不到再让 AI 选']]);
+      const checks=document.createElement('div');checks.className='custom-checks';
+      stepField(checks,s,'any','找不到文字时，直接点第一个按钮','checkbox');
+      stepField(checks,s,'fresh','只在最新一条消息里找按钮','checkbox');
+      card.appendChild(checks);
+      stepField(card,s,'timeout_ms','最多等按钮多久（秒）','number',{milliseconds:true,step:.001,decimal:true,min:1,max:3600,hint:'超过这个时间还没出现按钮就算失败'});
+    }
+    if(type==='wait_reply'){
+      stepField(card,s,'from','等谁回复（通常填 target）',{hint:'target = 当前任务目标；也可以填 @用户名、群 ID，或 {var.xxx}'});
+      stepField(card,s,'success','收到什么算成功',{hint:'例如机器人会回复“签到成功”，这里就填“签到成功”；留空表示任何新回复都算成功'});
+      stepField(card,s,'fail','收到什么算失败（可留空）',{hint:'例如“失败”“已过期”；多个词可以用英文逗号分开'});
+      stepField(card,s,'regex','把成功/失败条件当正则（高级）','checkbox',{hint:'不懂正则不要勾；普通关键词已经够用'});
+      stepField(card,s,'timeout_ms','最多等多久（秒）','number',{milliseconds:true,step:.001,decimal:true,min:1,max:3600,hint:'超过这个时间还没回复就算失败'});
+      stepField(card,s,'save','把回复存成变量（可留空）',{hint:'例如填 reply；之后可以用 {var.reply} 取这段回复'});
+    }
+    if(type==='extract'){
+      stepField(card,s,'from','从哪里取内容',{hint:'last.text 或 {last.text} = 对方最新回复；trigger.text 或 {trigger.text} = 触发消息；也可以填变量'});
+      stepField(card,s,'regex','按什么规则取（默认取整段）',{hint:'默认 (.+) 会取整段；懂正则再改，例如“验证码：(\\d+)”'});
+      stepField(card,s,'group','取第几个括号里的内容','number',{min:0,max:20,step:1,hint:'默认 1；不懂就留 1'});
+      stepField(card,s,'save','存成变量名',{hint:'自己起个短名字，例如 code、link；之后用 {var.code} 取用'});
+    }
+    if(type==='captcha'){
+      stepField(card,s,'from','从哪里识别验证码',{hint:'target = 当前任务目标；也可以填 @用户名、群 ID'});
+      stepField(card,s,'length','验证码几位','number',{min:1,max:16,step:1,hint:'4 位就填 4；不知道就保持默认'});
+      stepField(card,s,'send_to','识别后发给谁',{hint:'通常填 target，也就是发回给当前机器人'});
+      stepField(card,s,'template','发回去的内容',{hint:'{captcha} 会自动替换成识别结果；留空表示只识别不发送'});
+    }
+    if(type==='set'){
+      stepField(card,s,'name','给这个值起个名字',{hint:'只能写英文/数字/下划线，例如 code、my_value；之后用 {var.code} 取用'});
+      stepField(card,s,'value','要记住的内容','textarea',{hint:'可以写固定文字，也可以写 {last.text}、{trigger.text} 等变量'});
+    }
     if(type==='if'){
-      stepField(card,s,'left','判断左值（支持模板，如 {last.text}）');stepSelect(card,s,'op','判断方式',CONDITION_OPS);stepField(card,s,'right','判断右值（正则时填表达式）');
-      const thenTitle=document.createElement('label');thenTitle.textContent='Then（条件成立）';card.appendChild(thenTitle);
-      const thenBox=document.createElement('div');renderStepList(s.then,thenBox,(prefix?prefix+'.':'')+(i+1)+'.T',depth+1);card.appendChild(thenBox);card.appendChild(branchAdder(s.then,'给 Then 添加步骤'));
-      const elseTitle=document.createElement('label');elseTitle.textContent='Else（条件不成立）';card.appendChild(elseTitle);
-      const elseBox=document.createElement('div');renderStepList(s.else,elseBox,(prefix?prefix+'.':'')+(i+1)+'.E',depth+1);card.appendChild(elseBox);card.appendChild(branchAdder(s.else,'给 Else 添加步骤'));
+      stepField(card,s,'left','看哪里的内容',{hint:'常用来源可以直接点下面的按钮，不用自己背变量名'});
+      fieldChips(card,s,'left');
+      stepSelect(card,s,'op','怎么判断',CONDITION_OPS);
+      stepField(card,s,'right','和什么比较',{hint:'选“里面包含”时，这里填机器人回复里会出现的关键词，例如“签到成功”；选“是空的/不是空的”时这一栏不用填'});
+      const help=document.createElement('div');help.className='field-hint';help.textContent='不知道怎么选：先选“里面包含”，右边填关键词；例如机器人回复里有“签到成功”，就填“签到成功”。';card.appendChild(help);
+      const thenTitle=document.createElement('label');thenTitle.textContent='条件成立时，做这些';card.appendChild(thenTitle);
+      const thenBox=document.createElement('div');renderStepList(s.then,thenBox,'',depth+1);card.appendChild(thenBox);card.appendChild(branchAdder(s.then,'添加一条要做的步骤'));
+      const elseTitle=document.createElement('label');elseTitle.textContent='条件不成立时，做这些（可以留空）';card.appendChild(elseTitle);
+      const elseBox=document.createElement('div');renderStepList(s.else,elseBox,'',depth+1);card.appendChild(elseBox);card.appendChild(branchAdder(s.else,'添加一条要做的步骤'));
     }
     if(type==='repeat'){
-      stepField(card,s,'times','重复次数','number',{min:1,max:100,step:1});
-      const box=document.createElement('div');renderStepList(s.steps,box,(prefix?prefix+'.':'')+(i+1)+'.R',depth+1);card.appendChild(box);card.appendChild(branchAdder(s.steps,'给重复块添加步骤'));
+      stepField(card,s,'times','重复几次','number',{min:1,max:100,step:1,hint:'例如填 3，就把下面的步骤原样做 3 次'});
+      const box=document.createElement('div');renderStepList(s.steps,box,'',depth+1);card.appendChild(box);card.appendChild(branchAdder(s.steps,'添加一条要重复的步骤'));
     }
     if(type==='while'){
-      stepField(card,s,'left','判断左值（支持模板）');stepSelect(card,s,'op','判断方式',CONDITION_OPS);stepField(card,s,'right','判断右值');stepField(card,s,'max','最多循环次数','number',{min:1,max:100,step:1});
-      const box=document.createElement('div');renderStepList(s.steps,box,(prefix?prefix+'.':'')+(i+1)+'.W',depth+1);card.appendChild(box);card.appendChild(branchAdder(s.steps,'给循环块添加步骤'));
+      stepField(card,s,'left','看哪里的内容',{hint:'常用来源可以直接点下面的按钮，不用自己背变量名'});
+      fieldChips(card,s,'left');
+      stepSelect(card,s,'op','怎么判断',CONDITION_OPS);
+      stepField(card,s,'right','和什么比较',{hint:'例如条件是一直等到机器人回复里有“签到成功”，就选“里面包含”，这里填“签到成功”'});
+      stepField(card,s,'max','最多重复几次','number',{min:1,max:100,step:1,hint:'防止死循环；条件一直不满足，做满这么多次就停'});
+      const help=document.createElement('div');help.className='field-hint';help.textContent='这一段的意思是：只要条件成立，就反复做下面的步骤；做满最多次数或条件不成立就停。';card.appendChild(help);
+      const box=document.createElement('div');renderStepList(s.steps,box,'',depth+1);card.appendChild(box);card.appendChild(branchAdder(s.steps,'添加一条要循环做的步骤'));
     }
     if(type==='ai_generate'){
-      stepField(card,s,'prompt','AI 提示词（支持模板）','textarea');stepField(card,s,'save','保存为变量名');stepField(card,s,'max_tokens','最大输出 tokens','number',{min:64,max:4096,step:1});
+      stepField(card,s,'prompt','告诉 AI 要写什么','textarea',{hint:'例如“根据对方最新回复，写一句自然、简短的群聊回复”'});
+      stepField(card,s,'save','写好后存成变量名（可留空）',{hint:'例如填 reply，之后用 {var.reply} 取用'});
+      stepField(card,s,'max_tokens','最多写多少（token）','number',{min:64,max:4096,step:1,hint:'512 大约一段话；越长越贵'});
     }
     const actions=document.createElement('div');actions.className='custom-step-actions';
     for(const [label,offset] of [['上移',-1],['下移',1],['删除',0]]){const b=document.createElement('button');b.type='button';b.className=offset?'ghost':'danger';b.textContent=label;b.disabled=offset!==0&&(i+offset<0||i+offset>=list.length);b.addEventListener('click',()=>offset?moveStep(list,i,offset):removeStep(list,i));actions.appendChild(b)}
