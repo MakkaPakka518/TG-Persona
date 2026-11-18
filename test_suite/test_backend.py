@@ -30,7 +30,7 @@ import struct
 import threading
 import time
 from types import SimpleNamespace
-from typing import Optional
+from typing import Optional, List
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 import uuid
@@ -41,7 +41,7 @@ import persona_features
 import emby_keepalive
 from telethon.extensions import markdown as telethon_markdown
 from account_runtime import AIRequestScheduler
-from custom_workflow import (canonical_steps, canonical_trigger, group_matches, parse_steps,
+from custom_workflow import (_has_extended_step, canonical_steps, canonical_trigger, group_matches, parse_steps,
                              parse_trigger, redact as redact_custom, render_template, search_pattern,
                              uses_credentials, uses_default_target, uses_trigger_context, validate_template)
 
@@ -119,7 +119,7 @@ def load_backend():
     names = {name: globals()[name] for name in ('ast', 'asyncio', 'base64', 'OrderedDict', 'datetime',
              'timezone', 'timedelta', 'hashlib', 'hmac', 'ipaddress', 'json', 'math', 'random', 're',
                'secrets', 'socket', 'sqlite3', 'struct', 'time', 'zlib', 'difflib', 'threading', 'gzip', 'itertools', 'ContextVar', 'uuid', 'shutil', 'telethon_markdown', 'persona_store', 'persona_features', 'emby_keepalive')}
-    names.update(__file__=str(SOURCE), BaseModel=Model, Optional=Optional, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
+    names.update(__file__=str(SOURCE), BaseModel=Model, Optional=Optional, List=List, Field=lambda default=None, **kw: default, Request=SimpleNamespace,
                   HTTPException=HTTPException, JSONResponse=Response, Response=Response, os=os, io=io,
                   log=Mock(), errors=SimpleNamespace(FloodWaitError=FloodWait, RPCError=RPCError,
                   AuthKeyUnregisteredError=Unauthorized), ZoneInfo=None,
@@ -130,7 +130,7 @@ def load_backend():
                   TRUSTED_PROXIES=(), BASE=SOURCE.parent, _auto_running={}, signin_plans={}, poll_last={}, auto_last_ts={},
                  _session_alerted=False, tg_state={'phase': 'ready', 'me': {'id': 1}, 'err': None},
                   _running={'paused': True}, client=SimpleNamespace(), notify_event=Mock(), send_notify=Mock())
-    names.update(canonical_steps=canonical_steps, canonical_trigger=canonical_trigger,
+    names.update(_has_extended_step=_has_extended_step, canonical_steps=canonical_steps, canonical_trigger=canonical_trigger,
                  group_matches=group_matches, parse_steps=parse_steps, parse_trigger=parse_trigger,
                  redact_custom=redact_custom, render_template=render_template, search_pattern=search_pattern,
                  uses_credentials=uses_credentials, uses_default_target=uses_default_target,
@@ -552,6 +552,33 @@ class BackendBase(unittest.IsolatedAsyncioTestCase):
              patch.object(asyncio, 'sleep', new=AsyncMock()):
             self.assertEqual(await self.b['_await_signin_captcha']('entity', min_id=100), (None, None))
         self.b['client'].download_media.assert_not_awaited()
+
+    async def test_extended_custom_branches_and_repeat(self):
+        aid = await self.create(type='custom', custom_steps=json.dumps([
+            {'t': 'set', 'name': 'mode', 'value': 'fast'},
+            {'t': 'if', 'left': '{var.mode}', 'op': 'equals', 'right': 'fast',
+             'then': [{'t': 'wait', 'ms': 1}], 'else': [{'t': 'wait', 'ms': 999}]},
+            {'t': 'repeat', 'times': 2, 'steps': [{'t': 'wait', 'ms': 1}]},
+        ]))
+        with patch.object(asyncio, 'sleep', new=AsyncMock()):
+            self.assertTrue(await self.b['run_custom'](self.row(aid)))
+        self.assertEqual(self.b['conn'].execute('SELECT ok FROM hits ORDER BY id DESC').fetchone()[0], 1)
+
+    async def test_extended_while_and_ai_generate(self):
+        aid = await self.create(type='custom', custom_steps=json.dumps([
+            {'t': 'set', 'name': 'flag', 'value': '1'},
+            {'t': 'while', 'left': '{var.flag}', 'op': 'truthy', 'right': '', 'max': 3,
+             'steps': [{'t': 'set', 'name': 'flag', 'value': ''}]},
+            {'t': 'ai_generate', 'prompt': '写一句问候', 'save': 'greeting', 'max_tokens': 128},
+            {'t': 'send', 'to': 'target', 'text': '{var.greeting}', 'reply': False},
+        ]))
+        self.b['_call_ai_any'] = AsyncMock(return_value='你好')
+        self.b['client'].get_messages.return_value = []
+        with patch.object(asyncio, 'sleep', new=AsyncMock()):
+            self.assertTrue(await self.b['run_custom'](self.row(aid)))
+        self.b['client'].send_message.assert_awaited_once_with('entity', '你好', parse_mode=None)
+        self.b['_call_ai_any'].assert_awaited_once()
+        self.assertEqual(self.b['_call_ai_any'].await_args.kwargs['max_tokens'], 128)
 
     async def test_custom_send_wait_reply_does_not_use_old_success(self):
         aid = await self.create(type='custom', custom_steps=json.dumps([

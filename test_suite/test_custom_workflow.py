@@ -45,6 +45,28 @@ class CustomWorkflowValidationTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 canonical_steps(bad)
 
+    def test_extended_control_steps_are_canonical(self):
+        steps = parse_steps(json.dumps([
+            {"t": "set", "name": "total", "value": "1"},
+            {"t": "if", "left": "{var.total}", "op": "equals", "right": "1",
+             "then": [{"t": "wait", "ms": 1}], "else": [{"t": "wait", "ms": 2}]},
+            {"t": "repeat", "times": 2, "steps": [{"t": "wait", "ms": 3}]},
+        ]))
+        self.assertEqual([step["t"] for step in steps], ["set", "if", "repeat"])
+        self.assertEqual(steps[0], {"t": "set", "name": "total", "value": "1"})
+        self.assertEqual(steps[1]["op"], "equals")
+        self.assertEqual(steps[1]["then"][0]["ms"], 1)
+        self.assertEqual(steps[2]["times"], 2)
+
+    def test_extended_variables_and_nested_limits(self):
+        with self.assertRaisesRegex(ValueError, 'unavailable variable'):
+            canonical_steps([{"t": "send", "text": "{var.missing}"},
+                             {"t": "if", "left": "x", "op": "contains", "right": "x", "then": [{"t": "wait", "ms": 1}]}])
+        good = [{"t": "set", "name": "x", "value": "1"},
+                {"t": "send", "text": "{var.x}"},
+                {"t": "if", "left": "{var.x}", "op": "equals", "right": "1", "then": [{"t": "wait", "ms": 1}]}]
+        self.assertIn('{var.x}', canonical_steps(good))
+
     def test_group_button_context_logic(self):
         trigger = parse_trigger({"mode":"group","logic":"all","text":"launch",
                                  "button":"start=abc","button_regex":False})

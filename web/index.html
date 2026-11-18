@@ -660,6 +660,23 @@ section.act,.fold.open .fold-b{animation:none}
           <button class="ghost" type="button" id="aiDraftFill" disabled onclick="fillAIDraft()">填入新建表单</button>
           <button class="ghost" type="button" id="aiDraftSave" disabled onclick="saveAIDraft()">确认保存为停用任务</button>
         </div>
+        <div class="fold sub-fold" style="margin-top:14px">
+          <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">AI 试跑 · 让它自己操作</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+          <div class="fold-b">
+            <label for="aiRunTarget">试跑目标</label>
+            <input type="text" id="aiRunTarget" maxlength="256" placeholder="@bot 用户名、群 ID 或已保存会话">
+            <label for="aiRunGoal">告诉 AI 你想完成什么</label>
+            <textarea id="aiRunGoal" rows="3" maxlength="2000" placeholder="例如：给这个机器人签到，遇到古诗填空就选正确的字，看到签到成功再停。"></textarea>
+            <div class="hint">AI 会读取目标会话最近消息和按钮，逐步决定发送、点击或等待，并展示每一步的观察、判断和结果。请先确认目标和诉求，试跑会真实发送消息/点击按钮。</div>
+            <div class="flex" style="gap:8px;flex-wrap:wrap">
+              <button class="btn" type="button" id="aiRunStart" onclick="startAIRun()">开始试跑</button>
+              <button class="ghost" type="button" id="aiRunStop" disabled onclick="stopAIRun()">停止</button>
+              <button class="ghost" type="button" id="aiRunSave" disabled onclick="saveAIRunScript()">保存为停用任务</button>
+              <button class="ghost" type="button" id="aiRunEdit" disabled onclick="editAIRunScript()">填入表单核对</button>
+            </div>
+            <pre id="aiRunTrace" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto"></pre>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1325,7 +1342,7 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="cUser">用户名（选填）</label><input type="text" id="cUser" autocomplete="off" placeholder="编辑时留空沿用已保存值">
           <label for="cSecret">安全码（选填）</label><input type="password" id="cSecret" autocomplete="new-password" placeholder="编辑时留空沿用已保存值">
           <div class="hint">两项会单独安全保存，不进入任务列表、日志或导出文件。步骤使用 {credential.user} 或 {credential.secret} 时，未保存凭证的任务必须同时填写两项。</div>
-          <label>步骤卡片（按顺序执行，1–50 步）</label>
+          <label>步骤卡片（按顺序执行，支持条件/循环，最多 120 步）</label>
           <div id="stepCards"></div>
           <div id="stepError" class="hint" role="alert"></div>
           <div class="custom-add-grid">
@@ -1335,13 +1352,18 @@ section.act,.fold.open .fold-b{animation:none}
             <button class="ghost" type="button" onclick="fillStep('wait_reply')">＋ 等待回复</button>
             <button class="ghost" type="button" onclick="fillStep('extract')">＋ 提取内容</button>
             <button class="ghost" type="button" onclick="fillStep('captcha')">＋ 验证码</button>
+            <button class="ghost" type="button" onclick="fillStep('set')">＋ 设置变量</button>
+            <button class="ghost" type="button" onclick="fillStep('if')">＋ 如果 / 否则</button>
+            <button class="ghost" type="button" onclick="fillStep('repeat')">＋ 重复</button>
+            <button class="ghost" type="button" onclick="fillStep('while')">＋ 直到条件</button>
+            <button class="ghost" type="button" onclick="fillStep('ai_generate')">＋ AI 生成文本</button>
           </div>
           <div class="hint">可用变量：{trigger.text}、{trigger.chat_id}、{trigger.message_id}、{trigger.sender}、{trigger.button_text}、{trigger.button_url}、{trigger.bot}、{trigger.payload}、{credential.user}、{credential.secret}、{last.text}、{var.name}。随机占位符：{num:N}、{word:N}、{alpha:N}、{uuid}。</div>
           <label for="stepTemplate">流程模板</label>
           <div class="custom-template-row"><select id="stepTemplate"><option value="basic">基础 Bot 流程</option><option value="registration">监听注册链接流程</option><option value="scheduled">定时 Bot 流程</option></select><button class="ghost" type="button" onclick="applyStepTemplate()">替换为模板</button></div>
           <details id="stepAdvanced" style="margin-top:12px"><summary>高级：严格格式原始 JSON</summary>
             <textarea id="cSteps" rows="7" oninput="readStepJSON()" placeholder="[]"></textarea>
-            <div class="hint">仅接受最新的 send、wait、click、wait_reply、extract、captcha 格式；字段类型和名称必须完全符合步骤卡片。</div>
+            <div class="hint">仅接受 send、wait、click、wait_reply、extract、captcha、set、if、repeat、while、ai_generate 格式；字段类型和名称必须完全符合步骤卡片。</div>
           </details>
           <div class="flex">
             <div><label>整条失败重试(1-5)</label><input type="number" id="cRetry" value="1" min="1" max="5"></div>
@@ -3155,13 +3177,23 @@ const STEP_HINTS={
   click:{t:'click',to:'target',text:'',emoji:'',index:0,any:false,ai:false,mode:'script',fresh:true,timeout_ms:30000},
   wait_reply:{t:'wait_reply',from:'target',success:'成功',fail:'',regex:false,timeout_ms:30000,save:''},
   extract:{t:'extract',from:'last.text',regex:'',group:1,save:'value'},
-  captcha:{t:'captcha',from:'target',length:4,send_to:'target',template:'{captcha}'}
+  captcha:{t:'captcha',from:'target',length:4,send_to:'target',template:'{captcha}'},
+  set:{t:'set',name:'value',value:''},
+  if:{t:'if',left:'{last.text}',op:'contains',right:'',then:[{t:'wait',ms:1000}],else:[]},
+  repeat:{t:'repeat',times:2,steps:[{t:'wait',ms:1000}]},
+  while:{t:'while',left:'{last.text}',op:'contains',right:'',max:20,steps:[{t:'wait',ms:1000}]},
+  ai_generate:{t:'ai_generate',prompt:'',save:'ai_text',max_tokens:512}
 };
 const STEP_FIELDS={
   send:['t','to','text','reply'],wait:['t','ms'],click:['t','to','text','emoji','index','any','ai','mode','fresh','timeout_ms'],
-  wait_reply:['t','from','success','fail','regex','timeout_ms','save'],extract:['t','from','regex','group','save'],captcha:['t','from','length','send_to','template']
+  wait_reply:['t','from','success','fail','regex','timeout_ms','save'],extract:['t','from','regex','group','save'],captcha:['t','from','length','send_to','template'],
+  set:['t','name','value'],if:['t','left','op','right','then','else'],repeat:['t','times','steps'],
+  while:['t','left','op','right','max','steps'],ai_generate:['t','prompt','save','max_tokens']
 };
-const STEP_NAMES={send:'发送消息',wait:'等待',click:'点击按钮',wait_reply:'等待回复',extract:'提取内容',captcha:'识别验证码'};
+const STEP_NAMES={send:'发送消息',wait:'等待',click:'点击按钮',wait_reply:'等待回复',extract:'提取内容',captcha:'识别验证码',
+  set:'设置变量',if:'如果 / 否则',repeat:'重复',while:'直到条件',ai_generate:'AI 生成文本'};
+const STEP_ADD_TYPES=Object.keys(STEP_NAMES);
+const CONDITION_OPS=[['contains','包含'],['equals','等于'],['not_contains','不包含'],['regex','正则匹配'],['empty','为空'],['truthy','非空']];
 function cloneJSON(value){return JSON.parse(JSON.stringify(value))}
 function nextScheduleTrigger(){
   const date=new Date(Date.now()+3600000),pad=value=>String(value).padStart(2,'0');
@@ -3236,13 +3268,35 @@ function buildCustomTrigger(){
 function parseSteps(text){
   let list;try{list=JSON.parse(text.trim()||'[]')}catch(e){throw new Error('高级步骤内容无法读取，请检查格式，或使用示例模板重新开始')}
   if(!Array.isArray(list))throw new Error('步骤应是一组按顺序排列的卡片');
-  if(list.length>50)throw new Error('最多支持 50 个步骤，请先删除多余步骤');
-  for(const step of list)if(step&&step.t==='click'&&!step.mode)step.mode=step.ai?'ai':'script';
-  return list;
+  if(list.length>50)throw new Error('最多支持 50 个顶层步骤，请先删除多余步骤');
+  const normalize=items=>{for(const step of items){if(!step||typeof step!=='object')continue;if(step.t==='click'&&!step.mode)step.mode=step.ai?'ai':'script';if(step.t==='if'){if(!Array.isArray(step.then))step.then=[];if(!Array.isArray(step.else))step.else=[]}if((step.t==='repeat'||step.t==='while')&&!Array.isArray(step.steps))step.steps=[];for(const key of ['then','else','steps'])if(Array.isArray(step[key]))normalize(step[key])}};
+  normalize(list);return list;
 }
-function stepsUseCredential(list,target=''){return /\{credential\.(?:user|secret)\}/.test(target)||list.some(step=>step&&typeof step==='object'&&Object.values(step).some(value=>typeof value==='string'&&/\{credential\.(?:user|secret)\}/.test(value)))}
-function stepsUseDefaultTarget(list){return list.some(step=>step&&typeof step==='object'&&['to','from','send_to'].some(key=>step[key]==='target'))}
-function stepsUseTrigger(list,target=''){return target==='source'||target.includes('{trigger.')||list.some(step=>step&&typeof step==='object'&&Object.entries(step).some(([key,value])=>typeof value==='string'&&(value.startsWith('trigger.')||value.includes('{trigger.')||(['to','from','send_to'].includes(key)&&value==='source'))))}
+function stepsUseCredential(list,target=''){
+  const test=value=>typeof value==='string'&&/\{credential\.(?:user|secret)\}/.test(value);
+  if(test(target))return true;
+  return list.some(step=>{
+    if(!step||typeof step!=='object')return false;
+    if(Object.values(step).some(test))return true;
+    return ['then','else','steps'].some(key=>Array.isArray(step[key])&&stepsUseCredential(step[key]));
+  });
+}
+function stepsUseDefaultTarget(list){
+  return list.some(step=>{
+    if(!step||typeof step!=='object')return false;
+    if(['to','from','send_to'].some(key=>step[key]==='target'))return true;
+    return ['then','else','steps'].some(key=>Array.isArray(step[key])&&stepsUseDefaultTarget(step[key]));
+  });
+}
+function stepsUseTrigger(list,target=''){
+  const check=value=>typeof value==='string'&&(value.startsWith('trigger.')||value.includes('{trigger.'));
+  if(target==='source'||check(target))return true;
+  return list.some(step=>{
+    if(!step||typeof step!=='object')return false;
+    if(Object.entries(step).some(([key,value])=>check(value)||(['to','from','send_to'].includes(key)&&value==='source')))return true;
+    return ['then','else','steps'].some(key=>Array.isArray(step[key])&&stepsUseTrigger(step[key]));
+  });
+}
 function templateIssue(value){
   for(const match of String(value||'').matchAll(/\{([^{}]+)\}/g)){
     const name=match[1],random=name.match(/^(?:num|word|alpha):(\d+)$/i);
@@ -3253,31 +3307,63 @@ function templateIssue(value){
   return '';
 }
 function stepIssue(list,requireOne=false){
-  if(list.length>50)return '最多支持 50 个步骤';
+  if(!Array.isArray(list))return '步骤必须是数组';
+  let total=0;
+  const walk=(items,depth,path)=>{
+    if(!Array.isArray(items))return path+'必须是数组';
+    if(depth>4)return '条件/循环嵌套不能超过 4 层';
+    for(let i=0;i<items.length;i++){
+      total++;if(total>120)return '步骤总数不能超过 120 个';
+      const s=items[i],prefix=(path?path+'.':'')+(i+1)+'：';
+      if(!s||typeof s!=='object'||Array.isArray(s))return prefix+'步骤必须是 JSON 对象';
+      const fields=STEP_FIELDS[s.t];if(!fields)return prefix+'不支持步骤类型 '+String(s.t||'（空）');
+      const missing=fields.find(key=>!Object.prototype.hasOwnProperty.call(s,key)),extra=Object.keys(s).find(key=>!fields.includes(key));
+      if(missing)return prefix+'缺少字段 '+missing;if(extra)return prefix+'包含未知字段 '+extra;
+      const strings={send:['to','text'],click:['to','text','emoji'],wait_reply:['from','success','fail','save'],extract:['from','regex','save'],captcha:['from','send_to','template'],set:['name','value'],if:['left','op','right'],while:['left','op','right'],ai_generate:['prompt','save']}[s.t]||[];
+      if(strings.some(key=>typeof s[key]!=='string'))return prefix+'文本字段类型不正确';
+      const booleans={send:['reply'],click:['any','ai','fresh'],wait_reply:['regex']}[s.t]||[];
+      if(booleans.some(key=>typeof s[key]!=='boolean'))return prefix+'开关字段类型不正确';
+      const integers={wait:['ms'],click:['index','timeout_ms'],wait_reply:['timeout_ms'],extract:['group'],captcha:['length'],repeat:['times'],while:['max'],ai_generate:['max_tokens']}[s.t]||[];
+      if(integers.some(key=>!Number.isInteger(s[key])))return prefix+'数值字段必须是整数';
+      if(s.t==='send'&&!s.text.trim())return prefix+'请填写要发送的消息';
+      if((s.t==='send'||s.t==='click')&&!s.to.trim()||s.t==='wait_reply'&&!s.from.trim()||s.t==='extract'&&!s.from.trim()||s.t==='captcha'&&(!s.from.trim()||!s.send_to.trim()))return prefix+'步骤目标或来源不能为空';
+      if(s.t==='wait'&&(s.ms<0||s.ms>3600000))return prefix+'等待时间须为 0–3600 秒';
+      if((s.t==='click'||s.t==='wait_reply')&&(s.timeout_ms<1||s.timeout_ms>3600000))return prefix+'等待上限须为 0.001–3600 秒';
+      if(s.t==='click'&&(s.index<0||s.index>100))return prefix+'按钮序号须为 0–100';
+      if(s.t==='click'&&!['script','ai','fallback'].includes(s.mode))return prefix+'按钮模式只能为脚本、AI 或 AI 兜底';
+      if(s.t==='extract'&&(!s.regex.trim()||!s.save.trim()||s.group<0||s.group>20))return prefix+'请填写提取正则和变量名，分组须为 0–20';
+      if(s.t==='captcha'&&(s.length<1||s.length>16))return prefix+'验证码长度须为 1–16';
+      if(s.t==='set'&&!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(s.name))return prefix+'变量名只能使用字母、数字和下划线，且不能以数字开头';
+      if(s.t==='if'){
+        if(!CONDITION_OPS.some(item=>item[0]===s.op))return prefix+'请选择有效的判断方式';
+        if(s.op==='regex'&&!s.right.trim())return prefix+'正则判断需要填写匹配内容';
+        if(!Array.isArray(s.then)||!Array.isArray(s.else)||(!s.then.length&&!s.else.length))return prefix+'至少给 Then 或 Else 添加一个步骤';
+        for(const [key,label] of [['then','Then'],['else','Else']]){const err=walk(s[key],depth+1,prefix+label);if(err)return err}
+      }
+      if(s.t==='repeat'){
+        if(s.times<1||s.times>100)return prefix+'重复次数须为 1–100';
+        if(!Array.isArray(s.steps)||!s.steps.length)return prefix+'重复块至少添加一个步骤';
+        const err=walk(s.steps,depth+1,prefix+'重复');if(err)return err;
+      }
+      if(s.t==='while'){
+        if(!CONDITION_OPS.some(item=>item[0]===s.op))return prefix+'请选择有效的判断方式';
+        if(s.max<1||s.max>100)return prefix+'最大循环次数须为 1–100';
+        if(!Array.isArray(s.steps)||!s.steps.length)return prefix+'循环块至少添加一个步骤';
+        const err=walk(s.steps,depth+1,prefix+'循环');if(err)return err;
+      }
+      if(s.t==='ai_generate'){
+        if(!s.prompt.trim())return prefix+'请填写 AI 提示词';
+        if(!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(s.save))return prefix+'AI 结果变量名不合法';
+        if(s.max_tokens<64||s.max_tokens>4096)return prefix+'AI 输出上限须为 64–4096';
+      }
+      for(const key of strings){const issue=templateIssue(s[key]);if(issue)return prefix+issue}
+      if(s.t==='click'&&s.mode!=='script'&&[s.to,s.text,s.emoji].some(value=>value.includes('{credential.')))return prefix+'AI 选按钮不能使用账号凭据变量';
+      if(['wait_reply','extract'].includes(s.t)&&s.save&&!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(s.save))return prefix+'变量名只能使用字母、数字和下划线，且不能以数字开头';
+    }
+    return '';
+  };
+  const err=walk(list,0);if(err)return err;
   if(requireOne&&!list.length)return '请至少添加一个步骤';
-  for(let i=0;i<list.length;i++){
-    const s=list[i],prefix='第 '+(i+1)+' 步：';if(!s||typeof s!=='object'||Array.isArray(s))return prefix+'步骤必须是 JSON 对象';
-    const fields=STEP_FIELDS[s.t];if(!fields)return prefix+'不支持步骤类型 '+String(s.t||'（空）');
-    const missing=fields.find(key=>!Object.prototype.hasOwnProperty.call(s,key)),extra=Object.keys(s).find(key=>!fields.includes(key));
-    if(missing)return prefix+'缺少字段 '+missing;if(extra)return prefix+'包含未知字段 '+extra;
-    const strings={send:['to','text'],click:['to','text','emoji'],wait_reply:['from','success','fail','save'],extract:['from','regex','save'],captcha:['from','send_to','template']}[s.t]||[];
-    if(strings.some(key=>typeof s[key]!=='string'))return prefix+'文本字段类型不正确';
-    const booleans={send:['reply'],click:['any','ai','fresh'],wait_reply:['regex']}[s.t]||[];
-    if(booleans.some(key=>typeof s[key]!=='boolean'))return prefix+'开关字段类型不正确';
-    const integers={wait:['ms'],click:['index','timeout_ms'],wait_reply:['timeout_ms'],extract:['group'],captcha:['length']}[s.t]||[];
-    if(integers.some(key=>!Number.isInteger(s[key])))return prefix+'数值字段必须是整数';
-    if(s.t==='send'&&!s.text.trim())return prefix+'请填写要发送的消息';
-    if(['send','click'].includes(s.t)&&!s.to.trim()||s.t==='wait_reply'&&!s.from.trim()||s.t==='extract'&&!s.from.trim()||s.t==='captcha'&&(!s.from.trim()||!s.send_to.trim()))return prefix+'步骤目标或来源不能为空';
-    if(s.t==='wait'&&(s.ms<0||s.ms>3600000))return prefix+'等待时间须为 0–3600 秒';
-    if((s.t==='click'||s.t==='wait_reply')&&(s.timeout_ms<1||s.timeout_ms>3600000))return prefix+'等待上限须为 0.001–3600 秒';
-    if(s.t==='click'&&(s.index<0||s.index>100))return prefix+'按钮序号须为 0–100';
-    if(s.t==='click'&&!['script','ai','fallback'].includes(s.mode))return prefix+'按钮模式只能为脚本、AI 或 AI 兜底';
-    if(s.t==='extract'&&(!s.regex.trim()||!s.save.trim()||s.group<0||s.group>20))return prefix+'请填写提取正则和变量名，分组须为 0–20';
-    if(s.t==='captcha'&&(s.length<1||s.length>16))return prefix+'验证码长度须为 1–16';
-    for(const value of strings){const issue=templateIssue(s[value]);if(issue)return prefix+issue}
-    if(s.t==='click'&&s.mode!=='script'&&[s.to,s.text,s.emoji].some(value=>value.includes('{credential.')))return prefix+'AI 选按钮不能使用账号凭据变量';
-    if(['wait_reply','extract'].includes(s.t)&&s.save&&!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(s.save))return prefix+'变量名只能使用字母、数字和下划线，且不能以数字开头';
-  }
   return '';
 }
 function syncStepJSON(){
@@ -3288,65 +3374,84 @@ function readStepJSON(){
   catch(e){stepsError=e.message;$('#stepError').textContent=stepsError;$('#stepCards').replaceChildren()}
 }
 function setVisualSteps(value){$('#cSteps').value=typeof value==='string'?(value||'[]'):JSON.stringify(value||[]);readStepJSON()}
-function stepField(parent,index,key,labelText,type='text',options={}){
-  const s=visualSteps[index],label=document.createElement('label'),input=document.createElement(type==='textarea'?'textarea':'input');
+function stepField(parent,step,key,labelText,type='text',options={}){
+  const label=document.createElement('label'),input=document.createElement(type==='textarea'?'textarea':'input');
   if(type!=='textarea')input.type=type;
-  const value=s[key];
+  const value=step[key];
   if(type==='checkbox'){
     input.checked=!!value;input.style.width='auto';label.className='custom-check';label.appendChild(input);const text=document.createElement('span');text.textContent=labelText;label.appendChild(text);
   }else{label.textContent=labelText;input.value=options.milliseconds?(value==null?'':Number(value)/1000):String(value??'');label.appendChild(input)}
-  if(type==='number'){input.min=String(options.min??0);input.step=String(options.step??1);input.inputMode=options.decimal?'decimal':'numeric'}
+  if(type==='number'){input.min=String(options.min??0);input.max=String(options.max??999999);input.step=String(options.step??1);input.inputMode=options.decimal?'decimal':'numeric'}
   input.addEventListener(type==='checkbox'?'change':'input',()=>{
     let v=type==='checkbox'?input.checked:input.value;
     if(type==='number')v=String(v).trim()===''?'':Number(v)*(options.milliseconds?1000:1);
     if(options.milliseconds&&typeof v==='number'&&Math.abs(v-Math.round(v))<1e-7)v=Math.round(v);
-    s[key]=v;syncStepJSON();
+    step[key]=v;syncStepJSON();
   });
   parent.appendChild(label);
 }
-function stepSelect(parent,index,key,labelText,choices){
-  const s=visualSteps[index],label=document.createElement('label'),select=document.createElement('select');label.textContent=labelText;
+function stepSelect(parent,step,key,labelText,choices){
+  const label=document.createElement('label'),select=document.createElement('select');label.textContent=labelText;
   for(const [value,text] of choices){const option=document.createElement('option');option.value=value;option.textContent=text;select.appendChild(option)}
-  select.value=String(s[key]||'script');select.addEventListener('change',()=>{s[key]=select.value;if(key==='mode')s.ai=select.value==='ai';syncStepJSON()});label.appendChild(select);parent.appendChild(label);
+  select.value=String(step[key]||choices[0][0]);select.addEventListener('change',()=>{step[key]=select.value;if(key==='mode')step.ai=select.value==='ai';syncStepJSON()});label.appendChild(select);parent.appendChild(label);
 }
-function renderStepCards(){
-  const box=$('#stepCards');box.replaceChildren();
-  if(!visualSteps.length){box.textContent='还没有步骤，点下方按钮添加，或使用示例模板';return}
-  visualSteps.forEach((s,i)=>{
-    const card=document.createElement('div');card.className='custom-step-card';
-    const title=document.createElement('b'),type=s&&typeof s==='object'&&STEP_FIELDS[s.t]?s.t:'';title.textContent=(i+1)+'. '+(STEP_NAMES[type]||'无效步骤');card.appendChild(title);
-    if(type==='send'){
-      stepField(card,i,'to','发送目标（target、source、用户名、群 ID 或模板）');stepField(card,i,'text','消息文本','textarea');stepField(card,i,'reply','作为回复发送','checkbox');
-    }
-    if(type==='wait')stepField(card,i,'ms','等待（秒）','number',{milliseconds:true,step:.001,decimal:true});
+function branchAdder(list,labelText){
+  const row=document.createElement('div');row.className='custom-step-actions';row.style.flexWrap='wrap';
+  const select=document.createElement('select');select.style.maxWidth='180px';
+  for(const key of STEP_ADD_TYPES){const option=document.createElement('option');option.value=key;option.textContent=STEP_NAMES[key];select.appendChild(option)}
+  const button=document.createElement('button');button.type='button';button.className='ghost';button.textContent='＋ '+labelText;
+  button.addEventListener('click',()=>{list.push(cloneJSON(STEP_HINTS[select.value]));syncStepJSON();renderStepCards()});
+  row.append(select,button);return row;
+}
+function renderStepList(list,box,prefix,depth){
+  if(!list.length){const empty=document.createElement('div');empty.className='hint';empty.textContent='这个块还没有步骤';box.appendChild(empty);return}
+  list.forEach((s,i)=>{
+    const card=document.createElement('div');card.className='custom-step-card';if(depth)card.style.marginLeft='14px';
+    const title=document.createElement('b'),type=s&&typeof s==='object'&&STEP_FIELDS[s.t]?s.t:'';title.textContent=(prefix?prefix+'.':'')+(i+1)+'. '+(STEP_NAMES[type]||'无效步骤');card.appendChild(title);
+    if(type==='send'){stepField(card,s,'to','发送目标（target、source、用户名、群 ID 或模板）');stepField(card,s,'text','消息文本','textarea');stepField(card,s,'reply','作为回复发送','checkbox')}
+    if(type==='wait')stepField(card,s,'ms','等待（秒）','number',{milliseconds:true,step:.001,decimal:true,max:3600});
     if(type==='click'){
-      stepField(card,i,'to','目标（target、用户名、群 ID 或模板）');stepField(card,i,'text','按钮文字');stepField(card,i,'emoji','按钮表情');stepField(card,i,'index','按钮序号（0 为第一个）','number',{min:0,step:1});
-      stepSelect(card,i,'mode','按钮处理模式',[['script','脚本模式'],['ai','AI 模式'],['fallback','AI 兜底']]);
-      const checks=document.createElement('div');checks.className='custom-checks';stepField(checks,i,'any','匹配任意按钮','checkbox');stepField(checks,i,'fresh','只使用最新按钮','checkbox');card.appendChild(checks);
-      stepField(card,i,'timeout_ms','等待按钮上限（秒）','number',{milliseconds:true,step:.001,decimal:true});
+      stepField(card,s,'to','目标（target、用户名、群 ID 或模板）');stepField(card,s,'text','按钮文字');stepField(card,s,'emoji','按钮表情');stepField(card,s,'index','按钮序号（0 为第一个）','number',{min:0,max:100,step:1});
+      stepSelect(card,s,'mode','按钮处理模式',[['script','脚本模式'],['ai','AI 模式'],['fallback','AI 兜底']]);
+      const checks=document.createElement('div');checks.className='custom-checks';stepField(checks,s,'any','匹配任意按钮','checkbox');stepField(checks,s,'fresh','只使用最新按钮','checkbox');card.appendChild(checks);
+      stepField(card,s,'timeout_ms','等待按钮上限（秒）','number',{milliseconds:true,step:.001,decimal:true,min:1,max:3600});
     }
-    if(type==='wait_reply'){
-      stepField(card,i,'from','回复来源（target、source、用户名、群 ID 或模板）');stepField(card,i,'success','成功条件（留空且失败条件也为空时接受任意新回复）');stepField(card,i,'fail','失败条件');stepField(card,i,'regex','条件使用正则','checkbox');stepField(card,i,'timeout_ms','最长等待（秒）','number',{milliseconds:true,step:.001,decimal:true});stepField(card,i,'save','保存为变量名（选填，之后用 {var.name}）');
+    if(type==='wait_reply'){stepField(card,s,'from','回复来源（target、source、用户名、群 ID 或模板）');stepField(card,s,'success','成功条件（留空且失败条件也为空时接受任意新回复）');stepField(card,s,'fail','失败条件');stepField(card,s,'regex','条件使用正则','checkbox');stepField(card,s,'timeout_ms','最长等待（秒）','number',{milliseconds:true,step:.001,decimal:true,min:1,max:3600});stepField(card,s,'save','保存为变量名（选填，之后用 {var.name}）')}
+    if(type==='extract'){stepField(card,s,'from','提取来源（如 last.text、trigger.text 或模板）');stepField(card,s,'regex','提取正则');stepField(card,s,'group','正则分组','number',{min:0,max:20,step:1});stepField(card,s,'save','保存为变量名')}
+    if(type==='captcha'){stepField(card,s,'from','验证码所在聊天（target、source、用户名、群 ID 或模板）');stepField(card,s,'length','验证码长度','number',{min:1,max:16,step:1});stepField(card,s,'send_to','发送目标（target、source、用户名、群 ID 或模板）');stepField(card,s,'template','发送模板（可留空只保存结果；使用 {captcha} 或 {code}）')}
+    if(type==='set'){stepField(card,s,'name','变量名（之后用 {var.name}）');stepField(card,s,'value','变量值（支持模板）','textarea')}
+    if(type==='if'){
+      stepField(card,s,'left','判断左值（支持模板，如 {last.text}）');stepSelect(card,s,'op','判断方式',CONDITION_OPS);stepField(card,s,'right','判断右值（正则时填表达式）');
+      const thenTitle=document.createElement('label');thenTitle.textContent='Then（条件成立）';card.appendChild(thenTitle);
+      const thenBox=document.createElement('div');renderStepList(s.then,thenBox,(prefix?prefix+'.':'')+(i+1)+'.T',depth+1);card.appendChild(thenBox);card.appendChild(branchAdder(s.then,'给 Then 添加步骤'));
+      const elseTitle=document.createElement('label');elseTitle.textContent='Else（条件不成立）';card.appendChild(elseTitle);
+      const elseBox=document.createElement('div');renderStepList(s.else,elseBox,(prefix?prefix+'.':'')+(i+1)+'.E',depth+1);card.appendChild(elseBox);card.appendChild(branchAdder(s.else,'给 Else 添加步骤'));
     }
-    if(type==='extract'){
-      stepField(card,i,'from','提取来源（如 last.text、trigger.text 或模板）');stepField(card,i,'regex','提取正则');stepField(card,i,'group','正则分组','number',{min:0,step:1});stepField(card,i,'save','保存为变量名');
+    if(type==='repeat'){
+      stepField(card,s,'times','重复次数','number',{min:1,max:100,step:1});
+      const box=document.createElement('div');renderStepList(s.steps,box,(prefix?prefix+'.':'')+(i+1)+'.R',depth+1);card.appendChild(box);card.appendChild(branchAdder(s.steps,'给重复块添加步骤'));
     }
-    if(type==='captcha'){
-      stepField(card,i,'from','验证码所在聊天（target、source、用户名、群 ID 或模板）');stepField(card,i,'length','验证码长度','number',{min:1,step:1});stepField(card,i,'send_to','发送目标（target、source、用户名、群 ID 或模板）');stepField(card,i,'template','发送模板（可留空只保存结果；使用 {captcha} 或 {code}）');
+    if(type==='while'){
+      stepField(card,s,'left','判断左值（支持模板）');stepSelect(card,s,'op','判断方式',CONDITION_OPS);stepField(card,s,'right','判断右值');stepField(card,s,'max','最多循环次数','number',{min:1,max:100,step:1});
+      const box=document.createElement('div');renderStepList(s.steps,box,(prefix?prefix+'.':'')+(i+1)+'.W',depth+1);card.appendChild(box);card.appendChild(branchAdder(s.steps,'给循环块添加步骤'));
+    }
+    if(type==='ai_generate'){
+      stepField(card,s,'prompt','AI 提示词（支持模板）','textarea');stepField(card,s,'save','保存为变量名');stepField(card,s,'max_tokens','最大输出 tokens','number',{min:64,max:4096,step:1});
     }
     const actions=document.createElement('div');actions.className='custom-step-actions';
-    for(const [label,offset] of [['上移',-1],['下移',1],['删除',0]]){const b=document.createElement('button');b.type='button';b.className=offset?'ghost':'danger';b.textContent=label;b.disabled=offset!==0&&(i+offset<0||i+offset>=visualSteps.length);b.addEventListener('click',()=>offset?moveStep(i,offset):removeStep(i));actions.appendChild(b)}
+    for(const [label,offset] of [['上移',-1],['下移',1],['删除',0]]){const b=document.createElement('button');b.type='button';b.className=offset?'ghost':'danger';b.textContent=label;b.disabled=offset!==0&&(i+offset<0||i+offset>=list.length);b.addEventListener('click',()=>offset?moveStep(list,i,offset):removeStep(list,i));actions.appendChild(b)}
     card.appendChild(actions);box.appendChild(card);
   });
 }
+function renderStepCards(){const box=$('#stepCards');box.replaceChildren();renderStepList(visualSteps,box,'',0)}
 function fillStep(k){
   if(!Object.prototype.hasOwnProperty.call(STEP_HINTS,k))return;
   try{visualSteps=parseSteps($('#cSteps').value)}catch(e){return toast(e.message,1)}
-  if(visualSteps.length>=50)return toast('最多 50 个步骤，请先删除一个步骤再添加',1);
-  visualSteps.push(JSON.parse(JSON.stringify(STEP_HINTS[k])));syncStepJSON();renderStepCards();
+  if(visualSteps.length>=50)return toast('最多 50 个顶层步骤，请先删除一个步骤再添加',1);
+  visualSteps.push(cloneJSON(STEP_HINTS[k]));syncStepJSON();renderStepCards();
 }
-function moveStep(index,offset){const next=index+offset;if(index<0||next<0||index>=visualSteps.length||next>=visualSteps.length)return;[visualSteps[index],visualSteps[next]]=[visualSteps[next],visualSteps[index]];syncStepJSON();renderStepCards()}
-function removeStep(index){if(index<0||index>=visualSteps.length)return;visualSteps.splice(index,1);syncStepJSON();renderStepCards()}
+function moveStep(list,index,offset){const next=index+offset;if(index<0||next<0||index>=list.length||next>=list.length)return;[list[index],list[next]]=[list[next],list[index]];syncStepJSON();renderStepCards()}
+function removeStep(list,index){if(index<0||index>=list.length)return;list.splice(index,1);syncStepJSON();renderStepCards()}
 function applyStepTemplate(){
   const key=$('#stepTemplate').value,factory=STEP_TEMPLATES[key];if(!factory||!window.confirm('模板会替换当前触发条件和全部步骤。确定继续？'))return;
   const template=cloneJSON(factory());setCustomTrigger(template.trigger);visualSteps=template.steps;if(template.target)$('#cTarget').value=template.target;syncStepJSON();renderStepCards();
@@ -3787,19 +3892,113 @@ function aiSuggestionValid(s,type){
 }
 function syncAIDraftButtons(){const ready=!!aiDraft&&!aiDraftBusy&&isCurrentAccount(aiDraft.account);$('#aiDraftBtn').disabled=aiDraftBusy;$('#aiDraftFill').disabled=!ready;$('#aiDraftSave').disabled=!ready}
 function invalidateAIDraft(){aiDraftSeq++;aiDraft=null;syncAIDraftButtons();$('#aiDraftResult').textContent=''}
-function resetAIAssistant(){aiDraftSeq++;aiDraftBusy=false;aiDraft=null;assistantFormDraft=null;aiDiagnoses.clear();$('#aiDraftText').value='';$('#aiDraftResult').textContent='';syncAIDraftButtons()}
+function resetAIAssistant(){aiDraftSeq++;aiDraftBusy=false;aiDraft=null;assistantFormDraft=null;aiDiagnoses.clear();$('#aiDraftText').value='';$('#aiDraftResult').textContent='';syncAIDraftButtons();resetAIRunUI()}
 function readableCustomTrigger(value){
  try{const trigger=typeof value==='string'?JSON.parse(value):value;if(trigger.mode==='manual')return '手动执行';if(trigger.mode==='schedule')return '定时一次：'+trigger.at;if(trigger.mode==='group')return '监听群消息：'+(trigger.groups?.length?trigger.groups.join('、'):'全部监听群')+'，'+(trigger.logic==='all'?'全部条件':'任一条件')+'，冷却 '+trigger.cooldown+' 秒'}catch(e){}return '请在触发条件中核对';
 }
 function readableCustomSteps(value){
- try{return (typeof value==='string'?JSON.parse(value):value).map((step,index)=>{
-   const detail={send:(step.to||'默认目标')+' ← '+step.text,wait:String(step.ms/1000)+' 秒',click:(step.to||'默认目标')+' / '+(step.text||step.emoji||('序号 '+step.index)),wait_reply:(step.from||'默认目标')+' / '+(step.success||step.fail),extract:step.regex+' → '+step.save,captcha:(step.from||'默认来源')+' → '+(step.send_to||'默认目标')}[step.t]||'';
-   return `${index+1}. ${STEP_NAMES[step.t]||step.t}${detail?'：'+detail:''}`;
-  }).join('\n')}catch(e){return '请在步骤编辑器核对'}
+  try{
+    const list=typeof value==='string'?JSON.parse(value):value;
+    const detail=(step)=>{
+      if(step.t==='send')return (step.to||'默认目标')+' ← '+step.text;
+      if(step.t==='wait')return String(Number(step.ms)/1000)+' 秒';
+      if(step.t==='click')return (step.to||'默认目标')+' / '+(step.text||step.emoji||('序号 '+step.index));
+      if(step.t==='wait_reply')return (step.from||'默认目标')+' / '+(step.success||step.fail||'任意新回复');
+      if(step.t==='extract')return step.regex+' → '+step.save;
+      if(step.t==='captcha')return (step.from||'默认来源')+' → '+(step.send_to||'默认目标');
+      if(step.t==='set')return step.name+' = '+step.value;
+      if(step.t==='if')return step.left+' '+({contains:'包含',equals:'等于',not_contains:'不包含',regex:'匹配',empty:'为空',truthy:'非空'}[step.op]||step.op)+' '+step.right;
+      if(step.t==='repeat')return '重复 '+step.times+' 次';
+      if(step.t==='while')return '最多 '+step.max+' 次，直到 '+step.left+' '+step.op+' '+step.right;
+      if(step.t==='ai_generate')return 'AI → '+step.save;
+      return '';
+    };
+    const walk=(items,indent)=>items.map((step,index)=>{
+      const head=`${indent}${index+1}. ${STEP_NAMES[step.t]||step.t}${detail(step)?'：'+detail(step):''}`;
+      if(step.t==='if')return head+'\n'+walk(step.then||[],indent+'  T.')+'\n'+walk(step.else||[],indent+'  E.');
+      if(step.t==='repeat'||step.t==='while')return head+'\n'+walk(step.steps||[],indent+'  ');
+      return head;
+    }).join('\n');
+    return walk(Array.isArray(list)?list:[],'');
+  }catch(e){return '请在步骤编辑器核对'}
 }
 function readableAIDraft(d){
  const rows=[d.summary||'任务草稿'];for(const [k,v] of Object.entries(d.draft||{})){if(v===''||v==null||(k==='signin_image_prompt'&&d.draft?.signin_recognition_mode!=='image'))continue;let value=v;if(k==='type')value=AUTO_TYPE[v]||v;if(k==='enabled')value='停用（复核后手动开启）';if(k==='custom_trigger')value=readableCustomTrigger(v);if(k==='custom_steps')value=readableCustomSteps(v);rows.push((AI_LABELS[k]||k)+'：'+String(value))}
  if(Array.isArray(d.warnings))rows.push('\n注意：\n'+d.warnings.map(String).join('\n'));rows.push('耗时：'+testElapsed(d.elapsed_ms));return rows.join('\n');
+}
+let aiRunId='',aiRunSeq=0,aiRunTimer=null,aiRunAccount='',aiRunLast=null;
+function resetAIRunUI(){aiRunSeq++;if(aiRunTimer){clearTimeout(aiRunTimer);aiRunTimer=null}aiRunId='';aiRunLast=null;$('#aiRunTrace').textContent='';$('#aiRunStart').disabled=false;$('#aiRunStop').disabled=true;$('#aiRunSave').disabled=true;$('#aiRunEdit').disabled=true}
+function aiRunObservationText(obs){
+  if(!Array.isArray(obs)||!obs.length)return '（没有可读消息）';
+  return obs.slice(-3).map(item=>{
+    const who=item.out?'我':'对方';
+    const buttons=Array.isArray(item.buttons)&&item.buttons.length?' 按钮：'+item.buttons.map(row=>row.join('/')).join(' | '):'';
+    return `[${item.id}] ${who}：${item.text||'（无文字）'}${buttons}`;
+  }).join('\n');
+}
+function renderAIRunText(data){
+  if(!data)return;
+  const rows=[`状态：${data.status==='running'?'试跑中':data.status==='done'?'已完成':data.status==='failed'?'失败':data.status==='stopped'?'已停止':'启动中'}${data.error?' · '+data.error:''}`];
+  (data.steps||[]).forEach(step=>{
+    const d=step.decision||{};
+    rows.push(`\n第 ${step.index} 步 · 看到\n${aiRunObservationText(step.observation)}`);
+    rows.push(`决定：${d.action||'?'} ${JSON.stringify(d.args||{})}${d.reason?'\n理由：'+d.reason:''}`);
+    rows.push(`结果：${step.result||'（执行中）'}`);
+  });
+  if(data.final_note)rows.push('\n结束：'+data.final_note);
+  $('#aiRunTrace').textContent=rows.join('\n');
+}
+async function startAIRun(){
+  const c=accountContext(),target=$('#aiRunTarget').value.trim(),goal=$('#aiRunGoal').value.trim();
+  if(!target)return toast('先填写试跑目标',1);
+  if(!goal)return toast('先告诉 AI 你想完成什么',1);
+  resetAIRunUI();aiRunAccount=c;aiRunId='';$('#aiRunStart').disabled=true;$('#aiRunTrace').textContent='正在解析目标…';
+  try{
+    const d=await api('/api/ai/agent/start',{method:'POST',body:JSON.stringify({target,goal,max_steps:20}),_account:c});
+    if(!isCurrentAccount(c))return;
+    aiRunId=d.id;$('#aiRunStop').disabled=false;
+    const seq=++aiRunSeq;
+    const poll=async()=>{
+      if(seq!==aiRunSeq||!isCurrentAccount(c))return;
+      try{
+        const data=await api('/api/ai/agent/'+aiRunId,{_account:c});
+        if(seq!==aiRunSeq||!isCurrentAccount(c))return;
+        aiRunLast=data;renderAIRunText(data);
+        const running=['starting','running','stopping'].includes(data.status);
+        $('#aiRunStop').disabled=!running;$('#aiRunSave').disabled=running||!data.steps?.length;$('#aiRunEdit').disabled=running||!data.steps?.length;
+        if(running)aiRunTimer=setTimeout(poll,1200);else aiRunTimer=null;
+      }catch(e){if(seq===aiRunSeq&&isCurrentAccount(c)){$('#aiRunTrace').textContent='读取试跑状态失败：'+e.message;aiRunTimer=setTimeout(poll,1500)}}
+    };
+    aiRunTimer=setTimeout(poll,600);
+  }catch(e){if(isCurrentAccount(c)){$('#aiRunStart').disabled=false;$('#aiRunTrace').textContent='启动失败：'+e.message}}
+}
+async function stopAIRun(){
+  if(!aiRunId||!aiRunAccount)return;
+  try{await api('/api/ai/agent/'+aiRunId+'/stop',{method:'POST',body:'{}',_account:aiRunAccount});$('#aiRunStop').disabled=true}catch(e){toast(e.message,1)}
+}
+async function aiRunScriptDraft(){
+  if(!aiRunId||!aiRunAccount)return null;
+  const c=aiRunAccount;
+  const d=await api('/api/ai/agent/'+aiRunId+'/script',{method:'POST',body:'{}',_account:c});
+  if(!isCurrentAccount(c))return null;
+  if(!Array.isArray(d.steps)||!d.steps.length){toast('没有可保存的动作',1);return null}
+  const draft={type:'custom',name:'AI 试跑任务',target:d.target||$('#aiRunTarget').value.trim(),
+    custom_trigger:JSON.stringify({mode:'manual'}),custom_steps:JSON.stringify(d.steps),chain_retry:1,retries:2};
+  return {account:c,draft};
+}
+async function saveAIRunScript(){
+  const prepared=await aiRunScriptDraft();if(!prepared)return;
+  const c=prepared.account,draft=taskConfig(prepared.draft);delete draft.id;draft.enabled=0;draft.signin_captcha=0;draft.signin_recognition_mode='none';draft.signin_image_action='reply';draft.ai_provider_ids='';
+  try{
+    await api('/api/autos',{method:'POST',body:JSON.stringify(draft),_account:c});
+    if(!isCurrentAccount(c))return;
+    toast('已保存为停用自定义任务，请到列表核对后启用');loadAutos();
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
+}
+async function editAIRunScript(){
+  const prepared=await aiRunScriptDraft();if(!prepared)return;
+  aiDraft=prepared;applyDraftToForm(prepared.draft);openAutoForm('custom');
+  toast('已把 AI 试跑步骤填入自定义任务，核对后可保存');
 }
 async function generateAIDraft(){
   if(aiDraftBusy)return;
