@@ -660,23 +660,24 @@ section.act,.fold.open .fold-b{animation:none}
           <button class="ghost" type="button" id="aiDraftFill" disabled onclick="fillAIDraft()">填入新建表单</button>
           <button class="ghost" type="button" id="aiDraftSave" disabled onclick="saveAIDraft()">确认保存为停用任务</button>
         </div>
-        <div class="fold sub-fold" style="margin-top:14px">
-          <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">AI 试跑 · 让它自己操作</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
-          <div class="fold-b">
-            <label for="aiRunTarget">试跑目标</label>
-            <input type="text" id="aiRunTarget" maxlength="256" placeholder="@bot 用户名、群 ID 或已保存会话">
-            <label for="aiRunGoal">告诉 AI 你想完成什么</label>
-            <textarea id="aiRunGoal" rows="3" maxlength="2000" placeholder="例如：给这个机器人签到，遇到古诗填空就选正确的字，看到签到成功再停。"></textarea>
-            <div class="hint">AI 会读取目标会话最近消息和按钮，逐步决定发送、点击或等待，并展示每一步的观察、判断和结果。请先确认目标和诉求，试跑会真实发送消息/点击按钮。</div>
-            <div class="flex" style="gap:8px;flex-wrap:wrap">
-              <button class="btn" type="button" id="aiRunStart" onclick="startAIRun()">开始试跑</button>
-              <button class="ghost" type="button" id="aiRunStop" disabled onclick="stopAIRun()">停止</button>
-              <button class="ghost" type="button" id="aiRunSave" disabled onclick="saveAIRunScript()">保存为停用任务</button>
-              <button class="ghost" type="button" id="aiRunEdit" disabled onclick="editAIRunScript()">填入表单核对</button>
-            </div>
-            <pre id="aiRunTrace" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto"></pre>
-          </div>
+      </div>
+    </div>
+
+    <div class="card fold" id="aiRunCard">
+      <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">AI 试跑 · 让它自己操作</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+      <div class="fold-b">
+        <label for="aiRunTarget">试跑目标</label>
+        <input type="text" id="aiRunTarget" maxlength="256" placeholder="@bot 用户名、群 ID 或已保存会话">
+        <label for="aiRunGoal">告诉 AI 你想完成什么</label>
+        <textarea id="aiRunGoal" rows="3" maxlength="2000" placeholder="例如：给这个机器人签到，遇到古诗填空就选正确的字，看到签到成功再停。"></textarea>
+        <div class="hint">AI 会读取目标会话最近消息和按钮，逐步决定发送、点击或等待，并展示每一步的观察、判断和结果。请先确认目标和诉求，试跑会真实发送消息/点击按钮。</div>
+        <div class="flex" style="gap:8px;flex-wrap:wrap">
+          <button class="btn" type="button" id="aiRunStart" onclick="startAIRun()">开始试跑</button>
+          <button class="ghost" type="button" id="aiRunStop" disabled onclick="stopAIRun()">停止</button>
+          <button class="ghost" type="button" id="aiRunSave" disabled onclick="saveAIRunScript()">保存为停用任务</button>
+          <button class="ghost" type="button" id="aiRunEdit" disabled onclick="editAIRunScript()">填入表单核对</button>
         </div>
+        <pre id="aiRunTrace" class="hint" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto"></pre>
       </div>
     </div>
 
