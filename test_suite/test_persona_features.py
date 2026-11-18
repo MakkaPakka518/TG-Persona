@@ -296,6 +296,40 @@ class FeatureAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store.load_checkpoint(rt.db, aid)['state'], 'pending')
         rt.client = None
 
+    async def test_summary_uses_dynamic_sections_and_html_format(self):
+        rt = self.rt()
+        rt.db.execute("INSERT INTO watched_groups(chat_id,name,added_at) VALUES('123','fixture',0)")
+        rt.db.commit()
+        msg = SimpleNamespace(id=5, date=datetime.now(timezone.utc), raw_text='新版本今天发布', out=False,
+                              get_sender=AsyncMock(return_value=SimpleNamespace(bot=False)))
+        rt.client = SimpleNamespace(get_messages=AsyncMock(return_value=[msg]))
+        rt.tg_state['phase'] = 'ready'
+        job_input = {'name':'daily','groups':['123'],'topics':'版本发布'}
+        await self.req('POST', '/api/persona/summaries', json=job_input)
+        job = dict(rt.db.execute('SELECT * FROM summary_jobs').fetchone())
+        answer = json.dumps({
+            'summary': '本轮讨论新版本发布。',
+            'sections': [
+                {'title': '版本动态', 'points': [{'text': '今天发布了新版本。', 'sources': [5]}]},
+                {'title': '使用反馈', 'points': [{'text': '部分用户还在等修复。', 'sources': []}]},
+            ],
+            'open_questions': ['旧问题是否修复还没有结论。'],
+        }, ensure_ascii=False)
+        with use_runtime(rt), patch.object(self.main, 'resolve_entity', AsyncMock(return_value='entity')), \
+                patch.object(self.main, '_call_ai_any', AsyncMock(return_value=answer)), \
+                patch.object(self.main, '_send_generated_message', AsyncMock()) as send:
+            chat, day = features.reserve_summaries(vars(self.main), job, manual=True)[0]
+            await features.run_summary(vars(self.main), job, chat, day)
+            text = send.call_args.args[1]
+            self.assertEqual(send.call_args.kwargs['parse_mode'], 'html')
+            self.assertIn('📊 <b>群组总结</b>', text)
+            self.assertIn('版本动态', text)
+            self.assertIn('使用反馈', text)
+            self.assertIn('<blockquote expandable>', text)
+            self.assertIn('待确认', text)
+        self.assertEqual(rt.db.execute('SELECT status FROM summary_runs').fetchone()[0], 'success')
+        rt.client = None
+
     async def test_summary_config_change_during_generation_prevents_send(self):
         rt = self.rt()
         rt.db.execute("INSERT INTO watched_groups VALUES('123','fixture',0)")
