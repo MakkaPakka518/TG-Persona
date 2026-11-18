@@ -10942,8 +10942,9 @@ async def ai_agent_stop(run_id: str):
     if not run:
         raise HTTPException(404, "试跑记录不存在或已过期")
     run["stop"] = True
-    run["status"] = "stopping"
-    return {"ok": True}
+    if run.get("status") in ("starting", "running"):
+        run["status"] = "stopping"
+    return {"ok": True, "status": run.get("status")}
 
 
 def _ai_trace_steps(run):
