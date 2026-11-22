@@ -67,6 +67,37 @@ class AITest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.client_options['follow_redirects'])
         self.assertGreaterEqual(result['elapsed_ms'], 0)
 
+
+
+    async def test_responses_mode_uses_responses_endpoint_and_parses_output(self):
+        self.response_data = {'status': 'completed', 'output': [
+            {'type': 'message', 'role': 'assistant', 'content': [
+                {'type': 'output_text', 'text': '测试成功'}]}],
+            'usage': {'input_tokens': 5, 'output_tokens': 2}}
+        cfg = {'base': 'https://example.invalid/v1', 'key': 'dummy-fixture-key',
+               'model': 'dummy-model', 'api_mode': 'responses'}
+        reply = await self.b['_call_ai_request'](cfg, '连接测试')
+        self.assertEqual(reply, '测试成功')
+        url, options = self.calls[0]
+        self.assertEqual(url, 'https://example.invalid/v1/responses')
+        self.assertEqual(options['json']['input'], '连接测试')
+        self.assertEqual(options['json']['max_output_tokens'], 512)
+        self.assertNotIn('messages', options['json'])
+
+    async def test_responses_mode_accepts_full_endpoint_and_converts_vision_content(self):
+        self.response_data = {'output_text': 'ok'}
+        self.assertEqual(self.b['_ai_endpoint']('https://example.invalid/v1/responses', 'responses'),
+                         'https://example.invalid/v1/responses')
+        self.assertEqual(self.b['_ai_endpoint']('https://example.invalid/v1/responses', 'chat'),
+                         'https://example.invalid/v1/chat/completions')
+        converted = self.b['_responses_input']([
+            {'type': 'text', 'text': '看图'},
+            {'type': 'image_url', 'image_url': {'url': self.data_url}}])
+        self.assertEqual(converted[0]['role'], 'user')
+        self.assertEqual(converted[0]['content'][0], {'type': 'input_text', 'text': '看图'})
+        self.assertEqual(converted[0]['content'][1]['type'], 'input_image')
+        self.assertEqual(converted[0]['content'][1]['image_url'], self.data_url)
+
     async def test_ai_unexpected_reply_is_not_false_success(self):
         self.reply = '不应该输出测试成功'
         result = await self.b['test_ai_connection'](self.body())

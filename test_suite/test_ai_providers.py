@@ -56,6 +56,28 @@ class AIProviderTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException):
             await self.b['delete_ai_provider'](provider_id)
 
+
+
+    async def test_api_mode_defaults_to_chat_and_persists_responses(self):
+        created = await self.b['create_ai_provider'](self.body())
+        provider_id = created['provider']['id']
+        self.assertEqual(created['provider']['api_mode'], 'chat')
+        updated = await self.b['update_ai_provider'](provider_id, self.body(
+            key='', api_mode='responses', enabled=False))
+        self.assertEqual(updated['provider']['api_mode'], 'responses')
+        self.assertEqual(self.b['_ai_provider_rows']()[0]['api_mode'], 'responses')
+        # 旧客户端不带 api_mode 更新时，保留已有模式而不是悄悄回退 chat。
+        kept = await self.b['update_ai_provider'](provider_id, self.b['AIProviderInput'](
+            note='改名', base='https://example.invalid/v1', key='', model='model-one', enabled=False))
+        self.assertEqual(kept['provider']['api_mode'], 'responses')
+        legacy = {'id': 'b' * 16, 'note': '旧配置', 'base': 'https://example.invalid/v1',
+                  'key': 'k', 'model': 'm', 'enabled': True}
+        self.b['set_setting']('ai_providers', json.dumps([legacy]))
+        self.assertEqual(self.b['_ai_provider_rows']()[0]['api_mode'], 'chat')
+        self.b['_save_ai_providers']([])
+        with self.assertRaises(HTTPException):
+            await self.b['create_ai_provider'](self.body(api_mode='auto'))
+
     async def test_reasoning_effort_persists_defaults_and_validates(self):
         created = await self.b['create_ai_provider'](self.body(reasoning_effort='xhigh'))
         provider_id = created['provider']['id']

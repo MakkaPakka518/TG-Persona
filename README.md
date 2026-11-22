@@ -268,6 +268,14 @@ location / {
 空间显示为文件逻辑大小，不等同于真实磁盘分配块。删除途中若权限/I/O 出错会停止，可能已有部分备份删除，需重新查看列表。功能不会自动清理，也不会替用户判断新版本是否稳定。
 
 <a id="changelog"></a>
+## 1.29.44：AI API 增加接口模式（Chat / Responses）
+
+- 设置 → AI API 的每条线路新增“接口模式”下拉：`Chat Completions`（默认，走 `/v1/chat/completions`）和 `Responses API`（走 `/v1/responses`）。只支持 Responses 的中转站不用再换站或改代码。
+- API 地址仍然只填基础地址（如 `https://api.example.com/v1`）；程序会按模式自动拼接。已经填到 `/chat/completions` 或 `/responses` 的地址也能自动纠正，并兼容 `/models` 拉取。
+- 请求体按协议分别构造：Chat 继续用 `messages`，Responses 改用 `input`、`max_output_tokens`，思考强度映射为 `reasoning.effort`；两种模式共用现有的线路轮换、失败重试、Token 统计和测试连接。
+- 返回解析同时支持 Chat 的 `choices[0].message.content` 与 Responses 的 `output_text` / `output` 内容块；Responses 被输出上限截断时同样按“输出达到上限”处理，不会把截断内容当成完整结果。
+- 旧线路没有该字段时一律按 Chat 处理，不影响已有配置；新增、编辑、启用/停用都会保存所选模式。
+
 ## 1.29.43：定时群摘要改为“总结卡片”排版
 
 - 定时群摘要从一大段纯文本改成 Telegram HTML 卡片：顶部 `📊 群组总结` + 群名/时间，下面是 `📌 本次摘要`。

@@ -764,6 +764,7 @@ def _legacy_ai_config():
 
 AI_REASONING_EFFORTS = ("default", "none", "minimal", "low", "medium", "high", "xhigh", "max")
 AI_CLIENT_PROFILES = ("none", "opencode", "codex", "claude")
+AI_API_MODES = ("chat", "responses")
 
 
 def _ai_provider_rows(migrate=True):
@@ -782,6 +783,7 @@ def _ai_provider_rows(migrate=True):
                  "model": str(row.get("model") or "").strip(), "enabled": bool(row.get("enabled", True)),
                  "reasoning_effort": row.get("reasoning_effort", "default"),
                  "client_profile": row.get("client_profile", "none"),
+                 "api_mode": row.get("api_mode", "chat"),
                  "client_session_id": str(row.get("client_session_id") or ""),
                  "input_tokens": max(0, int(row.get("input_tokens") or 0)),
                  "output_tokens": max(0, int(row.get("output_tokens") or 0))}
@@ -789,13 +791,15 @@ def _ai_provider_rows(migrate=True):
             item["reasoning_effort"] = "default"
         if item["client_profile"] not in AI_CLIENT_PROFILES:
             item["client_profile"] = "none"
+        if item["api_mode"] not in AI_API_MODES:
+            item["api_mode"] = "chat"
         if re.fullmatch(r"[a-f0-9]{16}", item["id"]) and item["base"] and item["key"] and item["model"]:
             clean.append(item)
     if not clean and migrate and get_setting("ai_providers_migrated", "0") != "1":
         legacy = _legacy_ai_config()
         if all(legacy.values()):
             clean = [{"id": secrets.token_hex(8), "note": "原有配置", **legacy, "enabled": True,
-                      "reasoning_effort": "default", "client_profile": "none", "client_session_id": "",
+                      "reasoning_effort": "default", "client_profile": "none", "api_mode": "chat", "client_session_id": "",
                       "input_tokens": 0, "output_tokens": 0}]
             set_setting("ai_providers", json.dumps(clean, ensure_ascii=False))
         set_setting("ai_providers_migrated", "1")
@@ -814,7 +818,7 @@ def _save_ai_providers(rows):
 def _ai_provider_configs():
     return [{"id": row["id"], "note": row["note"], "base": row["base"],
              "key": row["key"], "model": row["model"], "reasoning_effort": row["reasoning_effort"],
-             "client_profile": row["client_profile"], "client_session_id": row["client_session_id"]}
+             "client_profile": row["client_profile"], "api_mode": row["api_mode"], "client_session_id": row["client_session_id"]}
              for row in _ai_provider_rows() if row["enabled"]]
 
 
@@ -1054,13 +1058,18 @@ def _safe_ai_error(error, key=""):
     return text[:300] or type(error).__name__
 
 
-def _ai_endpoint(base):
+def _ai_endpoint(base, mode="chat"):
     from urllib.parse import urlsplit
     base = str(base or "").strip().rstrip("/")
     parsed = urlsplit(base)
     if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("AI API 地址应为有效的 HTTP(S) 基础地址，不含密码或查询参数")
-    return base if base.endswith("/chat/completions") else base + "/chat/completions"
+    if mode not in AI_API_MODES:
+        raise ValueError("接口模式只能为 chat 或 responses")
+    for suffix in ("/chat/completions", "/responses"):
+        if base.endswith(suffix):
+            base = base[:-len(suffix)]
+    return base + ("/responses" if mode == "responses" else "/chat/completions")
 
 
 def _ai_reasoning_params(cfg, assistant_mode=False):
@@ -1188,10 +1197,59 @@ async def _call_ai_observed(cfg, content, max_tokens, assistant_mode, feature):
     return result
 
 
+def _responses_input(content):
+    if isinstance(content, str):
+        return content
+    parts = []
+    for item in content if isinstance(content, list) else []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "text":
+            parts.append({"type": "input_text", "text": str(item.get("text", ""))})
+        elif item.get("type") == "image_url":
+            image = item.get("image_url") or {}
+            url = image.get("url") if isinstance(image, dict) else image
+            if url:
+                parts.append({"type": "input_image", "image_url": str(url)})
+    return [{"role": "user", "content": parts}] if parts else str(content)
+
+
+def _responses_payload(cfg, content, max_tokens, reasoning_params):
+    payload = {"model": cfg["model"], "input": _responses_input(content)}
+    if max_tokens is not None:
+        payload["max_output_tokens"] = max_tokens
+    effort = reasoning_params.get("reasoning_effort")
+    if effort:
+        payload["reasoning"] = {"effort": effort}
+    return payload
+
+
+def _responses_reply(data):
+    reply = data.get("output_text")
+    if isinstance(reply, str) and reply.strip():
+        return reply.strip(), ""
+    texts, reasoning = [], []
+    for item in data.get("output") if isinstance(data.get("output"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "reasoning":
+            for part in item.get("summary") if isinstance(item.get("summary"), list) else []:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    reasoning.append(part["text"])
+        for part in item.get("content") if isinstance(item.get("content"), list) else []:
+            if (isinstance(part, dict) and part.get("type") in ("output_text", "text")
+                    and isinstance(part.get("text"), str)):
+                texts.append(part["text"])
+    return "".join(texts).strip(), "".join(reasoning).strip()
+
+
 async def _call_ai_request(cfg, content, max_tokens=512, assistant_mode=False, feature="other"):
     if not cfg.get("base") or not cfg.get("key") or not cfg.get("model"):
         raise ValueError("请填写 AI API 地址、密钥和模型名")
-    endpoint = _ai_endpoint(cfg["base"])
+    mode = str(cfg.get("api_mode") or "chat")
+    if mode not in AI_API_MODES:
+        raise ValueError("接口模式只能为 chat 或 responses")
+    endpoint = _ai_endpoint(cfg["base"], mode)
     if httpx is None:
         raise RuntimeError("服务器未安装 httpx，请重新安装项目依赖")
     reasoning_params = _ai_reasoning_params(cfg, assistant_mode)
@@ -1201,12 +1259,16 @@ async def _call_ai_request(cfg, content, max_tokens=512, assistant_mode=False, f
     model = str(cfg["model"]).strip().rsplit("/", 1)[-1].lower()
     if max_tokens is not None and assistant_mode and re.fullmatch(r"glm-5\.3(?:-flashx?)?", model) and reasoning_params:
         max_tokens = max(max_tokens, 8192)
-    payload = {"model": cfg["model"], "messages": [{"role": "user", "content": content}], **reasoning_params}
     if max_tokens is None and capability.get("max_output_tokens"):
         max_tokens = capability["max_output_tokens"]
-    if max_tokens is not None:
-        max_tokens = min(max_tokens, capability["max_output_tokens"]) if capability.get("max_output_tokens") else max_tokens
-        payload[capability.get("token_parameter", "max_tokens")] = max_tokens
+    if max_tokens is not None and capability.get("max_output_tokens"):
+        max_tokens = min(max_tokens, capability["max_output_tokens"])
+    if mode == "responses":
+        payload = _responses_payload(cfg, content, max_tokens, reasoning_params)
+    else:
+        payload = {"model": cfg["model"], "messages": [{"role": "user", "content": content}], **reasoning_params}
+        if max_tokens is not None:
+            payload[capability.get("token_parameter", "max_tokens")] = max_tokens
     thinking = (reasoning_params.get("thinking", {}).get("type") == "enabled"
                 or reasoning_params.get("reasoning_effort") not in (None, "none"))
     started = time.monotonic()
@@ -1239,18 +1301,25 @@ async def _call_ai_request(cfg, content, max_tokens=512, assistant_mode=False, f
                                             if key in ("input_tokens", "output_tokens", "prompt_tokens", "completion_tokens", "total_tokens")
                                             and isinstance(value, (int, float))}})
         try:
-            reply = data["choices"][0]["message"]["content"]
-            if isinstance(reply, list):
-                reply = "".join(part["text"] for part in reply if isinstance(part, dict)
-                                and part.get("type", "text") in ("text", "output_text")
-                                and isinstance(part.get("text"), str))
-            if reply is not None and not isinstance(reply, str):
-                raise RuntimeError("AI 正文格式不兼容，需要文本或文本内容块")
-            reply = (reply or "").strip()
-            reasoning = data["choices"][0]["message"].get("reasoning_content")
-            finish = data["choices"][0].get("finish_reason")
+            if mode == "responses":
+                reply, reasoning = _responses_reply(data)
+                status = str(data.get("status") or "")
+                details = data.get("incomplete_details") if isinstance(data.get("incomplete_details"), dict) else {}
+                finish = "length" if status == "incomplete" and str(details.get("reason") or "") in (
+                    "max_output_tokens", "max_tokens") else None
+            else:
+                reply = data["choices"][0]["message"]["content"]
+                if isinstance(reply, list):
+                    reply = "".join(part["text"] for part in reply if isinstance(part, dict)
+                                    and part.get("type", "text") in ("text", "output_text")
+                                    and isinstance(part.get("text"), str))
+                if reply is not None and not isinstance(reply, str):
+                    raise RuntimeError("AI 正文格式不兼容，需要文本或文本内容块")
+                reply = (reply or "").strip()
+                reasoning = data["choices"][0]["message"].get("reasoning_content")
+                finish = data["choices"][0].get("finish_reason")
         except (KeyError, IndexError, TypeError, AttributeError):
-            raise RuntimeError("AI 返回格式不兼容，缺少 choices/message/content") from None
+            raise RuntimeError("AI 返回格式不兼容，缺少可读正文") from None
         if feature == "summary" and finish in ("length", "max_tokens"):
             if max_tokens is not None:
                 raise RuntimeError("总结达到本次输出 Token 上限，请开启“不限制总结长度”或缩短总结范围")
@@ -13656,6 +13725,7 @@ class AIProviderInput(BaseModel):
     model: str = Field(..., min_length=1, max_length=256)
     reasoning_effort: str = Field("default", max_length=16)
     client_profile: str = Field("none", max_length=16)
+    api_mode: str = Field("chat", max_length=16)
     enabled: bool = True
 
 
@@ -13670,6 +13740,7 @@ def _public_ai_provider(row):
              "model": row["model"], "enabled": row["enabled"], "key_present": bool(row["key"]),
             "reasoning_effort": row.get("reasoning_effort", "default"),
             "client_profile": row.get("client_profile", "none"),
+            "api_mode": row.get("api_mode", "chat"),
              "input_tokens": row["input_tokens"], "output_tokens": row["output_tokens"], "health": health}
 
 
@@ -13679,6 +13750,10 @@ def _validated_ai_provider(body, previous=None):
                else body.client_profile)
     if profile not in AI_CLIENT_PROFILES:
         raise HTTPException(400, "客户端伪装只能为 none、opencode、codex 或 claude")
+    mode = (previous.get("api_mode", "chat")
+            if previous and "api_mode" not in body.model_fields_set else body.api_mode)
+    if mode not in AI_API_MODES:
+        raise HTTPException(400, "接口模式只能为 chat 或 responses")
     previous_session = previous.get("client_session_id", "") if previous else ""
     same_profile = bool(previous) and previous.get("client_profile", "none") == profile
     if profile == "none":
@@ -13695,13 +13770,14 @@ def _validated_ai_provider(body, previous=None):
                                  if previous and "reasoning_effort" not in body.model_fields_set
                                  else body.reasoning_effort),
             "client_profile": profile,
+            "api_mode": mode,
             "client_session_id": session_id,
             "input_tokens": previous["input_tokens"] if previous else 0,
             "output_tokens": previous["output_tokens"] if previous else 0}
     if not item["key"]:
         raise HTTPException(400, "请填写 AI API Key")
     try:
-        _ai_endpoint(item["base"])
+        _ai_endpoint(item["base"], item["api_mode"])
         _ai_reasoning_params(item)
     except ValueError as error:
         raise HTTPException(400, str(error)) from None
@@ -13941,7 +14017,7 @@ class AIModelsInput(BaseModel):
 
 def _models_endpoint(base):
     base = str(base or "").strip().rstrip("/")
-    _ai_endpoint(base)
+    base = _ai_endpoint(base, "chat")
     if base.endswith("/chat/completions"):
         base = base[:-len("/chat/completions")]
     if base.endswith("/models"):

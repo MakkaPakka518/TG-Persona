@@ -1849,6 +1849,10 @@ section.act,.fold.open .fold-b{animation:none}
           <div id="aiProviderForm" class="hidden">
             <label for="aiProviderNote">备注</label><input type="text" id="aiProviderNote" maxlength="80" placeholder="如：主线路、GLM 备用">
             <label for="aiProviderBase">API 地址（OpenAI 兼容）</label><input type="url" id="aiProviderBase" maxlength="2048" placeholder="https://api.openai.com/v1" oninput="clearAIProviderModelChoices()">
+            <div class="hint">只填到 /v1 即可，程序会按下面选择的接口模式自动拼接。</div>
+            <label for="aiProviderApiMode">接口模式</label>
+            <select id="aiProviderApiMode" aria-describedby="aiProviderApiModeHint"><option value="chat">Chat Completions（/v1/chat/completions，默认）</option><option value="responses">Responses API（/v1/responses）</option></select>
+            <div class="hint" id="aiProviderApiModeHint">中转站提示“请改用 /v1/responses”或只支持 Responses 时选 Responses；绝大多数线路保持 Chat Completions。</div>
             <label for="aiProviderKey">API Key</label><input type="password" id="aiProviderKey" maxlength="4096" autocomplete="new-password" placeholder="sk-..." oninput="clearAIProviderModelChoices()">
             <label for="aiProviderModel">模型</label><div class="water-ai-model-row"><input type="text" id="aiProviderModel" list="aiProviderModelOptions" maxlength="256" placeholder="gpt-4o-mini" onkeydown="if(event.key==='Escape')hideAIProviderModelList()"><button class="ghost" type="button" id="aiProviderModelsBtn" onclick="discoverAIProviderModels()">获取模型</button></div>
             <datalist id="aiProviderModelOptions"></datalist><select id="aiProviderModelList" class="model-choice-list hidden" size="10" aria-label="获取到的模型列表" onchange="selectAIProviderModel()"></select><div id="aiProviderModelsStatus" class="hint" role="status" aria-live="polite"></div>
@@ -4433,12 +4437,13 @@ function setRegistrationAIFlock(prefix,providers,reaction){const ids=csvValues(p
 let aiTestResults={};
 const AI_REASONING_LABELS={default:'模型默认',none:'关闭（none）',minimal:'最低（minimal）',low:'低（low）',medium:'中（medium）',high:'高（high）',xhigh:'极高（xhigh）',max:'最高（max）'};
 const AI_PROFILE_LABELS={none:'不伪装',opencode:'opencode',codex:'codex',claude:'claude'};
+const AI_API_MODE_LABELS={chat:'Chat Completions',responses:'Responses'};
 function renderAIProviders(){
   $('#aiProvidersCount').textContent=aiProviders.length;
   $('#aiProvidersList').innerHTML=aiProviders.length?aiProviders.map(p=>`<div class="ai-provider-row" data-ai-id="${p.id}">
     <div class="ai-provider-head"><div class="ai-provider-note">${esc(p.note)}</div><span class="tag ${p.enabled?'ok':'off'}">${p.enabled?'已启用':'已停用'}</span></div>
     <div class="ai-provider-meta">${esc(p.model)}<br>${esc(p.base)}</div>
-    <div class="ai-provider-meta">思考强度：${esc(AI_REASONING_LABELS[p.reasoning_effort]||AI_REASONING_LABELS.default)}　客户端：${esc(AI_PROFILE_LABELS[p.client_profile]||AI_PROFILE_LABELS.none)}</div>
+    <div class="ai-provider-meta">接口：${esc(AI_API_MODE_LABELS[p.api_mode]||AI_API_MODE_LABELS.chat)}　思考强度：${esc(AI_REASONING_LABELS[p.reasoning_effort]||AI_REASONING_LABELS.default)}　客户端：${esc(AI_PROFILE_LABELS[p.client_profile]||AI_PROFILE_LABELS.none)}</div>
     <div class="ai-provider-meta ai-token-usage">输入 ${formatTokenCount(p.input_tokens)}　输出 ${formatTokenCount(p.output_tokens)} Token</div>
     ${renderAIProviderHealth(p.health)}
     <div class="ai-provider-actions"><button class="ghost" data-ai-action="test">测试</button><button class="ghost" data-ai-action="edit">编辑</button><button class="ghost" data-ai-action="toggle">${p.enabled?'停用':'启用'}</button><button class="danger" data-ai-action="delete">删除</button></div>
@@ -4479,7 +4484,7 @@ function openAIProviderForm(id=null){
   aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=id;const p=aiProviders.find(x=>x.id===id);
   $('#aiProviderNote').value=p?.note||'';$('#aiProviderBase').value=p?.base||'';$('#aiProviderKey').value='';
   $('#aiProviderKey').placeholder=p?.key_present?'已保存，留空不修改':'sk-...';$('#aiProviderModel').value=p?.model||'';$('#aiProviderEnabled').checked=p?.enabled??true;
-  $('#aiProviderReasoning').value=p?.reasoning_effort||'default';$('#aiProviderProfile').value=p?.client_profile||'none';
+  $('#aiProviderReasoning').value=p?.reasoning_effort||'default';$('#aiProviderProfile').value=p?.client_profile||'none';$('#aiProviderApiMode').value=p?.api_mode||'chat';
   clearAIProviderModelChoices(false);
   $('#aiProviderForm').classList.remove('hidden');$('#aiProviderNote').focus();$('#aiProviderForm').scrollIntoView({behavior:'smooth',block:'center'});
 }
@@ -4487,7 +4492,7 @@ function clearAIProviderModelChoices(invalidate=true){if(invalidate){aiProviderM
 function hideAIProviderModelList(){$('#aiProviderModelList').classList.add('hidden')}
 if(document.addEventListener)document.addEventListener('click',e=>{const list=$('#aiProviderModelList');if(list.classList.contains('hidden'))return;if(e.target===list||e.target===$('#aiProviderModel')||e.target===$('#aiProviderModelsBtn'))return;hideAIProviderModelList()},true)
 function selectAIProviderModel(){const value=$('#aiProviderModelList').value;if(!value)return;$('#aiProviderModel').value=value;$('#aiProviderModelsStatus').textContent='已选择模型：'+value;hideAIProviderModelList()}
-function closeAIProviderForm(){aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=null;$('#aiProviderForm').classList.add('hidden');$('#aiProviderKey').value='';$('#aiProviderReasoning').value='default';$('#aiProviderProfile').value='none';clearAIProviderModelChoices(false)}
+function closeAIProviderForm(){aiProviderModelsSeq++;aiProviderModelsBusy=false;editingAIProviderId=null;$('#aiProviderForm').classList.add('hidden');$('#aiProviderKey').value='';$('#aiProviderReasoning').value='default';$('#aiProviderProfile').value='none';$('#aiProviderApiMode').value='chat';clearAIProviderModelChoices(false)}
 function redactProviderSecret(message,key){return key?String(message||'').split(key).join('[已隐藏]'):String(message||'')}
 async function discoverAIProviderModels(){
   if(aiProviderModelsBusy)return;const c=accountContext(),providerId=editingAIProviderId,base=$('#aiProviderBase').value.trim(),key=$('#aiProviderKey').value.trim(),seq=++aiProviderModelsSeq,status=$('#aiProviderModelsStatus'),button=$('#aiProviderModelsBtn');
@@ -4506,7 +4511,7 @@ async function discoverAIProviderModels(){
   finally{if(seq===aiProviderModelsSeq&&isCurrentAccount(c)){aiProviderModelsBusy=false;button.disabled=false}}
 }
 async function saveAIProvider(){
-  const body={note:$('#aiProviderNote').value.trim(),base:$('#aiProviderBase').value.trim(),key:$('#aiProviderKey').value.trim(),model:$('#aiProviderModel').value.trim(),reasoning_effort:$('#aiProviderReasoning').value,client_profile:$('#aiProviderProfile').value,enabled:$('#aiProviderEnabled').checked};
+  const body={note:$('#aiProviderNote').value.trim(),base:$('#aiProviderBase').value.trim(),key:$('#aiProviderKey').value.trim(),model:$('#aiProviderModel').value.trim(),reasoning_effort:$('#aiProviderReasoning').value,client_profile:$('#aiProviderProfile').value,api_mode:$('#aiProviderApiMode').value,enabled:$('#aiProviderEnabled').checked};
   if(!body.note||!body.base||!body.model||(!editingAIProviderId&&!body.key))return toast('请填写备注、地址、Key 和模型',1);
   try{await api('/api/ai/providers'+(editingAIProviderId?'/'+editingAIProviderId:''),{method:editingAIProviderId?'PUT':'POST',body:JSON.stringify(body)});closeAIProviderForm();$('#aiTestResult').textContent='AI API 已保存';await loadAIProviders()}
   catch(e){$('#aiTestResult').textContent='保存失败：'+e.message;toast(e.message,1)}
@@ -4522,7 +4527,7 @@ async function mutateAIProvider(id,action){
       const d=await api('/api/ai/providers/'+id+'/test',{method:'POST'});
       aiTestResults[id]='「'+p.note+'」\n'+(d.ok?'连接测试成功':'连接测试失败')+'\n实际回复：'+(d.reply||'（空回复）')+'\n耗时：'+testElapsed(d.elapsed_ms)+(d.ok?'':'\n原因：'+(d.error||'未知'));
       renderAIProviders();
-    }else if(action==='toggle')await api('/api/ai/providers/'+id,{method:'PUT',body:JSON.stringify({note:p.note,base:p.base,key:'',model:p.model,reasoning_effort:p.reasoning_effort||'default',client_profile:p.client_profile||'none',enabled:!p.enabled})});
+    }else if(action==='toggle')await api('/api/ai/providers/'+id,{method:'PUT',body:JSON.stringify({note:p.note,base:p.base,key:'',model:p.model,reasoning_effort:p.reasoning_effort||'default',client_profile:p.client_profile||'none',api_mode:p.api_mode||'chat',enabled:!p.enabled})});
     else{
       const d=await api('/api/ai/providers/'+id,{method:'DELETE'});delete aiTestResults[id];
       $('#aiTestResult').textContent='AI API 已删除'+(d.affected_references?'，已处理 '+d.affected_references+' 处使用配置':'');
