@@ -33,7 +33,7 @@ SAFE_COLUMNS = tuple((
     "type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
     "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,groups,keywords,action,reply_text,"
     "poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,cooldown_unlimited,success_window_seconds,enabled,command_delay,button_delay,refresh_buttons,button_mode,popup_success_kw,popup_fail_kw,signin_independent,signin_second_enabled,signin_second_start,signin_second_end,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars,ai_flock_knowledge_on_demand"
+    "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars,ai_flock_knowledge_on_demand,cc_username,cc_email,cc_last_code"
 ).split(","))
 # Credentials are stored per-account in settings, never in task rows/exports.
 INTEGER_LIMITS = {
@@ -169,7 +169,7 @@ def _check_fields(data, allowed):
             maximum = 262144 if key in ("custom_steps", "custom_trigger") else 16384
             if not isinstance(value, str) or len(value) > maximum:
                 _bad(f"{key} 必须为字符串且不超过 {maximum} 字符")
-            if key == "type" and value not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register"):
+            if key == "type" and value not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register", "cc_register"):
                 _bad("未知任务类型")
             if key == "action" and value not in ("reply", "send"):
                 _bad("任务 action 必须为 reply/send")

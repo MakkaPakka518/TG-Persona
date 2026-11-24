@@ -412,6 +412,9 @@ def db_init(database=None):
         ("ai_flock_max_tokens", "INTEGER DEFAULT 200"),
         ("ai_flock_knowledge_chars", "INTEGER DEFAULT 2000"),
         ("ai_flock_knowledge_on_demand", "INTEGER DEFAULT 0"),
+        ("cc_username", "TEXT DEFAULT ''"),
+        ("cc_email", "TEXT DEFAULT ''"),
+        ("cc_last_code", "TEXT DEFAULT ''"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -6810,6 +6813,249 @@ async def _custom_trigger_worker():
         runtime.custom_trigger_task = None
 
 
+# ---------------- CC Play 网页抢注 ----------------
+CC_REGISTER_SITE = "https://ccemby.eu.org"
+CC_CODE_RE = re.compile(r"(?<![A-Za-z0-9])((?:INV|REG)-[A-Za-z0-9][A-Za-z0-9_-]{2,32})(?![A-Za-z0-9])", re.I)
+CC_CODE_SKIP_RE = re.compile(r"已使用|已被使用|使用成功|已领取|已失效|已过期")
+
+
+def extract_cc_codes(text):
+    """从群消息提取 INV-/REG- 邀请码；已使用播报直接跳过。"""
+    text = str(text or "")
+    if CC_CODE_SKIP_RE.search(text):
+        return []
+    return list(dict.fromkeys(m.group(1).upper() for m in CC_CODE_RE.finditer(text)))
+
+
+def _cc_json_message(data):
+    if not isinstance(data, dict):
+        return ""
+    detail = data.get("detail")
+    if isinstance(detail, list):
+        parts = []
+        for item in detail:
+            if isinstance(item, dict):
+                parts.append(str(item.get("msg") or item.get("message") or item))
+            else:
+                parts.append(str(item))
+        return "；".join(parts)[:300]
+    for key in ("detail", "message", "msg", "error"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:300]
+    return ""
+
+
+def _cc_json_ok(data):
+    if not isinstance(data, dict):
+        return False
+    if data.get("success") is False or data.get("ok") is False:
+        return False
+    if _web_signin_token(data):
+        return True
+    for key in ("data", "user", "result"):
+        value = data.get(key)
+        if value not in (None, "", [], {}, False):
+            return True
+    return bool(data.get("username") or data.get("id"))
+
+
+def _cc_login(site, username, password):
+    status, data = _web_signin_request("POST", site + "/api/user/login",
+                                       payload={"username_or_email": username, "password": password})
+    if status == 200 and _web_signin_token(data):
+        return True, data
+    return False, data
+
+
+def _cc_level(data):
+    if not isinstance(data, dict):
+        return None
+    sources = [data, data.get("user"), data.get("data")]
+    for source in sources:
+        if isinstance(source, dict):
+            for key in ("vipLevel", "vip_level", "level"):
+                value = source.get(key)
+                if isinstance(value, (int, float)):
+                    return int(value)
+    return None
+
+
+def _cc_register_once(site, username, email, password, codes):
+    """按顺序提交邀请码；只有注册成功才返回 ok。"""
+    site = str(site or CC_REGISTER_SITE).strip().rstrip("/")
+    username = str(username or "").strip()
+    email = str(email or "").strip()
+    code_list = [str(code or "").strip().upper() for code in codes if str(code or "").strip()]
+    result = {"ok": False, "already": False, "code": "", "message": "", "username": username,
+              "site": site, "level": None}
+    if not username or not email or not password:
+        result["message"] = "CC 账号信息不完整"
+        return result
+    if not code_list:
+        result["message"] = "没有可用的邀请码"
+        return result
+    for code in code_list[:4]:
+        result["code"] = code
+        status, data = _web_signin_request("POST", site + "/api/user/register", payload={
+            "username": username, "email": email, "password": password,
+            "voucher_code": code, "email_code": ""
+        })
+        if status in (200, 201) and _cc_json_ok(data):
+            ok, login_data = _cc_login(site, username, password)
+            if ok:
+                level = _cc_level(login_data)
+                result["level"] = level
+                result["message"] = "注册成功！欢迎回来，%s%s" % (
+                    username, (" (Lv.%s)" % level) if level is not None else "")
+            else:
+                result["message"] = "注册成功，登录确认未通过：%s" % (
+                    _cc_json_message(login_data) or "请手动登录检查")
+            result["ok"] = True
+            return result
+        message = _cc_json_message(data) or ("HTTP %s" % status)
+        result["message"] = message
+        if "请直接登录" in message or "已存在" in message or "已被注册" in message:
+            ok, login_data = _cc_login(site, username, password)
+            if ok:
+                result["already"] = True
+                result["ok"] = True
+                result["level"] = _cc_level(login_data)
+                result["message"] = "账号已存在，已直接登录"
+                return result
+            result["message"] = "账号已存在：" + message
+            return result
+        # 邀请码无效/已被使用才继续试下一个；用户名、邮箱、密码错误没有重试意义。
+        if not any(word in message for word in ("邀请码", "注册码", "voucher", "码已", "已使用", "无效")):
+            return result
+    return result
+
+
+async def _cc_source_matches(a, event, chat):
+    """groups 可填群ID、@频道、@管理员或 Bot；同时匹配聊天和发送者。"""
+    tokens = [g.strip() for g in str(a["groups"] or "").split(",") if g.strip()]
+    if not tokens:
+        watched = {r["chat_id"] for r in get_account_db().execute(
+            "SELECT chat_id FROM watched_groups").fetchall()}
+        return chat in watched
+    sender = getattr(event, "sender", None)
+    username = str(getattr(sender, "username", "") or "").strip()
+    sender_id = str(getattr(event, "sender_id", "") or "")
+    for token in tokens:
+        bare = token.lstrip("@").strip()
+        if token == chat or bare == chat or (sender_id and token == sender_id):
+            return True
+        if username and bare.lower() == username.lower():
+            return True
+        try:
+            entity = await resolve_entity(token)
+        except Exception:
+            entity = None
+        if entity is not None:
+            entity_id = str(getattr(entity, "id", "") or "")
+            if entity_id and entity_id in (chat, sender_id):
+                return True
+    return False
+
+
+async def _run_cc_event(aid, codes, chat, msg_id, sender, text):
+    return await _observe_automation(
+        aid, _run_cc_body(aid, codes, chat, msg_id, sender, text), chat)
+
+
+async def _run_cc_body(aid, codes, chat, msg_id, sender, text):
+    db = get_account_db()
+    a = db.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    if a is None or not a["enabled"] or str(a["last_status"] or "") == "success":
+        return False
+    password = get_link_credential(aid).get("s", "")
+    if not password:
+        _cc_finish(aid, chat, msg_id, sender, text, codes[0] if codes else "", False, "未保存 CC 登录密码")
+        return False
+    db.execute("UPDATE automations SET last_attempt=?,last_status='running' WHERE id=?", (int(time.time()), aid))
+    db.commit()
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(
+            None, _cc_register_once, CC_REGISTER_SITE, a["cc_username"], a["cc_email"], password, codes)
+    except Exception as error:
+        result = {"ok": False, "message": "注册请求异常：%s" % error, "code": codes[0] if codes else ""}
+    _cc_finish(aid, chat, msg_id, sender, text, result.get("code", ""),
+               bool(result.get("ok")), result.get("message", ""), result)
+    return bool(result.get("ok"))
+
+
+def _cc_finish(aid, chat, msg_id, sender, text, code, ok, message, result=None):
+    db = get_account_db()
+    a = db.execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
+    if a is None:
+        return
+    stamp = now_local().strftime("%Y-%m-%d %H:%M:%S")
+    db.execute("UPDATE automations SET last_status=?,last_at=?,cc_last_code=?,enabled=? WHERE id=?",
+               ("success" if ok else "failed", stamp, str(code or "")[:128], 0 if ok else 1, aid))
+    db.commit()
+    grp_name = ""
+    try:
+        row = db.execute("SELECT name FROM watched_groups WHERE chat_id=?", (str(chat),)).fetchone()
+        if row:
+            grp_name = row["name"]
+    except Exception:
+        pass
+    detail = {"kind": "cc_register", "task": a["name"], "site": CC_REGISTER_SITE,
+              "user": a["cc_username"], "email": a["cc_email"], "code": code,
+              "message": message, "already": bool((result or {}).get("already")),
+              "level": (result or {}).get("level")}
+    add_hit("cc_register", bool(ok), chat_id=str(chat), rule_id=-aid, msg_id=int(msg_id or 0),
+            grp_name=grp_name or a["name"], sender=sender, content=str(text or "")[:500],
+            reply=str(message or "")[:300], detail=detail)
+    if ok:
+        notify_event("success", a["name"], "CC 注册成功：%s %s" % (a["cc_username"], message))
+
+
+async def on_cc_event(event):
+    if get_runtime().running["paused"] or getattr(event, "out", False):
+        return
+    if not (getattr(event, "is_group", False) or getattr(event, "is_channel", False)):
+        return
+    autos = get_account_db().execute(
+        "SELECT * FROM automations WHERE enabled=1 AND type='cc_register' AND last_status!='success'"
+    ).fetchall()
+    if not autos:
+        return
+    text = str(getattr(event, "raw_text", "") or "")
+    if not text:
+        text = str(getattr(getattr(event, "message", None), "message", "") or "")
+    labels = []
+    try:
+        for row in await event.get_buttons() or []:
+            for button in row:
+                labels.append(str(getattr(button, "text", "") or ""))
+    except Exception:
+        pass
+    codes = extract_cc_codes(text + "\n" + "\n".join(labels))
+    if not codes:
+        return
+    chat = str(event.chat_id)
+    sender = ""
+    try:
+        sender = await sender_name_of(event)
+    except Exception:
+        pass
+    runtime = _auto_runtime_state()
+    for a in autos:
+        if not await _cc_source_matches(a, event, chat):
+            continue
+        if a["id"] in runtime.auto_tasks or a["id"] in runtime.auto_queued or a["id"] in runtime.auto_workers:
+            continue
+        try:
+            runtime.auto_tasks[a["id"]] = asyncio.get_running_loop().create_future()
+            worker = runtime.spawn(_run_cc_event(a["id"], codes, chat, event.id, sender, text))
+            runtime.auto_workers[a["id"]] = worker
+            worker.add_done_callback(lambda _task, task_id=a["id"]: _finish_auto_reservation(task_id))
+        except Exception:
+            _finish_auto_reservation(a["id"])
+            log.exception("CC 抢注启动异常")
+
+
 async def on_link_event(event):
     """群链接与群按钮注册共用账号作用域和任务生命周期。"""
     # Bot 发布的开注公告也需触发；不使用普通回复规则的 ignore_bots 设置。
@@ -10592,6 +10838,7 @@ async def finish_login(me=None):
     if not runtime.handler_registered:
         runtime.client.add_event_handler(runtime.bind_event(on_group_message, runtime.client), events.NewMessage(incoming=True))
         runtime.client.add_event_handler(runtime.bind_event(on_auto_event, runtime.client), events.NewMessage(incoming=True))
+        runtime.client.add_event_handler(runtime.bind_event(on_cc_event, runtime.client), events.NewMessage(incoming=True))
         runtime.client.add_event_handler(runtime.bind_event(on_link_event, runtime.client), events.NewMessage(incoming=True))
         runtime.client.add_event_handler(runtime.bind_event(on_game_event, runtime.client), events.NewMessage(incoming=True))
         runtime.client.add_event_handler(runtime.bind_event(on_outgoing_learning, runtime.client), events.NewMessage(outgoing=True))
@@ -11444,6 +11691,9 @@ class AutoIn(BaseModel):
     ai_flock_max_tokens: int = Field(AI_FLOCK_MAX_TOKENS, ge=50, le=8192)
     ai_flock_knowledge_chars: int = Field(AI_FLOCK_KNOWLEDGE_CHARS, ge=-1, le=KNOWLEDGE_MAX_BYTES)
     ai_flock_knowledge_on_demand: int = Field(0, ge=0, le=1)
+    cc_username: str = Field("", max_length=64)
+    cc_email: str = Field("", max_length=254)
+    cc_last_code: str = Field("", max_length=128)
     announcement_kw: str = "定时注册"
     announcement_button: str = "点击注册"
     ai_provider_ids: str = ""        # signin: 逗号分隔 provider id；空=全部启用
@@ -11453,7 +11703,7 @@ class AutoIn(BaseModel):
 
 
 def _valid_auto(body: AutoIn):
-    if body.type not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register"):
+    if body.type not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register", "cc_register"):
         raise HTTPException(400, "未知任务类型")
     if not body.name.strip():
         raise HTTPException(400, "请填写任务名称")
@@ -11571,6 +11821,13 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "请填写群开注关键词和群按钮文字")
         if max(len(body.announcement_kw), len(body.announcement_button), len(body.command)) > 1000:
             raise HTTPException(400, "开注关键词、按钮文字或首条指令过长")
+    if body.type == "cc_register":
+        if not body.cc_username.strip():
+            raise HTTPException(400, "CC 抢注需要填写用户名")
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", body.cc_email.strip()):
+            raise HTTPException(400, "CC 抢注的邮箱格式不正确")
+        if not body.groups.strip():
+            raise HTTPException(400, "CC 抢注至少选择一个监听群或填写 @频道/@管理员")
     if body.type == "code_register":
         if not re.fullmatch(r"-[1-9][0-9]*", body.groups.strip()):
             raise HTTPException(400, "兑换码抢注必须选择且只能选择一个监听群")
@@ -11611,7 +11868,7 @@ def _valid_auto(body: AutoIn):
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
               "groups,keywords,action,reply_text,poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,cooldown_unlimited,success_window_seconds,enabled,command_delay,button_delay,refresh_buttons,button_mode,popup_success_kw,popup_fail_kw,signin_independent,signin_second_enabled,signin_second_start,signin_second_end,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars,ai_flock_knowledge_on_demand")
+              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars,ai_flock_knowledge_on_demand,cc_username,cc_email,cc_last_code")
 
 
 def _auto_vals(body: AutoIn, extra=None):
@@ -11639,6 +11896,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.ai_flock_context_messages, body.ai_flock_message_chars,
         body.ai_flock_skill_chars, body.ai_flock_max_tokens, body.ai_flock_knowledge_chars,
         body.ai_flock_knowledge_on_demand,
+        body.cc_username.strip(), body.cc_email.strip(), body.cc_last_code.strip(),
     ] + (extra or [])
 
 
@@ -11796,7 +12054,7 @@ async def delete_auto(aid: int):
 
 @app.post("/api/autos/{aid}/link-credential")
 async def save_link_credential(aid: int, body: dict):
-    row = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('link_register','button_register','code_register','custom')", (aid,)).fetchone()
+    row = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('link_register','button_register','code_register','cc_register','custom')", (aid,)).fetchone()
     if row is None:
         raise HTTPException(404, "需要凭据的任务不存在")
     user = str((body or {}).get("user") or "")
@@ -11882,6 +12140,8 @@ def _replay_plan(a):
         return ["匹配群消息或媒体", "按%s模式选择红包按钮" % a["button_mode"]]
     if kind == "grabcodes":
         return ["匹配群消息关键词", "提取邀请码", "回复或群内发送"]
+    if kind == "cc_register":
+        return ["监听群/频道消息", "提取 INV-/REG- 邀请码", "提交 CC 网页注册", "登录确认成功并停用任务"]
     if kind == "keepalive":
         return ["向目标群发送配置文本", "按设置延迟删除"]
     try:
@@ -11915,6 +12175,8 @@ async def _replay_message(message, a):
         matched = bool(_message_links(message))
     elif a["type"] == "code_register":
         matched = bool(_message_register_codes(message, a["target"]))
+    elif a["type"] == "cc_register":
+        matched = bool(extract_cc_codes(text))
     elif a["type"] == "custom":
         try:
             trigger = parse_trigger(a["custom_trigger"])
@@ -14358,7 +14620,7 @@ async def get_logs(n: int = 60, kind: str = "", q: str = "", before: int = 0):
     kind = (kind or "").strip()
     if kind == "reply":
         where, params = "action IN ('reply','react','both')", []
-    elif kind in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register", "ai_flock"):
+    elif kind in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register", "cc_register", "ai_flock"):
         where, params = "action=?", [kind]
     else:
         where, params = "1=1", []
@@ -14386,7 +14648,7 @@ async def get_logs(n: int = 60, kind: str = "", q: str = "", before: int = 0):
     if q.strip():
         return {"hits": out, "counts": {}, "has_more": len(out) == min(n, 200)}
     counts = {"reply": 0, "signin": 0, "scheduled_register": 0, "grabcodes": 0, "redpacket": 0, "custom": 0,
-              "keepalive": 0, "link_register": 0, "button_register": 0, "code_register": 0, "ai_flock": 0}
+              "keepalive": 0, "link_register": 0, "button_register": 0, "code_register": 0, "cc_register": 0, "ai_flock": 0}
     for r in get_account_db().execute("SELECT action, COUNT(*) c FROM hits GROUP BY action").fetchall():
         k = "reply" if r["action"] in ("reply", "react", "both") else r["action"]
         if k in counts:

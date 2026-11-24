@@ -108,7 +108,8 @@ def load_backend():
                         '_LE_REPEAT', '_LE_CATEGORY_WORDS', '_LE_NEUTRAL', '_LE_SIGNAL', '_LE_CHARS',
                         '_LE_REPLAY', '_LE_STATS', '_LE_SAMPLES', '_LE_FLUSH_AT', "PEOPLE_LINES", "PEOPLE_WHITE_LINES", "PEOPLE_BUDGET", "PEOPLE_SAMPLE_STEP", "_PEOPLE_RUNNING", "_PEOPLE_TRACE", "PEOPLE_PERSONA_SECTIONS", "PEOPLE_PERSONA_MAX_CHARS", "PEOPLE_MBTI_OK", "PEOPLE_ZODIAC_OK", "STUDY_LAYER_DETAIL_MAX", "STUDY_LAYER_SUMMARY_MAX", "STUDY_LAYER_MAX_WORK", "STUDY_LAYER_PAGE_MERGED", "RECALL_FLOOR", "RECALL_DUP_RATIO", "RECALL_STABLE_RATIO", "PEOPLE_PROFILE_PROMPT", "_POEM_PUNCT", "POEM_MASK_CHARS", "POEM_FILL_MASK_CHARS", "_poem_lines", "_poem_lock",
                         'MEMORY_STALE_DAYS', 'SENT_DEDUPE_SECONDS', 'BUBBLE_SPLIT_RATIO',
-                        'BUBBLE_SPLIT_RATIO_AFTER_GRAB', 'BUBBLE_MAX_PARTS'}
+                        'BUBBLE_SPLIT_RATIO_AFTER_GRAB', 'BUBBLE_MAX_PARTS', 'WEB_SIGNIN_UA',
+                        'CC_REGISTER_SITE', 'CC_CODE_RE', 'CC_CODE_SKIP_RE'}
     selected = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):

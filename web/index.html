@@ -921,6 +921,30 @@ section.act,.fold.open .fold-b{animation:none}
           </form></div></div>
         </div>
       </div>
+      <div class="fold sub-fold" id="ccRegisterCard">
+        <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4zM8 8h8M8 12h5"/></svg>CC 抢注</span><span class="cnt" id="aCntCC">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+        <div class="fold-b">
+          <div class="hint" style="margin-bottom:10px">监听 CC 频道、群主/管理员或 Bot 发出的 <b>INV-</b> / <b>REG-</b> 邀请码，自动打开 <b>ccemby.eu.org</b> 注册并提交预设用户名、邮箱和密码。成功一次后任务自动停用，避免重复注册。</div>
+          <button class="btn addtask" type="button" onclick="openAutoForm('cc_register')">＋ 添加 CC 抢注</button>
+          <div id="aListCC"></div>
+          <div class="empty" id="aEmptyCC">暂无 CC 抢注任务</div>
+          <div class="autof" id="af-cc_register"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑 CC 抢注</b><button class="ghost" type="button" onclick="closeAutoForm('cc_register')">关闭</button></div><form onsubmit="saveAuto('cc_register');return false">
+            <label for="ccName">任务名称</label><input type="text" id="ccName" required placeholder="如：CC 频道邀请码抢注">
+            <label for="ccUsername">预设用户名</label><input type="text" id="ccUsername" required autocomplete="off" placeholder="注册时提交的用户名">
+            <label for="ccEmail">预设邮箱</label><input type="email" id="ccEmail" required autocomplete="off" placeholder="用于找回密码的邮箱">
+            <label for="ccPassword">预设密码</label><input type="password" id="ccPassword" autocomplete="new-password" placeholder="新增必填；编辑留空沿用已保存密码">
+            <div class="hint">密码单独保存在当前账号配置中，不会出现在任务列表、日志或导出文件里。</div>
+            <label>监听来源（可多选）</label>
+            <div class="hint" style="margin:0 0 8px">勾选已添加的监听群；不勾则只监听下方额外来源</div>
+            <div id="ccGroups" class="grp-pick"></div>
+            <label for="ccExtraGroups">额外频道 / 群主 / 管理员 / Bot</label>
+            <input type="text" id="ccExtraGroups" value="@CcEmby,@CC1036" placeholder="逗号分隔，如 @CcEmby,@CC1036">
+            <div class="hint">这里填 @用户名 也可以填频道或群 ID；至少勾选一个监听群或填写一个额外来源。</div>
+            <div class="hint">识别规则：INV-xxxx 或 REG-xxxx；只处理最近一条，已使用/已失效播报会跳过。注册成功后显示“注册成功！欢迎回来，用户名 (Lv.x)”并自动停用。</div>
+            <div class="flex" style="margin-top:14px"><button class="btn" type="submit">保存</button><button class="ghost" type="button" id="ccCancel" style="display:none" onclick="cancelAutoEdit('cc_register')">取消编辑</button></div>
+          </form></div></div>
+        </div>
+      </div>
       <div class="fold sub-fold">
         <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M17 20h5v-2a3 3 0 0 0-5.36-1.65M5 20H0v-2a3 3 0 0 1 5.36-1.65M12 20H7a3 3 0 0 1 5.36-1.65"/><circle cx="16" cy="8" r="3"/><path d="M19 4a3 3 0 1 1-3-3 3 3 0 0 1 3 3z"/></svg>群抢注监控</span><span class="cnt" id="aCntGrab">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
         <div class="fold-b">
@@ -2709,9 +2733,9 @@ async function applyBatch(){
   finally{if(isCurrentAccount(p.c)){batchBusy=false;$('#batchPreviewBtn').disabled=false;$('#batchApplyBtn').disabled=true}}
 }
 
-const AUTO_TYPE={signin:'签到',scheduled_register:'定时抢注',grabcodes:'抢注',redpacket:'抢红包',custom:'自定义',keepalive:'群聊',link_register:'群链接抢注',button_register:'群按钮开注',code_register:'群兑换码抢注'};
+const AUTO_TYPE={signin:'签到',scheduled_register:'定时抢注',grabcodes:'抢注',redpacket:'抢红包',custom:'自定义',keepalive:'群聊',link_register:'群链接抢注',button_register:'群按钮开注',code_register:'群兑换码抢注',cc_register:'CC抢注'};
 const ACTIONS={signin:'reply',grabcodes:'reply',redpacket:'reply'};
-const AUTO_MAP={signin:['Sign','签到'],scheduled_register:['Timed','定时抢注'],grabcodes:['Grab','抢注'],redpacket:['Pack','抢红包'],custom:['Custom','自定义'],keepalive:['Keep','保号'],link_register:['Link','链接'],button_register:['ButtonReg','按钮开注'],code_register:['CodeReg','兑换码']};
+const AUTO_MAP={signin:['Sign','签到'],scheduled_register:['Timed','定时抢注'],grabcodes:['Grab','抢注'],redpacket:['Pack','抢红包'],custom:['Custom','自定义'],keepalive:['Keep','保号'],link_register:['Link','链接'],button_register:['ButtonReg','按钮开注'],code_register:['CodeReg','兑换码'],cc_register:['CC','CC抢注']};
 
 async function loadAutos(){
   const c=accountContext();
@@ -3054,6 +3078,7 @@ function autoCanRun(a){
 function signinRecognitionMode(a){const mode=String(a?.signin_recognition_mode||'');return ['none','captcha','image','poem'].includes(mode)?mode:(a?.signin_captcha?'captcha':'none')}
 function buttonModeLabel(mode){return ({script:'脚本按钮',ai:'AI 选按钮',fallback:'AI 兜底'}[mode]||'脚本按钮')}
 function autoDesc(a){
+  if(a.type==='cc_register')return `来源：${esc(a.groups||'全部监听群')} · 站点 ccemby.eu.org · 账号 ${esc(a.cc_username||'未填')} · ${a.link_credential_set?'密码已保存':'密码未保存'}${a.cc_last_code?' · 最近码 '+esc(a.cc_last_code):''}${a.last_at?' · 上次 '+esc(a.last_at):''}`;
   if(a.type==='code_register')return `群：${esc(a.groups)}；Bot：${esc(a.target)}；${buttonModeLabel(a.button_mode)}；${Number(a.link_mode)===0?'随机一条':'串行最多 '+esc(String(a.link_limit??4))+' 条'}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒回群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
   if(a.type==='button_register')return `群：${esc(a.groups||'全部监听群')}；开注：${esc(a.announcement_kw)}；群按钮：${esc(a.announcement_button)}；${buttonModeLabel(a.button_mode)}；指令：${esc(a.command||'/start')}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒向原群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
   if(a.type==='signin'){
@@ -3139,6 +3164,12 @@ function editAutoItem(id){
     $('#brGroupReply').checked=!!a.success_reply_enabled;$('#brReplyText').value=a.success_reply_text||'';$('#brReplyDelay').value=a.success_reply_delay??5;
     $('#brGroupReplyFields').classList.toggle('hidden',!$('#brGroupReply').checked);$('#brCancel').style.display='inline-block';
     $('#brAiFlock').checked=!!a.ai_flock_enabled;$('#brAiFlockMinutes').value=a.ai_flock_minutes??5;$('#brAiFlockPrompt').value=a.ai_flock_prompt||DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('br',a.ai_flock_provider_ids,a.ai_flock_reaction);setIntegerFields('brAiFlock',a,AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#brAiFlockKnowledgeOnDemand').checked=settingEnabled(a.ai_flock_knowledge_on_demand);$('#brAiFlockFields').classList.toggle('hidden',!$('#brAiFlock').checked);
+  }else if(t==='cc_register'){
+    $('#ccName').value=a.name;$('#ccUsername').value=a.cc_username||'';$('#ccEmail').value=a.cc_email||'';$('#ccPassword').value='';
+    const ids=new Set(watchedGroups.map(g=>String(g.chat_id))),tokens=csvValues(a.groups);
+    autoGroupSel.cc_register=new Set(tokens.filter(x=>ids.has(x)));
+    $('#ccExtraGroups').value=tokens.filter(x=>!ids.has(x)).join(',');
+    renderAutoGroups('cc_register');$('#ccCancel').style.display='inline-block';
   }else if(t==='code_register'){
     $('#crName').value=a.name;$('#crGroupSearch').value='';renderCodeGroupOptions(a.groups);$('#crBot').value=a.target||'';
     $('#crButton').value=a.btn_text||'注册';$('#crButtonMode').value=a.button_mode||'script';$('#crReady').value=a.keywords||'已进入注册状态';$('#crExisting').value=a.existing_kw||'';
@@ -3581,8 +3612,8 @@ function applyStepTemplate(){
   const key=$('#stepTemplate').value,factory=STEP_TEMPLATES[key];if(!factory||!window.confirm('模板会替换当前触发条件和全部步骤。确定继续？'))return;
   const template=cloneJSON(factory());setCustomTrigger(template.trigger);visualSteps=template.steps;if(template.target)$('#cTarget').value=template.target;syncStepJSON();renderStepCards();
 }
-const autoGroupSel={grabcodes:new Set(),redpacket:new Set(),link_register:new Set(),button_register:new Set(),custom:new Set()};
-const AUTO_GROUP_BOX={grabcodes:'gGroups',redpacket:'pGroups',link_register:'lkGroups',button_register:'brGroups',custom:'cGroups'};
+const autoGroupSel={grabcodes:new Set(),redpacket:new Set(),link_register:new Set(),button_register:new Set(),cc_register:new Set(),custom:new Set()};
+const AUTO_GROUP_BOX={grabcodes:'gGroups',redpacket:'pGroups',link_register:'lkGroups',button_register:'brGroups',cc_register:'ccGroups',custom:'cGroups'};
 for(const [type,id] of Object.entries(AUTO_GROUP_BOX))$('#'+id).addEventListener('click',e=>{const b=e.target.closest('[data-auto-group]');if(b&&$('#'+id).contains(b))toggleAutoGroup(type,b.dataset.autoGroup)});
 function renderAutoGroups(type){
   const box=document.getElementById(AUTO_GROUP_BOX[type]);
@@ -3603,6 +3634,7 @@ function setAutoGroups(type,csv){
   renderAutoGroups(type);
 }
 function getAutoGroups(type){return watchedGroupCsv(autoGroupSel[type])}
+function getCCGroups(){return [...csvValues(getAutoGroups('cc_register')),...csvValues($('#ccExtraGroups').value)].filter((x,i,arr)=>arr.indexOf(x)===i).join(',')}
 
 function pickBtnEmoji(e){
   const el=document.querySelector('#sBtnEmoji');
@@ -3659,6 +3691,7 @@ function openAutoForm(type){
   if(type==='signin'){renderSigninIconPreview();syncSigninWindow()}
   if(type==='custom'){readStepJSON();renderAutoGroups('custom')}
   if(type==='code_register')renderCodeGroupOptions();
+  if(type==='cc_register')renderAutoGroups('cc_register');
   document.body.style.overflow='hidden';
 }
 function closeAutoForm(type){
@@ -3760,6 +3793,17 @@ async function saveAuto(type){
     if((user&&!secret)||(!user&&secret))return toast('用户名和安全码需同时填写；留空表示沿用已保存值',1);
     if(!wasEditing&&(!user||!secret))return toast('新增任务请填写注册用户名和安全码',1);
     if(user&&secret)linkCredential={user,secret};
+  }else if(type==='cc_register'){
+    const username=$('#ccUsername').value.trim(),email=$('#ccEmail').value.trim(),password=$('#ccPassword').value;
+    const groups=[...csvValues(getAutoGroups('cc_register')),...csvValues($('#ccExtraGroups').value)].filter((x,i,arr)=>arr.indexOf(x)===i).join(',');
+    body={type,name:$('#ccName').value.trim(),groups,cc_username:username,cc_email:email,cc_last_code:'',target:'https://ccemby.eu.org',enabled:0,model:''};
+    delete body.model;
+    if(!body.name||!username||!email)return toast('请填写任务名称、用户名和邮箱',1);
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return toast('邮箱格式不正确',1);
+    if(!groups)return toast('请选择监听群或填写 @频道/@管理员',1);
+    if(!wasEditing&&!password)return toast('新增任务请填写预设密码',1);
+    if(wasEditing&&!password&&username!==(editAuto.cc_username||''))return toast('修改用户名需同时填写密码',1);
+    if(password)linkCredential={user:username,secret:password};
   }else if(type==='code_register'){
     const flockLimits=validIntegerFields('crAiFlock',AI_FLOCK_LIMIT_SPECS,'ai_flock_');if(!flockLimits)return;
     body={type,name:$('#crName').value.trim(),groups:$('#crGroup').value,target:$('#crBot').value.trim(),
@@ -3834,6 +3878,9 @@ async function saveAuto(type){
       try{await api('/api/autos/'+savedId+'/link-credential',{method:'POST',body:JSON.stringify(linkCredential),_account:c})}
       catch(e){if(isCurrentAccount(c))toast('任务已保存，但账号信息保存失败：'+e.message,1);return loadAutos()}
       if(!isCurrentAccount(c))return;
+    }
+    if(type==='cc_register'&&!wasEditing&&linkCredential&&savedId){
+      try{await api('/api/autos/'+savedId+'/toggle',{method:'POST',_account:c})}catch(e){if(isCurrentAccount(c))toast('任务已保存，但自动启用失败：'+e.message,1)}
     }
     closeAutoForm(type);toast(wasEditing?'已更新':'已新增');editAuto=null;loadAutos();
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
