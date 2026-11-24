@@ -28,6 +28,7 @@ class CCReportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.b['extract_cc_codes']('新码 INV-4C5B6440，备用 REG-ABC_123'),
                          ['INV-4C5B6440', 'REG-ABC_123'])
         self.assertEqual(self.b['extract_cc_codes']('INV-4C5B6440 已被使用'), [])
+        self.assertIn('INV-4C5B6440', self.b['extract_cc_codes']('旧码 INV-OLD 已使用，新码 INV-4C5B6440'))
         self.assertEqual(self.b['extract_cc_codes']('没有邀请码'), [])
 
     async def test_cc_task_fields_and_credential(self):
@@ -48,6 +49,9 @@ class CCReportTests(unittest.IsolatedAsyncioTestCase):
         event2 = SimpleNamespace(chat_id=-100456, sender=SimpleNamespace(username='someone'),
                                  sender_id=888)
         self.assertFalse(await self.b['_cc_source_matches'](a, event2, '-100456'))
+        self.b['resolve_entity'] = AsyncMock(return_value=SimpleNamespace(id=123))
+        event3 = SimpleNamespace(chat_id=-100123, sender=SimpleNamespace(username=''), sender_id=0)
+        self.assertTrue(await self.b['_cc_source_matches'](a, event3, '-100123'))
 
     async def test_cc_level_nested_data(self):
         data = {'code': 200, 'data': {'vip_level': 2}}

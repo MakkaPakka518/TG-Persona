@@ -6817,12 +6817,13 @@ async def _custom_trigger_worker():
 CC_REGISTER_SITE = "https://ccemby.eu.org"
 CC_CODE_RE = re.compile(r"(?<![A-Za-z0-9])((?:INV|REG)-[A-Za-z0-9][A-Za-z0-9_-]{2,32})(?![A-Za-z0-9])", re.I)
 CC_CODE_SKIP_RE = re.compile(r"已使用|已被使用|使用成功|已领取|已失效|已过期")
+CC_CODE_FRESH_RE = re.compile(r"新码|新邀请码|新注册码|未使用|可用|补发|新一批")
 
 
 def extract_cc_codes(text):
     """从群消息提取 INV-/REG- 邀请码；已使用播报直接跳过。"""
     text = str(text or "")
-    if CC_CODE_SKIP_RE.search(text):
+    if CC_CODE_SKIP_RE.search(text) and not CC_CODE_FRESH_RE.search(text):
         return []
     return list(dict.fromkeys(m.group(1).upper() for m in CC_CODE_RE.finditer(text)))
 
@@ -6938,12 +6939,16 @@ async def _cc_source_matches(a, event, chat):
         watched = {r["chat_id"] for r in get_account_db().execute(
             "SELECT chat_id FROM watched_groups").fetchall()}
         return chat in watched
+    chat_ids = {str(chat)}
+    raw = str(chat).lstrip("-")
+    if raw.startswith("100") and len(raw) > 3:
+        chat_ids.add(raw[3:])
     sender = getattr(event, "sender", None)
     username = str(getattr(sender, "username", "") or "").strip()
     sender_id = str(getattr(event, "sender_id", "") or "")
     for token in tokens:
         bare = token.lstrip("@").strip()
-        if token == chat or bare == chat or (sender_id and token == sender_id):
+        if token in chat_ids or bare in chat_ids or (sender_id and token == sender_id):
             return True
         if username and bare.lower() == username.lower():
             return True
@@ -6953,7 +6958,7 @@ async def _cc_source_matches(a, event, chat):
             entity = None
         if entity is not None:
             entity_id = str(getattr(entity, "id", "") or "")
-            if entity_id and entity_id in (chat, sender_id):
+            if entity_id and (entity_id in chat_ids or entity_id == sender_id):
                 return True
     return False
 
