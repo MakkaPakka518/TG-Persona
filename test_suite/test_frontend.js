@@ -1191,7 +1191,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('共享图标接口不带账号头，JSON仅显式按钮加载且无五秒图标轮询',async()=>{
     let requests=[];app.fetch=async(p,o)=>{requests.push([p,o]);return {ok:true,status:200,json:async()=>({})}};
     for(const path of ['/api/icons','/api/icon-libraries','/api/icon-libraries/a','/api/icons/refresh'])await realApi(path);assert(requests.every(r=>!r[1].headers['X-Account-ID']));
-    const intervals=js.match(/setInterval\([\s\S]*?\);/g)||[];assert(intervals.every(s=>!/(loadIcons|loadIconLibraries|refreshIcons)/.test(s)));assert(html.includes('https://emby-icon.vercel.app/TFEL-Emby.json'));
+    const intervals=js.match(/setInterval\([\s\S]*?\);/g)||[];assert(intervals.every(s=>!/(loadIcons|loadIconLibraries|refreshIcons)/.test(s)));assert(html.includes('https://icon.ouo.xwx.me/TFEL-Emby.json'));
   });
   await test('统一签到默认禁用00:05–00:41且字段收起，旧设置缺失兼容',async()=>{
     ex('signinGlobalDirty=false;acceptSigninGlobalSettings({})');assert.strictEqual(ex('signinGlobal.enabled'),false);assert.strictEqual(q('#signinGlobalStart').value,'00:05');assert.strictEqual(q('#signinGlobalEnd').value,'00:41');assert(!q('#signinGlobalEnabled').checked);

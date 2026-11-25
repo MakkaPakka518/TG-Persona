@@ -221,12 +221,17 @@ class IconRouterTests(unittest.TestCase):
         self.assertEqual(len(self.calls), calls)
 
     def test_bad_saved_config_is_controlled_and_no_network(self):
-        for value in ("not JSON", "{}", '[{"id":"bad"}]',
-                      json.dumps([{**icons._builtin(), "url": "https://attacker.example/icons.json"}])):
+        for value in ("not JSON", "{}", '[{"id":"bad"}]'):
             self.settings.path.write_text(value)
             result = self.client.get("/api/icon-libraries")
             self.assertEqual(result.status_code, 500)
             self.assertNotIn("attacker.example", result.text)
+        # 内置库地址被旧值或恶意值覆盖时，一律以代码常量为准，不请求旧/外部地址。
+        self.settings.path.write_text(json.dumps([{**icons._builtin(), "url": "https://attacker.example/icons.json"}]))
+        result = self.client.get("/api/icon-libraries")
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["libraries"][0]["url"], icons.BUILTIN_URL)
+        self.assertNotIn("attacker.example", result.text)
         self.assertEqual(self.calls, [])
 
     def test_worker_does_not_block_panel_event_loop(self):

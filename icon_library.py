@@ -30,7 +30,7 @@ from fastapi import APIRouter, Body, HTTPException
 
 SETTING_KEY = "icon_libraries"
 BUILTIN_ID = "builtin-tfel"
-BUILTIN_URL = "https://emby-icon.vercel.app/TFEL-Emby.json"
+BUILTIN_URL = "https://icon.ouo.xwx.me/TFEL-Emby.json"
 MAX_LIBRARIES = 10
 MAX_LIBRARY_ICONS = 2000
 MAX_TOTAL_ICONS = 5000
@@ -328,14 +328,20 @@ def build_icon_router(get_setting: Callable, set_setting: Callable,
                 if (not isinstance(identifier, str) or identifier in ids or
                         (identifier != BUILTIN_ID and not re.fullmatch(r"[0-9a-f]{32}", identifier))):
                     raise IconError("无效配置")
-                url = _url(entry.get("url"))
-                if url in urls or (identifier == BUILTIN_ID and url != BUILTIN_URL):
-                    raise IconError("无效配置")
                 enabled = entry.get("enabled", True)
                 if type(enabled) is not bool:
                     raise IconError("无效配置")
+                if identifier == BUILTIN_ID:
+                    # 内置库 URL 以代码常量为准：换地址后旧配置自动迁移，也防止被改成任意来源。
+                    libraries.append({**_builtin(), "enabled": enabled})
+                    ids.add(identifier)
+                    urls.add(BUILTIN_URL)
+                    continue
+                url = _url(entry.get("url"))
+                if url in urls:
+                    raise IconError("无效配置")
                 libraries.append({"id": identifier, "name": _name(entry.get("name"), MAX_NAME_LENGTH),
-                                  "url": url, "enabled": enabled, "builtin": identifier == BUILTIN_ID})
+                                  "url": url, "enabled": enabled, "builtin": False})
                 ids.add(identifier)
                 urls.add(url)
             if BUILTIN_ID not in ids:
