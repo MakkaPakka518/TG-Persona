@@ -5137,9 +5137,13 @@ def _store_learning_samples(samples):
         count = sum((sample[3] if sample[3] in ("owner", "group") else "group") == role for sample in samples)
         if count:
             _learning_metric(role, collected=count)
-    keep = max(1000, _learning_budget("flock_learning_batch_size", AI_FLOCK_LEARNING_MESSAGES) * 5)
-    db.execute("DELETE FROM ai_learning_samples WHERE id NOT IN "
-               "(SELECT id FROM ai_learning_samples ORDER BY id DESC LIMIT ?)", (keep,))
+    batch_size = _learning_budget("flock_learning_batch_size", AI_FLOCK_LEARNING_MESSAGES)
+    # 学习队列只保留最近一段，避免长期失败时无限堆积；主人样本单独保底，不被群消息挤掉。
+    for role, keep in (("owner", max(100, batch_size * 5)), ("group", max(200, batch_size * 10))):
+        db.execute("DELETE FROM ai_learning_samples WHERE role=? AND id NOT IN "
+                   "(SELECT id FROM ai_learning_samples WHERE role=? ORDER BY id DESC LIMIT ?)",
+                   (role, role, keep))
+    db.execute("DELETE FROM ai_learning_samples WHERE role NOT IN ('owner','group')")
     db.commit()
     _schedule_ai_learning()
     return len(samples)
@@ -5695,7 +5699,7 @@ def _is_context_length_error(error):
     return any(token in message for token in (
         "context length", "context_length", "maximum context", "too long", "token limit",
         "max token", "request too large", "http 413", "context window", "prompt is too long",
-        "tokens exceed", "上下文", "长度超限"))
+        "tokens exceed", "上下文", "长度超限", "输出达到本次上限"))
 
 
 async def _upload_flock_skill():
