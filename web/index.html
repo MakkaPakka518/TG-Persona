@@ -1171,7 +1171,11 @@ section.act,.fold.open .fold-b{animation:none}
           <button class="btn" type="button" id="signinGlobalSave" style="margin-top:10px" onclick="saveSigninGlobal()">保存统一时间</button>
           <div class="hint" id="signinGlobalResult" role="status" aria-live="polite"></div>
         </div>
-        <button class="btn addtask" type="button" onclick="openAutoForm('signin')">＋ 添加签到任务</button>
+        <div class="flex" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <button class="btn addtask" type="button" style="flex:1;margin-bottom:0" onclick="openAutoForm('signin')">＋ 添加签到任务</button>
+          <button class="btn addtask" type="button" style="flex:1;margin-bottom:0" onclick="openPoemSigninForm()">＋ 添加诗词签到</button>
+        </div>
+        <div class="hint" style="margin:-2px 0 10px">群诗词签到不是单独任务类型：点「添加诗词签到」会自动打开 BOT 签到表单并勾好诗词模式。</div>
         <div id="aListSign"></div>
         <div class="empty" id="aEmptySign">暂无签到任务,点上面按钮添加</div>
         <div class="autof" id="af-signin"><div class="autof-card"><div class="autof-head"><b>新增 / 编辑签到任务</b><button class="ghost" type="button" onclick="closeAutoForm('signin')">关闭</button></div><form onsubmit="saveAuto('signin');return false">
@@ -3737,6 +3741,15 @@ function closeAutoForm(type){
   document.body.style.overflow='';
   cancelAutoEdit(type);
   if(typeof tpClose==='function')tpClose(); // 顺手关掉可能还开着的时间滚轮
+}
+function openPoemSigninForm(){
+  cancelAutoEdit('signin');
+  openAutoForm('signin');
+  $('#sName').value='群诗词签到';
+  $('#sPoemMode').checked=true;
+  $('#sIsChat').checked=true;
+  syncPoemFields();
+  $('#sTarget').focus();
 }
 async function saveAuto(type){
   const c=editAutoAccount||accountContext(),wasEditing=!!editAuto;

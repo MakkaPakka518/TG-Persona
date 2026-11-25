@@ -169,6 +169,15 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(form.includes('发送命令 → 等待命令后延迟 → 点击按钮 → 等待按钮后延迟 → 后续图片处理'));
     assert(form.includes('0 秒表示立即进行'));
   });
+  await test('BOT签到提供诗词签到快捷入口并自动勾选诗词模式',async()=>{
+    assert(html.includes('＋ 添加诗词签到'));
+    assert(html.includes('onclick="openPoemSigninForm()"'));
+    run("openPoemSigninForm()");
+    assert.strictEqual(element('#sPoemMode').checked,true);
+    assert.strictEqual(element('#sIsChat').checked,true);
+    assert.strictEqual(element('#sName').value,'群诗词签到');
+    assert.strictEqual(element('#sPoemFinal').value,'就位');
+  });
   await test('新增及取消编辑恢复 1.6 秒和 2 秒默认值',async()=>{
     editSignin({command_delay:0,button_delay:0});run("closeAutoForm('signin');openAutoForm('signin')");
     assert.strictEqual(element('#sCommandDelay').value,'1.6');assert.strictEqual(element('#sButtonDelay').value,'2');
