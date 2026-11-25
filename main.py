@@ -423,6 +423,9 @@ def db_init(database=None):
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
         except sqlite3.OperationalError:
             pass
+    # 1.29.51：诗词签到从 BOT 签到中拆成独立任务类型，旧任务自动迁移。
+    conn.execute("UPDATE automations SET type='signin_poem', signin_poem_mode=1 "
+                 "WHERE type='signin' AND signin_poem_mode=1")
     for col, ddl in (("wait_others", "INTEGER DEFAULT 0"), ("wait_timeout", "INTEGER DEFAULT 30"), ("failed", "INTEGER DEFAULT 0")):
         try:
             conn.execute(f"ALTER TABLE game_tasks ADD COLUMN {col} {ddl}")
@@ -7433,7 +7436,19 @@ async def _await_task_button(ent, min_id, keyword, timeout=30, mode="script", hi
     return None, None
 
 
+SIGNIN_TASK_TYPES = ("signin", "signin_poem")
+
+
+def _is_signin_type(value):
+    return str(value or "") in ("signin", "signin_poem")
+
+
 def _signin_poem_mode(a):
+    try:
+        if str(a["type"]) == "signin_poem":
+            return True
+    except (KeyError, IndexError, TypeError):
+        pass
     try:
         return bool(int(a["signin_poem_mode"] or 0))
     except (KeyError, IndexError, TypeError, ValueError):
@@ -9154,7 +9169,7 @@ def _reset_auto_schedule(aid, clear_success=False):
     # 时间、重试设置、启停或图标变化不能重新发放当天重试额度。
     if not clear_success and (a["last_attempt"] or a["last_status"] == "unconfirmed"):
         next_at = int(a["next_run_at"] or 0)
-        if a["type"] == "signin":
+        if _is_signin_type(a["type"]):
             if a["last_status"] in ("success", "unconfirmed") or a["retry_count"] >= _retry_limit(a):
                 next_at = 0
         elif a["type"] == "keepalive":
@@ -9188,14 +9203,14 @@ def _global_signin_window():
 
 def _effective_signin_window(a):
     window = _global_signin_window()
-    follows = window["enabled"] and a["type"] == "signin" and not a["signin_independent"]
+    follows = window["enabled"] and _is_signin_type(a["type"]) and not a["signin_independent"]
     return (window["start"], window["end"]) if follows else (a["win_start"], a["win_end"])
 
 
 def _signin_windows(a):
     first = _effective_signin_window(a)
     windows = [first]
-    if a["type"] == "signin" and a["signin_second_enabled"]:
+    if _is_signin_type(a["type"]) and a["signin_second_enabled"]:
         windows.append((a["signin_second_start"], a["signin_second_end"]))
     return windows
 
@@ -9254,7 +9269,7 @@ def _maybe_notify_global_signin_summary():
     if get_setting("signin_summary_day", "") == today:
         return False
     rows = get_account_db().execute(
-        "SELECT * FROM automations WHERE enabled=1 AND type='signin' AND signin_independent=0 ORDER BY id DESC").fetchall()
+        "SELECT * FROM automations WHERE enabled=1 AND type IN ('signin','signin_poem') AND signin_independent=0 ORDER BY id DESC").fetchall()
     if not rows:
         return False
     runtime = _auto_runtime_state()
@@ -9490,7 +9505,7 @@ async def _execute_auto_body(aid, manual=False, trigger_context=None):
         a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
         if a is None or (not manual and not a["enabled"]):
             return result
-        notice["aggregate"] = bool(not manual and a["type"] == "signin"
+        notice["aggregate"] = bool(not manual and _is_signin_type(a["type"])
                                    and _global_signin_window()["enabled"] and not a["signin_independent"])
         if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
             return result
@@ -9498,10 +9513,10 @@ async def _execute_auto_body(aid, manual=False, trigger_context=None):
         current = now_local()
         today = current.strftime("%Y-%m-%d")
         signin_slot = (_signin_slot(a, current, allow_outside=manual, success_mask=_signin_mask(a, today))
-                       if a["type"] == "signin" else -1)
+                       if _is_signin_type(a["type"]) else -1)
         count = int(a["retry_count"] or 0)
         if not manual:
-            if a["type"] == "signin":
+            if _is_signin_type(a["type"]):
                 if signin_slot is None or _signin_mask(a, today) & (1 << signin_slot):
                     return result
                 same_slot = (a["retry_day"] == today
@@ -9511,7 +9526,7 @@ async def _execute_auto_body(aid, manual=False, trigger_context=None):
                     return result
             if a["type"] == "keepalive" and now < int(a["next_run_at"] or 0):
                 return result
-        if a["type"] == "signin" and (a["retry_day"] != today
+        if _is_signin_type(a["type"]) and (a["retry_day"] != today
                 or int(a["signin_attempt_slot"] if a["signin_attempt_slot"] is not None else -1) != signin_slot):
             count = 0
         if a["type"] == "keepalive" and count >= _retry_limit(a):
@@ -9525,7 +9540,7 @@ async def _execute_auto_body(aid, manual=False, trigger_context=None):
         a = get_account_db().execute("SELECT * FROM automations WHERE id=?", (aid,)).fetchone()
         ok, status = False, "failed"
         try:
-            if a["type"] == "signin":
+            if _is_signin_type(a["type"]):
                 if manual:
                     ok = bool(await run_signin(a))
                 else:
@@ -9567,15 +9582,15 @@ async def _execute_auto_body(aid, manual=False, trigger_context=None):
                 status = "unconfirmed"
             next_at = finished + backoff
             exhausted = count >= _retry_limit(a)
-            if a["type"] == "signin" and (exhausted or status in ("unconfirmed", "stopped")):
+            if _is_signin_type(a["type"]) and (exhausted or status in ("unconfirmed", "stopped")):
                 next_at = 0
             if status == "stopped":
                 next_at = 0
                 get_account_db().execute("UPDATE automations SET next_run_at=0,last_status='stopped' WHERE id=?", (aid,))
             elif ok:
-                stamp = now_local().strftime("%Y-%m-%d") if a["type"] == "signin" else str(finished)
+                stamp = now_local().strftime("%Y-%m-%d") if _is_signin_type(a["type"]) else str(finished)
                 next_at = finished + max(60, int(a["poll_interval"] or 60)) if a["type"] == "keepalive" else 0
-                if a["type"] == "signin":
+                if _is_signin_type(a["type"]):
                     previous_mask = _signin_mask(a, today)
                     success_mask = previous_mask | (1 << max(0, signin_slot))
                     get_account_db().execute("UPDATE automations SET last_at=?,signin_success_mask=?,retry_count=0,next_run_at=?,"
@@ -9596,7 +9611,7 @@ async def _execute_auto_body(aid, manual=False, trigger_context=None):
                 except ValueError:
                     pass
             retry = (not manual and not ok and status == "failed" and not exhausted and
-                     (a["type"] in ("signin", "keepalive") or (a["type"] == "custom" and retry_later))
+                     (a["type"] in ("signin", "signin_poem", "keepalive") or (a["type"] == "custom" and retry_later))
                      and aid not in _auto_runtime_state().auto_stop_requested)
             if a["type"] == "scheduled_register" or (custom_schedule and not retry and status != "interrupted"):
                 get_account_db().execute("UPDATE automations SET enabled=0,next_run_at=0 WHERE id=?", (aid,))
@@ -9636,7 +9651,7 @@ def _signin_tick():
     for key in list(get_runtime().signin_plans):
         if key[1] != today:
             get_runtime().signin_plans.pop(key, None)
-    for a in get_account_db().execute("SELECT * FROM automations WHERE enabled=1 AND type='signin' ORDER BY id DESC").fetchall():
+    for a in get_account_db().execute("SELECT * FROM automations WHERE enabled=1 AND type IN ('signin','signin_poem') ORDER BY id DESC").fetchall():
         if a["id"] in get_runtime().auto_tasks:
             continue
         slot = _signin_slot(a, current, success_mask=_signin_mask(a, today))
@@ -11851,7 +11866,7 @@ async def toggle_rule(rid: int):
 
 # ---------- 自动化管理 (签到 / 抢注 / 抢红包 / 自定义) ----------
 class AutoIn(BaseModel):
-    type: str = "signin"          # signin | scheduled_register | grabcodes | redpacket | custom
+    type: str = "signin"          # signin | signin_poem | scheduled_register | grabcodes | redpacket | custom
     name: str = ""
     icon_url: str = Field("", max_length=2048)  # 任务图标，仅 HTTP(S)
     target: str = ""              # signin/custom: @机器人 或 群ID;grabcodes: 轮询机器人(可选)
@@ -11928,7 +11943,7 @@ class AutoIn(BaseModel):
 
 
 def _valid_auto(body: AutoIn):
-    if body.type not in ("signin", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register", "cc_register"):
+    if body.type not in ("signin", "signin_poem", "scheduled_register", "grabcodes", "redpacket", "custom", "keepalive", "link_register", "button_register", "code_register", "cc_register"):
         raise HTTPException(400, "未知任务类型")
     if not body.name.strip():
         raise HTTPException(400, "请填写任务名称")
@@ -11949,7 +11964,7 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "图标地址无效") from None
         if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.fragment or port == 0 or any(c.isspace() for c in body.icon_url):
             raise HTTPException(400, "图标仅支持不含凭据的 HTTP(S) 图片地址")
-    if body.type == "signin":
+    if body.type in ("signin", "signin_poem"):
         if not body.target.strip() or not body.command.strip():
             raise HTTPException(400, "签到需要填写目标(@机器人)和命令")
         if body.signin_poem_mode not in (0, 1):
@@ -11958,9 +11973,14 @@ def _valid_auto(body: AutoIn):
             raise HTTPException(400, "签到成功后删除诗词开关只能为 0 或 1")
         if body.poem_box_wait < 0 or body.poem_box_wait > 120:
             raise HTTPException(400, "盲盒额外等待需在 0-120 秒之间")
-        if body.signin_poem_mode:
+        if body.type == "signin_poem":
+            body.signin_poem_mode = 1
+            body.is_chat = 1
+        elif body.signin_poem_mode:
+            raise HTTPException(400, "诗词群签到请使用独立任务类型 signin_poem")
+        if body.type == "signin_poem":
             if not body.reply_text.strip() or not body.keywords.strip():
-                raise HTTPException(400, "诗词群签到需要填写第二句诗词和触发词（如：就位）")
+                raise HTTPException(400, "诗词群签到需要填写第一句、第二句诗词和触发词（如：就位）")
             if body.signin_recognition_mode.strip() not in ("", "none"):
                 raise HTTPException(400, "诗词群签到不能同时启用图片处理")
         if _win_minutes(body.win_start) is None or _win_minutes(body.win_end) is None:
@@ -12108,7 +12128,7 @@ _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn
 
 
 def _auto_vals(body: AutoIn, extra=None):
-    poem = body.type == "signin" and bool(body.signin_poem_mode)
+    poem = body.type == "signin_poem"
     success_kw = body.success_kw.strip() or ("签到成功" if poem else "")
     points_pat = body.points_pat.strip() or (r"获得积分\s*(\d+)" if poem else "")
     btn_text = body.btn_text.strip() or ("盲盒" if poem and body.click_btn else "")
@@ -12162,14 +12182,14 @@ async def list_autos():
     output = []
     for row in rows:
         start, end = _effective_signin_window(row)
-        mask = _signin_mask(row, today) if row["type"] == "signin" else 0
-        required = _signin_required_mask(row) if row["type"] == "signin" else 0
-        output.append(dict(row, signed_today=bool(row["type"] == "signin" and required and mask == required),
-            signin_done_slots=bin(mask).count("1"), signin_total_slots=len(_signin_window_spans(row)) if row["type"] == "signin" else 0,
-            effective_windows=_signin_windows(row) if row["type"] == "signin" else [(start, end)],
+        mask = _signin_mask(row, today) if _is_signin_type(row["type"]) else 0
+        required = _signin_required_mask(row) if _is_signin_type(row["type"]) else 0
+        output.append(dict(row, signed_today=bool(_is_signin_type(row["type"]) and required and mask == required),
+            signin_done_slots=bin(mask).count("1"), signin_total_slots=len(_signin_window_spans(row)) if _is_signin_type(row["type"]) else 0,
+            effective_windows=_signin_windows(row) if _is_signin_type(row["type"]) else [(start, end)],
             running=(row["id"] in _auto_runtime_state().auto_workers),
             queued=(row["id"] in _auto_runtime_state().auto_queued), last_result=results.get(row["id"]),
-            uses_global_window=(row["type"] == "signin" and window["enabled"] and not row["signin_independent"]),
+            uses_global_window=(_is_signin_type(row["type"]) and window["enabled"] and not row["signin_independent"]),
             effective_win_start=start, effective_win_end=end,
             link_credential_set=bool(get_link_credential(row["id"]).get("u"))))
     return {"autos": output}
@@ -12218,7 +12238,7 @@ async def update_auto(aid: int, body: AutoIn):
         ("signin_poem_mode", body.signin_poem_mode),
         ("poem_delete_on_success", body.poem_delete_on_success),
         ("history_first", body.history_first)))
-    schedule_changed = body.type == "signin" and any(previous[key] != value for key, value in (
+    schedule_changed = _is_signin_type(body.type) and any(previous[key] != value for key, value in (
         ("win_start", body.win_start.strip()), ("win_end", body.win_end.strip()),
         ("signin_independent", body.signin_independent),
         ("signin_second_enabled", body.signin_second_enabled),
@@ -12314,7 +12334,7 @@ async def save_link_credential(aid: int, body: dict):
 @app.post("/api/autos/{aid}/run")
 async def run_auto_now(aid: int):
     """手动立即执行:signin/custom"""
-    a = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('signin','custom','keepalive')", (aid,)).fetchone()
+    a = get_account_db().execute("SELECT * FROM automations WHERE id=? AND type IN ('signin','signin_poem','custom','keepalive')", (aid,)).fetchone()
     if not a:
         raise HTTPException(404, "该类型任务不可手动执行或不存在")
     if get_runtime().client is None or get_runtime().tg_state["phase"] != "ready":
@@ -12363,7 +12383,7 @@ async def test_scheduled_auto(aid: int):
 
 
 def _replay_targets(a):
-    if a["type"] in ("signin", "scheduled_register", "custom", "keepalive") and str(a["target"] or "").strip():
+    if a["type"] in ("signin", "signin_poem", "scheduled_register", "custom", "keepalive") and str(a["target"] or "").strip():
         return [str(a["target"]).strip()]
     groups = _csv(a["groups"])
     if not groups:
@@ -12373,7 +12393,9 @@ def _replay_targets(a):
 
 def _replay_plan(a):
     kind = a["type"]
-    if kind == "signin":
+    if kind == "signin_poem":
+        return ["发送第一句诗词", "发送第二句诗词", "发送触发词", "读取回复本任务消息的机器人结果", "只领取本任务回复上的盲盒"]
+    if _is_signin_type(kind):
         return ["发送签到指令", "按%s模式选择按钮" % a["button_mode"], "等待结果或识别图片"]
     if kind == "scheduled_register":
         return ["发送指令或检查历史卡片", "按%s模式选择注册按钮" % a["button_mode"], "回复配置内容", "确认成功关键词"]
@@ -12448,7 +12470,7 @@ async def replay_auto(aid: int):
             if entity is None:
                 sources.append({"target": target, "error": "目标无法解析", "messages": []})
                 continue
-            messages = await get_runtime().client.get_messages(entity, limit=12 if a["type"] in ("signin", "scheduled_register") else 3)
+            messages = await get_runtime().client.get_messages(entity, limit=12 if a["type"] in ("signin", "signin_poem", "scheduled_register") else 3)
             replays = [await _replay_message(message, a) for message in messages or []]
             # 只读试运行只需要"当前那条"：往前 12 条多是上几天的签到回显，没有诊断价值。
             useful = [item for item in replays if item["buttons"] or item["trigger_match"]]
@@ -12992,10 +13014,10 @@ async def resolve_anomaly(aid: int, body: dict):
         return {"ok": True, "action": action}
     today = now_local().strftime("%Y-%m-%d")
     if action == "confirm_success":
-        if row["type"] not in ("signin", "keepalive"):
+        if row["type"] not in ("signin", "signin_poem", "keepalive"):
             raise HTTPException(400, "仅签到或保号任务可人工确认成功")
-        stamp = today if row["type"] == "signin" else str(int(time.time()))
-        if row["type"] == "signin":
+        stamp = today if _is_signin_type(row["type"]) else str(int(time.time()))
+        if _is_signin_type(row["type"]):
             slot = _signin_slot(row, now_local(), allow_outside=True) or 0
             mask = _signin_mask(row, today) | (1 << slot)
             db.execute("UPDATE automations SET last_at=?,signin_success_mask=?,signin_attempt_slot=?,"
@@ -14312,7 +14334,7 @@ def _provider_references(provider_id, include_disabled=False):
                 if include_disabled or active:
                     references.append(f"{label} / 注册任务 {row['name']}")
         signins = db.execute("SELECT name,enabled,signin_captcha,signin_recognition_mode,ai_provider_ids "
-                             "FROM automations WHERE type='signin'").fetchall()
+                             "FROM automations WHERE type IN ('signin','signin_poem')").fetchall()
         for row in signins:
             ids = _csv(row["ai_provider_ids"])
             active = bool(row["enabled"] and _signin_recognition_mode(row) != "none")
@@ -14388,7 +14410,7 @@ def _reconcile_provider_ids(valid_ids=None):
                 db.execute("UPDATE automations SET ai_flock_enabled=0 WHERE rowid=?", (row["_rid"],))
                 runtime_changed += 1
         for row in db.execute("SELECT rowid AS _rid,ai_provider_ids,signin_recognition_mode,signin_captcha "
-                              "FROM automations WHERE type='signin'").fetchall():
+                              "FROM automations WHERE type IN ('signin','signin_poem')").fetchall():
             original = _csv(row["ai_provider_ids"])
             filtered = [item for item in original if item in valid_ids]
             if original and not filtered:

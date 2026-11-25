@@ -34,7 +34,7 @@ class PoemSigninTests(unittest.IsolatedAsyncioTestCase):
         self.b['conn'].close()
 
     async def create(self, **changes):
-        values = dict(name='诗词签到', type='signin', target='-1001234567890',
+        values = dict(name='诗词签到', type='signin_poem', target='-1001234567890',
                       command='夕阳无限好，', reply_text='只是近黄昏。', keywords='就位',
                       signin_poem_mode=1, click_btn=1, btn_text='盲盒', btn_emoji='🎁',
                       command_delay=1.5, result_timeout=6, poem_box_wait=0,
@@ -121,7 +121,7 @@ class PoemSigninTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('no permission', detail)
 
     async def test_standard_signin_path_is_unchanged(self):
-        aid = await self.create(signin_poem_mode=0, reply_text='', keywords='', click_btn=0,
+        aid = await self.create(type='signin', signin_poem_mode=0, reply_text='', keywords='', click_btn=0,
                                 command='/checkin', success_kw='签到成功')
         self.sent.clear()
         self.b['client'].get_messages = AsyncMock(return_value=[message(203, '签到成功')])

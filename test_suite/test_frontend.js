@@ -161,22 +161,36 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('签到表单包含两段中文秒数标签、默认值及范围步进',async()=>{
     const form=formOf('signin');
     for(const [id,label,value] of [['sCommandDelay','发送命令后延迟（秒）','1.6'],['sButtonDelay','点击按钮后延迟（秒）','2']]){
-      const labelHtml=id==='sCommandDelay'?'<label for="sCommandDelay" id="sCommandDelayLabel">'+label+'</label>':'<label for="'+id+'">'+label+'</label>';
-      assert(form.includes(labelHtml));
+      assert(form.includes('<label for="'+id+'">'+label+'</label>'));
+      assert(!form.includes('sPoemMode'));
       const input=form.match(new RegExp('<input\\b[^>]*id="'+id+'"[^>]*>'))[0];
       for(const attr of ['type="number"','value="'+value+'"','min="0"','max="120"','step="0.1"','required'])assert(input.includes(attr));
     }
     assert(form.includes('发送命令 → 等待命令后延迟 → 点击按钮 → 等待按钮后延迟 → 后续图片处理'));
     assert(form.includes('0 秒表示立即进行'));
   });
-  await test('BOT签到提供诗词签到快捷入口并自动勾选诗词模式',async()=>{
-    assert(html.includes('＋ 添加诗词签到'));
-    assert(html.includes('onclick="openPoemSigninForm()"'));
-    run("openPoemSigninForm()");
-    assert.strictEqual(element('#sPoemMode').checked,true);
-    assert.strictEqual(element('#sIsChat').checked,true);
-    assert.strictEqual(element('#sName').value,'群诗词签到');
-    assert.strictEqual(element('#sPoemFinal').value,'就位');
+  await test('诗词签到是独立分组和独立表单，BOT表单不再含诗词字段',async()=>{
+    assert(html.includes('id="aCntPoem"')&&html.includes('id="aListPoem"')&&html.includes('id="af-poem"'));
+    assert(html.includes('onclick="openPoemForm()"'));
+    assert(!formOf('signin').includes('sPoemMode'));
+    run("openPoemForm()");
+    assert.strictEqual(element('#pName').value,'群诗词签到');
+    assert.strictEqual(element('#pFinal').value,'就位');
+    assert.strictEqual(element('#pDelete').checked,false);
+  });
+  await test('诗词签到保存为独立 signin_poem 类型并带删除开关',async()=>{
+    run("openPoemForm()");
+    const values={'#pName':'诗词独立','#pTarget':'-1001234567890','#pFirst':'夕阳无限好，','#pSecond':'只是近黄昏。','#pFinal':'就位','#pBoxText':'盲盒','#pBoxEmoji':'🎁','#pBoxWait':'8','#pCommandDelay':'2','#pResultTimeout':'40','#pKw':'签到成功','#pFw':'失败','#pPts':'获得积分\\s*(\\d+)','#pRetries':'1'};
+    for(const [id,value] of Object.entries(values))element(id).value=value;
+    element('#pDelete').checked=true;
+    let request;context.api=async(p,o)=>{request=[p,o];return {}};
+    await run("saveAuto('poem')");
+    assert.strictEqual(request[0],'/api/autos');assert.strictEqual(request[1].method,'POST');
+    const body=JSON.parse(request[1].body);
+    assert.strictEqual(body.type,'signin_poem');assert.strictEqual(body.signin_poem_mode,1);
+    assert.strictEqual(body.command,'夕阳无限好，');assert.strictEqual(body.reply_text,'只是近黄昏。');
+    assert.strictEqual(body.keywords,'就位');assert.strictEqual(body.poem_delete_on_success,1);
+    assert.strictEqual(body.poem_box_wait,8);assert.strictEqual(body.is_chat,1);
   });
   await test('新增及取消编辑恢复 1.6 秒和 2 秒默认值',async()=>{
     editSignin({command_delay:0,button_delay:0});run("closeAutoForm('signin');openAutoForm('signin')");
@@ -265,8 +279,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('结果等待表单包含默认值范围步进及持续轮询语义',async()=>{
     const form=formOf('signin');
     for(const [id,label,value,min,max,step] of [['sResultDelay','结果判断前延迟（秒）','0','0','120','0.1'],['sResultTimeout','等待最终回复上限（秒）','30','1','300','1']]){
-      const labelHtml=id==='sCommandDelay'?'<label for="sCommandDelay" id="sCommandDelayLabel">'+label+'</label>':'<label for="'+id+'">'+label+'</label>';
-      assert(form.includes(labelHtml));
+      assert(form.includes('<label for="'+id+'">'+label+'</label>'));
+      assert(!form.includes('sPoemMode'));
       const input=form.match(new RegExp('<input\\b[^>]*id="'+id+'"[^>]*>'))[0];
       for(const attr of ['type="number"','value="'+value+'"','min="'+min+'"','max="'+max+'"','step="'+step+'"','required'])assert(input.includes(attr));
     }
@@ -303,7 +317,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
       for(const id of ['#sIsChat','#sClickBtn'])element(id).checked=true;element('#sRecognitionMode').value='captcha';
       let request;context.api=async(p,o)=>{request=[p,o];return {}};await run("saveAuto('signin')");
       assert.strictEqual(request[0],editing?'/api/autos/42':'/api/autos');assert.strictEqual(request[1].method,editing?'PUT':'POST');
-      const expected={type:'signin',name:'完整任务',target:'@dummy_bot',command:'/checkin',icon_url:'https://dummy.invalid/icon.png',is_chat:1,reply_text:'',keywords:'',signin_poem_mode:0,poem_box_wait:12,poem_delete_on_success:0,win_start:'09:00',win_end:'10:00',signin_independent:0,signin_second_enabled:0,signin_second_start:'12:00',signin_second_end:'12:30',click_btn:1,btn_text:'签到',btn_emoji:'✅',click_times:3,click_interval:500,refresh_buttons:0,button_mode:'script',popup_success_kw:'',popup_fail_kw:'',command_delay:0,button_delay:2.7,result_delay:delay,result_timeout:timeout,success_kw:'成功',fail_kw:'明确失败',points_pat:'积分:(\\d+)',retries:0,signin_recognition_mode:'captcha',signin_image_prompt:run('DEFAULT_SIGNIN_IMAGE_PROMPT'),signin_image_action:'reply',signin_captcha:1};
+      const expected={type:'signin',name:'完整任务',target:'@dummy_bot',command:'/checkin',icon_url:'https://dummy.invalid/icon.png',is_chat:1,win_start:'09:00',win_end:'10:00',signin_independent:0,signin_second_enabled:0,signin_second_start:'12:00',signin_second_end:'12:30',click_btn:1,btn_text:'签到',btn_emoji:'✅',click_times:3,click_interval:500,refresh_buttons:0,button_mode:'script',popup_success_kw:'',popup_fail_kw:'',command_delay:0,button_delay:2.7,result_delay:delay,result_timeout:timeout,success_kw:'成功',fail_kw:'明确失败',points_pat:'积分:(\\d+)',retries:0,signin_recognition_mode:'captcha',signin_image_prompt:run('DEFAULT_SIGNIN_IMAGE_PROMPT'),signin_image_action:'reply',signin_captcha:1};
       if(editing)expected.enabled=0;assert.deepStrictEqual(JSON.parse(request[1].body),expected);
     }
   });
