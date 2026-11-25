@@ -562,7 +562,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             self.b['_safe_skill_markdown']('- api_key = abcdef', label='群知识')
 
-    async def test_learning_samples_keep_at_least_a_thousand(self):
+    async def test_learning_samples_keep_role_cap(self):
         self.b['_schedule_ai_learning'] = Mock()
         db = self.b['conn']
         db.executemany('INSERT INTO ai_learning_samples(ts,chat_id,text,role) VALUES(0,?,?,?)',
@@ -570,7 +570,7 @@ class AIFlockTests(unittest.IsolatedAsyncioTestCase):
         db.commit()
         self.b['_store_learning_samples']([(0, '-1', '新样本', 'group')])
         count = db.execute('SELECT COUNT(*) FROM ai_learning_samples').fetchone()[0]
-        self.assertGreaterEqual(count, 1000)
+        self.assertEqual(count, 200)
         self.assertIn('新样本', db.execute('SELECT text FROM ai_learning_samples ORDER BY id DESC').fetchone()[0])
 
     async def test_study_over_group_limit_is_distilled_before_write(self):

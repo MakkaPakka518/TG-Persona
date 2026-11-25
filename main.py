@@ -415,6 +415,9 @@ def db_init(database=None):
         ("cc_username", "TEXT DEFAULT ''"),
         ("cc_email", "TEXT DEFAULT ''"),
         ("cc_last_code", "TEXT DEFAULT ''"),
+        ("signin_poem_mode", "INTEGER DEFAULT 0"),
+        ("poem_box_wait", "INTEGER DEFAULT 12"),
+        ("poem_delete_on_success", "INTEGER DEFAULT 0"),
     ):
         try:
             conn.execute(f"ALTER TABLE automations ADD COLUMN {col} {ddl}")
@@ -7430,6 +7433,214 @@ async def _await_task_button(ent, min_id, keyword, timeout=30, mode="script", hi
     return None, None
 
 
+def _signin_poem_mode(a):
+    try:
+        return bool(int(a["signin_poem_mode"] or 0))
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
+
+
+def _blindbox_result(text):
+    """盲盒回调/消息状态：success=领到，already=已领/失效，failed=明确失败。"""
+    body = str(text or "")
+    if any(word in body for word in ("已被领取", "已经领取", "已领取", "失效", "来晚了", "领过了")):
+        return "already"
+    if any(word in body for word in ("失败", "错误", "无效", "过期", "稍后再试")):
+        return "failed"
+    if any(word in body for word in ("恭喜", "领取成功", "领取到", "获得", "随机奖励", "奖励已")):
+        return "success"
+    return "unknown"
+
+
+def _poem_box_button(buttons, keyword="盲盒", emoji="🎁"):
+    """只选回调按钮。不碰 URL/网页按钮，避免把群消息里的外链当成盲盒。"""
+    keywords = [x.strip() for x in re.split(r"[,，\s]", str(keyword or "盲盒")) if x.strip()]
+    emojis = [_norm_emoji(x) for x in re.split(r"[,，\s]", str(emoji or "")) if _norm_emoji(x)]
+    for row in (buttons or []):
+        for button in row or []:
+            if getattr(button, "data", None) is None:
+                continue
+            text = str(getattr(button, "text", "") or "")
+            if any(word in text for word in ("已被领取", "已经领取", "已领取", "失效")):
+                continue
+            normalized = _norm_emoji(text)
+            if emojis and any(icon in normalized for icon in emojis):
+                return button
+            if any(word in text for word in keywords):
+                return button
+    return None
+
+
+async def _message_buttons(message):
+    try:
+        return await message.get_buttons() or []
+    except Exception:
+        return getattr(message, "buttons", None) or []
+
+
+async def _run_poem_group_signin(a):
+    """群诗词签到：第一句、第二句、触发词分三条发送；只认回复我们这三条的消息。"""
+    target = str(a["target"] or "").strip()
+    first = str(a["command"] or "").strip()
+    second = str(a["reply_text"] or "").strip()
+    final = str(a["keywords"] or "").strip()
+    if not all((target, first, second, final)):
+        return _task_failure(a, "诗词群签到缺少目标、第一句、第二句或触发词")
+    ent = await resolve_entity(target)
+    if ent is None:
+        return _task_failure(a, "诗词群签到目标解析失败", first)
+    sent_ids = []
+    sent_messages = []
+    try:
+        for index, text in enumerate((first, second, final)):
+            message = await _send_generated_message(ent, text)
+            sent_ids.append(int(message.id))
+            sent_messages.append(message)
+            if index < 2:
+                await asyncio.sleep(max(0.0, float(a["command_delay"] or 0)))
+    except errors.FloodWaitError as error:
+        raise _RetryLater(error.seconds) from error
+    except Exception as error:
+        return _task_failure(a, "诗词群签到发送失败: %s" % error, first)
+
+    success_kw = str(a["success_kw"] or "").strip()
+    fail_kw = str(a["fail_kw"] or "").strip()
+    points_pat = str(a["points_pat"] or "").strip()
+    need_box = bool(a["click_btn"])
+    box_kw = str(a["btn_text"] or "盲盒").strip() or "盲盒"
+    box_emoji = str(a["btn_emoji"] or "🎁").strip()
+    box_wait = max(0, min(120, int(a["poem_box_wait"] if "poem_box_wait" in a.keys() else 12)))
+    timeout = max(1, min(300, int(a["result_timeout"] or 30)))
+    deadline = time.monotonic() + timeout
+    success_text, fail_text, last_text = "", "", ""
+    box_message, box_button = None, None
+
+    def own_reply(message):
+        return (not getattr(message, "out", False)
+                and getattr(message, "reply_to_msg_id", None) is not None
+                and int(getattr(message, "reply_to_msg_id")) in sent_ids)
+
+    async def scan_messages(need_success):
+        nonlocal success_text, fail_text, last_text, box_message, box_button
+        try:
+            messages = await get_runtime().client.get_messages(ent, limit=24)
+        except errors.FloodWaitError:
+            raise
+        except Exception:
+            return False
+        for message in sorted(messages, key=lambda item: getattr(item, "id", 0)):
+            if not own_reply(message):
+                continue
+            text = str(getattr(message, "raw_text", "") or "").strip()
+            if text:
+                last_text = text
+            if need_success and text:
+                if _signin_succeeded(text, success_kw):
+                    success_text = text
+                    return True
+                if _signin_failed(text, fail_kw):
+                    fail_text = text
+                    return True
+            if need_box and box_message is None:
+                button = _poem_box_button(await _message_buttons(message), box_kw, box_emoji)
+                if button is not None:
+                    box_message, box_button = message, button
+        return False
+
+    while time.monotonic() < deadline:
+        if await scan_messages(True):
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(0.8, remaining))
+
+    # 签到成功后盲盒可能晚几秒才由另一个 bot 回复我们的诗句；只在额外窗口里继续找。
+    if need_box and box_button is None and not fail_text:
+        box_deadline = time.monotonic() + box_wait
+        while True:
+            await scan_messages(False)
+            if box_button is not None or time.monotonic() >= box_deadline:
+                break
+            await asyncio.sleep(min(0.5, max(0.0, box_deadline - time.monotonic())))
+
+    box_state, box_popup, box_button_text = "", "", ""
+    if need_box and box_button is not None:
+        box_button_text = str(getattr(box_button, "text", "") or "")
+        try:
+            answer = await box_button.click()
+            box_popup = str(getattr(answer, "message", answer if isinstance(answer, str) else "") or "").strip()
+            box_state = _blindbox_result(box_popup) if box_popup else "clicked"
+        except errors.FloodWaitError as error:
+            raise _RetryLater(error.seconds) from error
+        except Exception as error:
+            box_state = "click_failed"
+            box_popup = str(error)[:120]
+    elif need_box:
+        box_state = "not_found"
+
+    deleted, delete_errors = [], []
+    if success_text:
+        try:
+            delete_on_success = bool(int(a["poem_delete_on_success"] if "poem_delete_on_success" in a.keys() else 0))
+        except (TypeError, ValueError):
+            delete_on_success = False
+        if delete_on_success:
+            for message in sent_messages[:2]:
+                try:
+                    if hasattr(message, "delete"):
+                        await message.delete()
+                    else:
+                        await get_runtime().client.delete_messages(ent, [message.id])
+                    deleted.append(int(message.id))
+                except Exception as error:
+                    delete_errors.append("%s: %s" % (getattr(message, "id", "?"), error))
+            log.info("诗词群签到成功后删除两句诗词 任务=%s 已删=%s 失败=%s",
+                     a["name"], deleted, delete_errors[:2])
+
+    points = ""
+    if points_pat and success_text:
+        try:
+            match = re.search(points_pat, success_text)
+            if match:
+                points = match.group(1) if match.groups() else match.group(0)
+        except re.error:
+            pass
+
+    detail = {"kind": "signin", "task": a["name"], "bot": target, "mode": "poem_group",
+              "sent_messages": sent_ids, "first": first, "second": second, "final": final,
+              "reply": success_text or fail_text or last_text, "points": points,
+              "box": box_state, "box_button": box_button_text, "box_reply": box_popup,
+              "deleted_messages": deleted, "delete_errors": delete_errors,
+              "command_delay": a["command_delay"], "result_timeout": timeout,
+              "poem_box_wait": box_wait}
+    if fail_text and not success_text:
+        detail["error"] = "机器人回复失败：" + fail_text[:120]
+        add_hit("signin", False, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
+                content=final, reply=fail_text, detail=detail)
+        _notify_task_failure(a, "诗词签到失败：" + fail_text[:120])
+        return False
+    if not success_text:
+        detail["error"] = "等待机器人回复超时，未确认签到结果"
+        return _task_unconfirmed(a, "诗词签到等待回复超时，结果未知；请检查群内实际结果", final, last_text, detail)
+
+    desc = "诗词签到成功"
+    if points:
+        desc += " · 积分 " + str(points)
+    if box_state == "success":
+        desc += " · 盲盒已领取"
+    elif box_state == "already":
+        desc += " · 盲盒已被领取/失效"
+    elif box_state == "click_failed":
+        desc += " · 盲盒点击失败"
+    detail["note"] = desc
+    add_hit("signin", True, chat_id=target, rule_id=-a["id"], grp_name=a["name"],
+            content=final, reply=success_text, detail=detail)
+    _notify_signin_success(a, desc + " · " + target)
+    log.info("诗词群签到成功 任务=%s 群=%s 积分=%s 盲盒=%s", a["name"], target, points, box_state or "未触发")
+    return True
+
+
 def _signin_recognition_mode(task):
     try:
         mode = str(task["signin_recognition_mode"] or "").strip()
@@ -7445,6 +7656,8 @@ def _signin_recognition_mode(task):
 
 async def run_signin(a):
     """单次签到尝试;重试/成功时间由统一执行器管理,不在协程内无限重发。"""
+    if _signin_poem_mode(a):
+        return await _run_poem_group_signin(a)
     target = str(a["target"] or "").strip()
     cmd = _pick_cmd(a["command"])
     if not target or not cmd:
@@ -11703,6 +11916,9 @@ class AutoIn(BaseModel):
     cc_username: str = Field("", max_length=64)
     cc_email: str = Field("", max_length=254)
     cc_last_code: str = Field("", max_length=128)
+    signin_poem_mode: int = Field(0, ge=0, le=1)  # 诗词群签到：第一句 command、第二句 reply_text、触发词 keywords
+    poem_box_wait: int = Field(12, ge=0, le=120)  # 签到成功后额外等待盲盒消息的秒数
+    poem_delete_on_success: int = Field(0, ge=0, le=1)  # 成功签到后删除任务发出的前两句诗词
     announcement_kw: str = "定时注册"
     announcement_button: str = "点击注册"
     ai_provider_ids: str = ""        # signin: 逗号分隔 provider id；空=全部启用
@@ -11736,6 +11952,17 @@ def _valid_auto(body: AutoIn):
     if body.type == "signin":
         if not body.target.strip() or not body.command.strip():
             raise HTTPException(400, "签到需要填写目标(@机器人)和命令")
+        if body.signin_poem_mode not in (0, 1):
+            raise HTTPException(400, "诗词群签到开关只能为 0 或 1")
+        if body.poem_delete_on_success not in (0, 1):
+            raise HTTPException(400, "签到成功后删除诗词开关只能为 0 或 1")
+        if body.poem_box_wait < 0 or body.poem_box_wait > 120:
+            raise HTTPException(400, "盲盒额外等待需在 0-120 秒之间")
+        if body.signin_poem_mode:
+            if not body.reply_text.strip() or not body.keywords.strip():
+                raise HTTPException(400, "诗词群签到需要填写第二句诗词和触发词（如：就位）")
+            if body.signin_recognition_mode.strip() not in ("", "none"):
+                raise HTTPException(400, "诗词群签到不能同时启用图片处理")
         if _win_minutes(body.win_start) is None or _win_minutes(body.win_end) is None:
             raise HTTPException(400, "时间窗口格式需为 hh:mm")
         if _win_minutes(body.win_start) >= _win_minutes(body.win_end):
@@ -11877,17 +12104,21 @@ def _valid_auto(body: AutoIn):
 _AUTO_COLS = ("type,name,target,command,win_start,win_end,click_btn,btn_text,btn_emoji,click_times,click_interval,"
               "success_kw,fail_kw,points_pat,is_chat,retries,signin_captcha,"
               "groups,keywords,action,reply_text,poll_interval,custom_steps,custom_trigger,chain_retry,cooldown,cooldown_unlimited,success_window_seconds,enabled,command_delay,button_delay,refresh_buttons,button_mode,popup_success_kw,popup_fail_kw,signin_independent,signin_second_enabled,signin_second_start,signin_second_end,icon_url,result_delay,result_timeout,scheduled_at,history_first,"
-              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars,ai_flock_knowledge_on_demand,cc_username,cc_email,cc_last_code")
+              "link_mode,link_limit,link_wait,existing_kw,success_reply_enabled,success_reply_text,success_reply_delay,announcement_kw,announcement_button,ai_provider_ids,signin_recognition_mode,signin_image_prompt,signin_image_action,ai_flock_enabled,ai_flock_minutes,ai_flock_prompt,ai_flock_provider_ids,ai_flock_reaction,ai_flock_context_messages,ai_flock_message_chars,ai_flock_skill_chars,ai_flock_max_tokens,ai_flock_knowledge_chars,ai_flock_knowledge_on_demand,cc_username,cc_email,cc_last_code,signin_poem_mode,poem_box_wait,poem_delete_on_success")
 
 
 def _auto_vals(body: AutoIn, extra=None):
+    poem = body.type == "signin" and bool(body.signin_poem_mode)
+    success_kw = body.success_kw.strip() or ("签到成功" if poem else "")
+    points_pat = body.points_pat.strip() or (r"获得积分\s*(\d+)" if poem else "")
+    btn_text = body.btn_text.strip() or ("盲盒" if poem and body.click_btn else "")
     return [
         body.type, body.name.strip(), body.target.strip(),
         (body.command.strip() or "/start") if body.type == "button_register" else body.command.strip(),
         body.win_start.strip(), body.win_end.strip(), body.click_btn,
-        body.btn_text.strip(), body.btn_emoji.strip(), body.click_times, body.click_interval,
-        body.success_kw.strip(), body.fail_kw.strip(),
-        body.points_pat.strip(), body.is_chat, body.retries, body.signin_captcha,
+        btn_text, body.btn_emoji.strip(), body.click_times, body.click_interval,
+        success_kw, body.fail_kw.strip(),
+        points_pat, body.is_chat, body.retries, body.signin_captcha,
         body.groups.strip(), body.keywords.strip(), body.action, body.reply_text.strip(),
         body.poll_interval, canonical_steps(body.custom_steps) if body.type == "custom" else body.custom_steps.strip(),
         canonical_trigger(body.custom_trigger) if body.type == "custom" else body.custom_trigger.strip(), body.chain_retry,
@@ -11906,6 +12137,7 @@ def _auto_vals(body: AutoIn, extra=None):
         body.ai_flock_skill_chars, body.ai_flock_max_tokens, body.ai_flock_knowledge_chars,
         body.ai_flock_knowledge_on_demand,
         body.cc_username.strip(), body.cc_email.strip(), body.cc_last_code.strip(),
+        body.signin_poem_mode, body.poem_box_wait, body.poem_delete_on_success,
     ] + (extra or [])
 
 
@@ -11983,6 +12215,8 @@ async def update_auto(aid: int, body: AutoIn):
         ("custom_trigger", canonical_trigger(body.custom_trigger) if body.type == "custom" else body.custom_trigger.strip()),
         ("scheduled_at", body.scheduled_at.strip()), ("btn_text", body.btn_text.strip()),
         ("keywords", body.keywords.strip()), ("success_kw", body.success_kw.strip()),
+        ("signin_poem_mode", body.signin_poem_mode),
+        ("poem_delete_on_success", body.poem_delete_on_success),
         ("history_first", body.history_first)))
     schedule_changed = body.type == "signin" and any(previous[key] != value for key, value in (
         ("win_start", body.win_start.strip()), ("win_end", body.win_end.strip()),

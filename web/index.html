@@ -1184,8 +1184,26 @@ section.act,.fold.open .fold-b{animation:none}
           <label>目标机器人(@username 或群ID)</label>
           <input type="text" id="sTarget" placeholder="如: @checkin_bot">
           <label style="display:flex;align-items:center;gap:8px;margin-top:4px"><input type="checkbox" id="sIsChat" style="width:auto"> 目标是群组(命令发到群里)</label>
-          <label>签到命令(多条用 | 分隔随机选一条;支持 {num:N} {word:N} {alpha:N} {uuid} 随机占位符)</label>
+          <label id="sCmdLabel">签到命令(多条用 | 分隔随机选一条;支持 {num:N} {word:N} {alpha:N} {uuid} 随机占位符)</label>
           <input type="text" id="sCmd" placeholder="如: /checkin {num:4} | /daily">
+          <label class="check"><input type="checkbox" id="sPoemMode" onchange="syncPoemFields()"> 诗词群签到（分三条发送两句诗 + 触发词，如「就位」）</label>
+          <div id="sPoemFields" class="hidden">
+            <div class="hint">开启后，上面的第一句诗词、下面的第二句诗词和触发词会作为三条独立消息发送；只读取回复我们这三条消息的机器人结果，也只领取这些回复上的盲盒按钮。</div>
+            <div class="flex">
+              <div><label for="sPoemLine2">第二句诗词（单独发送）</label><input type="text" id="sPoemLine2" placeholder="如：只是近黄昏。"></div>
+              <div><label for="sPoemFinal">触发词（最后单独发送）</label><input type="text" id="sPoemFinal" value="就位" placeholder="如：就位"></div>
+            </div>
+            <label class="check"><input type="checkbox" id="sPoemBox" checked> 自动领取「回复我们消息」上的幸运盲盒</label>
+            <div class="flex">
+              <div><label for="sPoemBoxText">盲盒按钮关键词（可逗号分隔）</label><input type="text" id="sPoemBoxText" value="盲盒" placeholder="如：盲盒,领取"></div>
+              <div><label for="sPoemBoxEmoji">盲盒按钮表情</label><input type="text" id="sPoemBoxEmoji" value="🎁" placeholder="如：🎁"></div>
+            </div>
+            <label for="sPoemBoxWait">签到成功后继续等盲盒（秒，0=立即检查一次）</label>
+            <input type="number" id="sPoemBoxWait" value="12" min="0" max="120" step="1">
+            <label class="check"><input type="checkbox" id="sPoemDelete" checked> 签到成功后自动删除刚发的两句诗词</label>
+            <div class="hint">只删除本任务发出的前两句，不删「就位」（它通常会被机器人自己删除），也不会碰其他人的消息。删除失败只记录日志，不影响签到成功。</div>
+            <div class="hint">只点回复我们这三条消息的按钮；别人触发的盲盒、群里的「签到日历」或 URL 按钮都不会点。</div>
+          </div>
           <div class="flex">
             <div><label>每天时间窗口(开始)</label><input type="text" id="sWinStart" value="08:00" readonly onclick="openTimePicker('sWinStart')"></div>
             <div><label>窗口(结束)</label><input type="text" id="sWinEnd" value="12:00" readonly onclick="openTimePicker('sWinEnd')"></div>
@@ -1199,11 +1217,12 @@ section.act,.fold.open .fold-b{animation:none}
           </div>
           <div class="hint" id="sWindowHint">单任务窗口：在每天时间段内随机开始。</div>
           <div class="flex">
-            <div><label for="sCommandDelay">发送命令后延迟（秒）</label><input type="number" id="sCommandDelay" value="1.6" min="0" max="120" step="0.1" required></div>
+            <div><label for="sCommandDelay" id="sCommandDelayLabel">发送命令后延迟（秒）</label><input type="number" id="sCommandDelay" value="1.6" min="0" max="120" step="0.1" required></div>
             <div><label for="sButtonDelay">点击按钮后延迟（秒）</label><input type="number" id="sButtonDelay" value="2" min="0" max="120" step="0.1" required></div>
           </div>
-          <div class="hint">发送命令 → 等待命令后延迟 → 点击按钮 → 等待按钮后延迟 → 后续图片处理。两段独立设置，范围 0–120 秒；0 秒表示立即进行。</div>
-          <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="sClickBtn" style="width:auto"> 签到后自动点击回复里的按钮</label>
+          <div class="hint" id="sDelayHint">发送命令 → 等待命令后延迟 → 点击按钮 → 等待按钮后延迟 → 后续图片处理。两段独立设置，范围 0–120 秒；0 秒表示立即进行。</div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:12px" id="sClickBtnLabel"><input type="checkbox" id="sClickBtn" style="width:auto"> 签到后自动点击回复里的按钮</label>
+          <div id="sNormalBtnBlock">
           <div id="sBtnWrap" class="hidden">
             <label>按钮表情(推荐 · 文字会变但图标不变的 bot 用它)</label>
             <input type="text" id="sBtnEmoji" placeholder="如: 🧧 (可逗号分隔多个)">
@@ -1233,6 +1252,8 @@ section.act,.fold.open .fold-b{animation:none}
             </select>
             <div class="hint">刷新模式每次连点重新获取最新按钮；复用模式始终点击同一按钮，不在连点中重新获取消息。</div>
           </div>
+          </div>
+          <div id="sRecognitionBlock">
           <label for="sRecognitionMode">图片处理</label>
           <select id="sRecognitionMode">
             <option value="none" selected>不识别图片</option>
@@ -1255,6 +1276,7 @@ section.act,.fold.open .fold-b{animation:none}
             <label for="sImagePrompt">图片识别提示词</label>
             <textarea id="sImagePrompt" maxlength="2000" rows="5">你是一个高精度的验证码与图像识别助手。请仔细观察图片中的核心事物、场景、服装或物品，并根据机器人题目说明给出最匹配的名称。必须且只能输出答案本身，严禁输出任何多余字符、标点符号、解释、理由或思考过程！</textarea>
             <div class="hint">识别结果会直接发送给机器人。图片识别仅调用所选 AI API，不使用本地 OCR。</div>
+          </div>
           </div>
           <div class="flex">
             <div><label for="sResultDelay">结果判断前延迟（秒）</label><input type="number" id="sResultDelay" value="0" min="0" max="120" step="0.1" required></div>
@@ -1400,7 +1422,7 @@ section.act,.fold.open .fold-b{animation:none}
           </details>
           <label for="stepTemplate">流程模板（可以直接套一个再改）</label>
           <div class="custom-template-row"><select id="stepTemplate"><option value="basic">新手：发 /start → 等 2 秒 → 点签到 → 等结果</option><option value="registration">注册链接：监听群 → 点注册 → 填账号</option><option value="scheduled">定时：到点发 /start → 点签到</option></select><button class="ghost" type="button" onclick="applyStepTemplate()">替换为模板</button></div>
-          <details id="stepAdvanced" style="margin-top:12px"><summary>高级：原始 JSON（一般不用点）</summary>
+          <details id="stepAdvanced" style="margin-top:12px"><summary>高级：严格格式原始 JSON（一般不用点）</summary>
             <textarea id="cSteps" rows="7" oninput="readStepJSON()" placeholder="[]"></textarea>
             <div class="hint">仅接受 send、wait、click、wait_reply、extract、captcha、set、if、repeat、while、ai_generate 格式；字段类型和名称必须完全符合步骤卡片。</div>
           </details>
@@ -3083,6 +3105,10 @@ function autoDesc(a){
   if(a.type==='button_register')return `群：${esc(a.groups||'全部监听群')}；开注：${esc(a.announcement_kw)}；群按钮：${esc(a.announcement_button)}；${buttonModeLabel(a.button_mode)}；指令：${esc(a.command||'/start')}；${a.link_credential_set?'账号信息已保存':'请填写账号信息'}${a.success_reply_enabled?'；成功后 '+esc(String(a.success_reply_delay??5))+' 秒向原群发送 '+esc(a.success_reply_text):''}${a.ai_flock_enabled?'；AI 水群 '+esc(String(a.ai_flock_minutes??5))+' 分钟':''}`;
   if(a.type==='signin'){
     const mode=signinRecognitionMode(a),recognition=mode==='captcha'?' · 验证码识别':mode==='poem'?' · 古诗填空点选':mode==='image'?(a.signin_image_action==='click'?' · 图片识别点选':' · 图片识别回复'):'';
+    if(a.signin_poem_mode){
+      const daily=Number(a.signin_total_slots||1)>1?' · 今日 '+Number(a.signin_done_slots||0)+'/'+Number(a.signin_total_slots)+' 次':a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'');
+      return `诗词群签到 · 群 ${esc(a.target)} · 「${esc(a.command)}」「${esc(a.reply_text)}」「${esc(a.keywords)}」分三条发送${a.click_btn?' · 只领取我们消息的盲盒（'+esc(a.btn_text||'盲盒')+'）':''}${a.poem_delete_on_success?' · 成功后删前两句':''} · 间隔 ${esc(String(a.command_delay??1.6))}秒 · 等回复 ${esc(String(a.result_timeout??30))}秒${a.points_pat?' · 提取积分':''}${daily}`;
+    }
     const daily=Number(a.signin_total_slots||1)>1?' · 今日 '+Number(a.signin_done_slots||0)+'/'+Number(a.signin_total_slots)+' 次':a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'');
     return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+buttonModeLabel(a.button_mode)+' · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${recognition}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${daily}`;
   }
@@ -3117,6 +3143,14 @@ function editAutoItem(id){
     $('#sName').value=a.name;$('#sTarget').value=a.target;$('#sCmd').value=a.command;
     $('#sIconUrl').value=a.icon_url||'';renderSigninIconPreview();syncSigninWindow();
     $('#sIsChat').checked=!!a.is_chat;
+    $('#sPoemMode').checked=!!a.signin_poem_mode;
+    $('#sPoemLine2').value=a.reply_text||'';
+    $('#sPoemFinal').value=a.keywords||'就位';
+    $('#sPoemBox').checked=!!a.click_btn;
+    $('#sPoemBoxText').value=a.btn_text||'盲盒';
+    $('#sPoemBoxEmoji').value=a.btn_emoji||'🎁';
+    $('#sPoemBoxWait').value=a.poem_box_wait??12;
+    $('#sPoemDelete').checked=!!a.poem_delete_on_success;
     $('#sWinStart').value=a.win_start;$('#sWinEnd').value=a.win_end;
     $('#sIndependent').checked=!!a.signin_independent;$('#sSecondEnabled').checked=!!a.signin_second_enabled;
     $('#sSecondStart').value=a.signin_second_start||'12:00';$('#sSecondEnd').value=a.signin_second_end||'12:30';syncSigninTaskWindows();
@@ -3137,6 +3171,7 @@ function editAutoItem(id){
     $('#sFw').value=a.fail_kw||'';
     $('#sPts').value=a.points_pat||'';
     $('#sRetries').value=a.retries!=null?a.retries:2;
+    syncPoemFields();
     $('#sCancel').style.display='inline-block';
   }else if(t==='scheduled_register'){
     const [date='',clock='']=String(a.scheduled_at||'').split('T'),parts=clock.split(':');
@@ -3204,7 +3239,7 @@ function editAutoItem(id){
 }
 function cancelAutoEdit(t){
   editAuto=null;editAutoAccount=null;if(typeof assistantFormDraft!=='undefined')assistantFormDraft=null;
-    ({signin:()=>{$('#sName').value='';clearSigninIcon();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sIndependent').checked=false;$('#sSecondEnabled').checked=false;$('#sSecondStart').value='12:00';$('#sSecondEnd').value='12:30';syncSigninTaskWindows();$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sButtonMode').value='script';$('#sPopupSuccess').value='';$('#sPopupFail').value='';$('#sRecognitionMode').value='none';$('#sImageAction').value='reply';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
+    ({signin:()=>{$('#sName').value='';clearSigninIcon();$('#sTarget').value='';$('#sCmd').value='';$('#sIsChat').checked=false;$('#sPoemMode').checked=false;$('#sPoemLine2').value='';$('#sPoemFinal').value='就位';$('#sPoemBox').checked=true;$('#sPoemBoxText').value='盲盒';$('#sPoemBoxEmoji').value='🎁';$('#sPoemBoxWait').value=12;$('#sPoemDelete').checked=true;$('#sWinStart').value='08:00';$('#sWinEnd').value='12:00';$('#sIndependent').checked=false;$('#sSecondEnabled').checked=false;$('#sSecondStart').value='12:00';$('#sSecondEnd').value='12:30';syncSigninTaskWindows();$('#sCommandDelay').value=1.6;$('#sButtonDelay').value=2;$('#sResultDelay').value=0;$('#sResultTimeout').value=30;$('#sClickBtn').checked=false;$('#sBtnWrap').classList.add('hidden');$('#sBtnText').value='';$('#sBtnEmoji').value='';$('#sClicks').value=1;$('#sClickGap').value=300;$('#sRefreshButtons').value='1';$('#sButtonMode').value='script';$('#sPopupSuccess').value='';$('#sPopupFail').value='';$('#sRecognitionMode').value='none';$('#sImageAction').value='reply';$('#sImagePrompt').value=DEFAULT_SIGNIN_IMAGE_PROMPT;signinAIProviderSel.clear();renderSigninAIProviders();syncSigninRecognitionFields();syncPoemFields();$('#sKw').value='';$('#sFw').value='';$('#sPts').value='';$('#sRetries').value=2;$('#sCancel').style.display='none'},
     scheduled_register:()=>{$('#trName').value='';$('#trDate').value='';$('#trTime').value='00:00';$('#trSecond').value='0';$('#trTarget').value='';$('#trCommand').value='';$('#trButton').value='';$('#trButtonMode').value='script';$('#trHistoryFirst').checked=false;$('#trClosedRetry').checked=false;$('#trClosedKeywords').value='自助注册已关闭,注册已关闭,等待开启';$('#trClosedInterval').value='5';$('#trClosedRetryFields').classList.add('hidden');$('#trTrigger').value='';$('#trReply').value='';$('#trSuccess').value='';$('#trTimeout').value=30;$('#trCancel').style.display='none'},
     grabcodes:()=>{$('#gName').value='';setAutoGroups('grabcodes','');$('#gKeywords').value='邀请码,开注,开放注册,发码';$('#gText').value='';$('#gCd').value='30';$('#gBot').value='';$('#gProbe').value='/start';$('#gPoll').value='0';pickGrabAct('reply');$('#gCancel').style.display='none'},
     link_register:()=>{$('#lkName').value='';setAutoGroups('link_register','');$('#lkButton').value='注册';$('#lkButtonMode').value='script';$('#lkReady').value='已进入注册状态';$('#lkExisting').value='无法启用续期功能';$('#lkUser').value='';$('#lkSecret').value='';$('#lkMode').value='1';$('#lkLimit').value='4';$('#lkWwait').value='3';$('#lkSuccess').value='成功';$('#lkFail').value='';$('#lkGroupReply').checked=false;$('#lkGroupReplyText').value='';$('#lkGroupReplyDelay').value='5';$('#lkGroupReplyFields').classList.add('hidden');$('#lkAiFlock').checked=false;$('#lkAiFlockMinutes').value='5';$('#lkAiFlockPrompt').value=DEFAULT_REGISTRATION_AI_FLOCK_PROMPT;setRegistrationAIFlock('lk','','');setIntegerFields('lkAiFlock',{},AI_FLOCK_LIMIT_SPECS,'ai_flock_');$('#lkAiFlockKnowledgeOnDemand').checked=false;$('#lkAiFlockFields').classList.add('hidden');$('#lkTimeout').value='30';$('#lkCancel').style.display='none'},
@@ -3709,12 +3744,15 @@ async function saveAuto(type){
   let body,url='/api/autos',linkCredential=null;
   const registrationPrefix={button_register:'br',link_register:'lk',code_register:'cr'}[type];if(registrationPrefix&&rejectBrokenProviderSelection(registrationAIProviderExplicit[registrationPrefix],registrationAIProviderSel[registrationPrefix]))return;
   if(type==='signin'){
+    const poem=$('#sPoemMode').checked;
     body={type,name:$('#sName').value.trim(),target:$('#sTarget').value.trim(),command:$('#sCmd').value.trim(),icon_url:$('#sIconUrl').value.trim(),
-      is_chat:$('#sIsChat').checked?1:0,
-      win_start:$('#sWinStart').value.trim(),win_end:$('#sWinEnd').value.trim(),click_btn:$('#sClickBtn').checked?1:0,
+      is_chat:poem?1:($('#sIsChat').checked?1:0),
+      reply_text:poem?$('#sPoemLine2').value.trim():'',keywords:poem?$('#sPoemFinal').value.trim():'',
+      signin_poem_mode:poem?1:0,poem_box_wait:poem?(Number($('#sPoemBoxWait').value)||0):12,poem_delete_on_success:poem?($('#sPoemDelete').checked?1:0):0,
+      win_start:$('#sWinStart').value.trim(),win_end:$('#sWinEnd').value.trim(),click_btn:(poem?$('#sPoemBox').checked:$('#sClickBtn').checked)?1:0,
       signin_independent:$('#sIndependent').checked?1:0,signin_second_enabled:$('#sSecondEnabled').checked?1:0,
       signin_second_start:$('#sSecondStart').value,signin_second_end:$('#sSecondEnd').value,
-      btn_text:$('#sBtnText').value.trim(),btn_emoji:$('#sBtnEmoji').value.trim(),
+      btn_text:(poem?$('#sPoemBoxText').value:$('#sBtnText').value).trim(),btn_emoji:(poem?$('#sPoemBoxEmoji').value:$('#sBtnEmoji').value).trim(),
       click_times:+$('#sClicks').value||1,click_interval:+$('#sClickGap').value||300,
       refresh_buttons:$('#sRefreshButtons').value==='0'?0:1,button_mode:$('#sButtonMode').value,
       popup_success_kw:$('#sPopupSuccess').value.trim(),popup_fail_kw:$('#sPopupFail').value.trim(),
@@ -3724,11 +3762,13 @@ async function saveAuto(type){
       result_timeout:$('#sResultTimeout').value.trim()===''?30:Number($('#sResultTimeout').value),
       success_kw:$('#sKw').value.trim(),fail_kw:$('#sFw').value.trim(),
       points_pat:$('#sPts').value.trim(),retries:$('#sRetries').value.trim()===''?2:Number($('#sRetries').value),
-      signin_recognition_mode:$('#sRecognitionMode').value,signin_image_prompt:$('#sImagePrompt').value.trim(),signin_image_action:$('#sImageAction').value,
-      signin_captcha:$('#sRecognitionMode').value==='captcha'?1:0};
+      signin_recognition_mode:poem?'none':$('#sRecognitionMode').value,signin_image_prompt:$('#sImagePrompt').value.trim(),signin_image_action:$('#sImageAction').value,
+      signin_captcha:poem?0:($('#sRecognitionMode').value==='captcha'?1:0)};
     if(signinAIProviderSel.size)body.ai_provider_ids=[...signinAIProviderSel].join(',');
     if(body.icon_url&&!safeHttpUrl(body.icon_url))return toast('图标仅支持安全的 HTTP / HTTPS URL',1);
     if(!body.name||!body.target||!body.command)return toast('请填写名称/目标/命令',1);
+    if(poem&&(!body.reply_text||!body.keywords))return toast('诗词群签到请填写第二句诗词和触发词',1);
+    if(poem&&(!Number.isInteger(body.poem_box_wait)||body.poem_box_wait<0||body.poem_box_wait>120))return toast('盲盒等待须为 0–120 秒',1);
     if(body.signin_second_enabled&&(!validTime(body.signin_second_start)||!validTime(body.signin_second_end)||body.signin_second_start>=body.signin_second_end))return toast('第二时间段须为同日且开始早于结束',1);
     if(!['none','captcha','image','poem'].includes(body.signin_recognition_mode))return toast('请选择有效的图片处理方式',1);
     if(body.signin_recognition_mode==='image'&&!body.signin_image_prompt)return toast('图片识别需要填写提示词',1);
@@ -4516,6 +4556,25 @@ function renderAITestProviders(){
   const enabled=aiProviders.filter(p=>p.enabled);
   const enabledIds=new Set(enabled.map(p=>p.id));aiTestProviderSel=new Set([...aiTestProviderSel].filter(id=>enabledIds.has(id)));
   box.innerHTML=enabled.length?enabled.map(p=>`<button type="button" class="gp ${aiTestProviderSel.has(p.id)?'on':''}" data-test-ai="${p.id}">${esc(p.note)}</button>`).join(''):'<div class="empty" style="padding:6px">请先到设置启用 AI API</div>';
+}
+function syncPoemFields(){
+  const on=$('#sPoemMode').checked;
+  $('#sPoemFields').classList.toggle('hidden',!on);
+  $('#sNormalBtnBlock').classList.toggle('hidden',on);
+  $('#sRecognitionBlock').classList.toggle('hidden',on);
+  $('#sIsChat').disabled=on;
+  if(on)$('#sIsChat').checked=true;
+  $('#sCmdLabel').textContent=on?'第一句诗词（单独发送）':'签到命令(多条用 | 分隔随机选一条;支持 {num:N} {word:N} {alpha:N} {uuid} 随机占位符)';
+  $('#sCmd').placeholder=on?'如：夕阳无限好，':'如: /checkin {num:4} | /daily';
+  $('#sCommandDelayLabel').textContent=on?'两条消息间隔（秒）':'发送命令后延迟（秒）';
+  $('#sDelayHint').textContent=on?'三条消息按这个间隔逐条发送；「就位」发出后开始等待机器人回复。':'发送命令 → 等待命令后延迟 → 点击按钮 → 等待按钮后延迟 → 后续图片处理。两段独立设置，范围 0–120 秒；0 秒表示立即进行。';
+  if(on){
+    $('#sRecognitionMode').value='none';syncSigninRecognitionFields();
+    if(!$('#sKw').value)$('#sKw').value='签到成功';
+    if(!$('#sPts').value)$('#sPts').value='获得积分\\s*(\\d+)';
+    if(!$('#sPoemFinal').value)$('#sPoemFinal').value='就位';
+    if(!$('#sPoemBoxText').value)$('#sPoemBoxText').value='盲盒';
+  }
 }
 function syncSigninRecognitionFields(){
   const mode=$('#sRecognitionMode').value;

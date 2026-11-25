@@ -161,7 +161,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('签到表单包含两段中文秒数标签、默认值及范围步进',async()=>{
     const form=formOf('signin');
     for(const [id,label,value] of [['sCommandDelay','发送命令后延迟（秒）','1.6'],['sButtonDelay','点击按钮后延迟（秒）','2']]){
-      assert(form.includes('<label for="'+id+'">'+label+'</label>'));
+      const labelHtml=id==='sCommandDelay'?'<label for="sCommandDelay" id="sCommandDelayLabel">'+label+'</label>':'<label for="'+id+'">'+label+'</label>';
+      assert(form.includes(labelHtml));
       const input=form.match(new RegExp('<input\\b[^>]*id="'+id+'"[^>]*>'))[0];
       for(const attr of ['type="number"','value="'+value+'"','min="0"','max="120"','step="0.1"','required'])assert(input.includes(attr));
     }
@@ -255,7 +256,8 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('结果等待表单包含默认值范围步进及持续轮询语义',async()=>{
     const form=formOf('signin');
     for(const [id,label,value,min,max,step] of [['sResultDelay','结果判断前延迟（秒）','0','0','120','0.1'],['sResultTimeout','等待最终回复上限（秒）','30','1','300','1']]){
-      assert(form.includes('<label for="'+id+'">'+label+'</label>'));
+      const labelHtml=id==='sCommandDelay'?'<label for="sCommandDelay" id="sCommandDelayLabel">'+label+'</label>':'<label for="'+id+'">'+label+'</label>';
+      assert(form.includes(labelHtml));
       const input=form.match(new RegExp('<input\\b[^>]*id="'+id+'"[^>]*>'))[0];
       for(const attr of ['type="number"','value="'+value+'"','min="'+min+'"','max="'+max+'"','step="'+step+'"','required'])assert(input.includes(attr));
     }
@@ -292,7 +294,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
       for(const id of ['#sIsChat','#sClickBtn'])element(id).checked=true;element('#sRecognitionMode').value='captcha';
       let request;context.api=async(p,o)=>{request=[p,o];return {}};await run("saveAuto('signin')");
       assert.strictEqual(request[0],editing?'/api/autos/42':'/api/autos');assert.strictEqual(request[1].method,editing?'PUT':'POST');
-      const expected={type:'signin',name:'完整任务',target:'@dummy_bot',command:'/checkin',icon_url:'https://dummy.invalid/icon.png',is_chat:1,win_start:'09:00',win_end:'10:00',signin_independent:0,signin_second_enabled:0,signin_second_start:'12:00',signin_second_end:'12:30',click_btn:1,btn_text:'签到',btn_emoji:'✅',click_times:3,click_interval:500,refresh_buttons:0,button_mode:'script',popup_success_kw:'',popup_fail_kw:'',command_delay:0,button_delay:2.7,result_delay:delay,result_timeout:timeout,success_kw:'成功',fail_kw:'明确失败',points_pat:'积分:(\\d+)',retries:0,signin_recognition_mode:'captcha',signin_image_prompt:run('DEFAULT_SIGNIN_IMAGE_PROMPT'),signin_image_action:'reply',signin_captcha:1};
+      const expected={type:'signin',name:'完整任务',target:'@dummy_bot',command:'/checkin',icon_url:'https://dummy.invalid/icon.png',is_chat:1,reply_text:'',keywords:'',signin_poem_mode:0,poem_box_wait:12,poem_delete_on_success:0,win_start:'09:00',win_end:'10:00',signin_independent:0,signin_second_enabled:0,signin_second_start:'12:00',signin_second_end:'12:30',click_btn:1,btn_text:'签到',btn_emoji:'✅',click_times:3,click_interval:500,refresh_buttons:0,button_mode:'script',popup_success_kw:'',popup_fail_kw:'',command_delay:0,button_delay:2.7,result_delay:delay,result_timeout:timeout,success_kw:'成功',fail_kw:'明确失败',points_pat:'积分:(\\d+)',retries:0,signin_recognition_mode:'captcha',signin_image_prompt:run('DEFAULT_SIGNIN_IMAGE_PROMPT'),signin_image_action:'reply',signin_captcha:1};
       if(editing)expected.enabled=0;assert.deepStrictEqual(JSON.parse(request[1].body),expected);
     }
   });
@@ -806,15 +808,15 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('六类步骤卡展示全部新类型，秒数精确转成毫秒并可排序删除',async()=>{
     ex("setVisualSteps('[]')");for(const type of ['send','wait','click','wait_reply','extract','captcha'])ex("fillStep('"+type+"')");
     let list=JSON.parse(q('#cSteps').value);assert.deepStrictEqual(list.map(step=>step.t),['send','wait','click','wait_reply','extract','captcha']);
-    assert.deepStrictEqual(q('#stepCards').children.map(card=>card.children[0].textContent),['1. 发送消息','2. 等待','3. 点击按钮','4. 等待回复','5. 提取内容','6. 识别验证码']);
-    const waitInput=q('#stepCards').children[1].children[1].children[0];waitInput.value='0.125';waitInput.listeners.input();assert.strictEqual(JSON.parse(q('#cSteps').value)[1].ms,125);
-    ex('moveStep(1,1)');assert.strictEqual(JSON.parse(q('#cSteps').value)[2].ms,125);ex('removeStep(2)');assert.strictEqual(JSON.parse(q('#cSteps').value).length,5);
+    assert.deepStrictEqual(q('#stepCards').children.map(card=>card.children[0].textContent),['第 1 步 · 发一句话','第 2 步 · 等一会儿','第 3 步 · 点一下按钮','第 4 步 · 等对方回复','第 5 步 · 从回复里取内容','第 6 步 · 识别验证码/图片']);
+    const waitInput=q('#stepCards').children[1].children[2].children[0];waitInput.value='0.125';waitInput.listeners.input();assert.strictEqual(JSON.parse(q('#cSteps').value)[1].ms,125);
+    ex('moveStep(visualSteps,1,1)');assert.strictEqual(JSON.parse(q('#cSteps').value)[2].ms,125);ex('removeStep(visualSteps,2)');assert.strictEqual(JSON.parse(q('#cSteps').value).length,5);
   });
   await test('严格步骤校验逐步编号并拒绝旧字段、错误类型和上限',async()=>{
-    assert(ex("stepIssue([{t:'wait',ms:-1}],true)").startsWith('第 1 步：'));
-    assert(ex("stepIssue([{t:'send',to:'',text:'',reply:false}],true)").includes('第 1 步：请填写'));
-    assert(ex("stepIssue([{t:'wait',ms:0,v:0}],true)").includes('第 1 步：包含未知字段 v'));
-    assert(ex("stepIssue([{t:'captcha',from:'last.text',length:'4',send_to:'',template:'{code}'}],true)").includes('第 1 步：数值字段必须是整数'));
+    assert(ex("stepIssue([{t:'wait',ms:-1}],true)").startsWith('1：'));
+    assert(ex("stepIssue([{t:'send',to:'',text:'',reply:false}],true)").includes('1：请填写'));
+    assert(ex("stepIssue([{t:'wait',ms:0,v:0}],true)").includes('1：包含未知字段 v'));
+    assert(ex("stepIssue([{t:'captcha',from:'last.text',length:'4',send_to:'',template:'{code}'}],true)").includes('1：数值字段必须是整数'));
     assert(ex("stepIssue([{...STEP_HINTS.click,timeout_ms:0}],true)").includes('等待上限'));
     assert(ex("stepIssue([{...STEP_HINTS.extract,regex:'(.)',save:'bad name'}],true)").includes('变量名'));
     assert(ex("stepIssue([{...STEP_HINTS.click,ai:true,mode:'ai',text:'{credential.secret}'}],true)").includes('AI 选按钮'));
@@ -836,7 +838,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('自定义任务编辑、空凭证保留、重置及恶意文本均完整安全',async()=>{
     const trigger={mode:'schedule',at:'2026-12-03T09:08:07'},steps=[{t:'send',to:'@dummy',text:'<img src=x onerror=bad()>',reply:true},{t:'wait_reply',from:'@dummy',success:'完成',fail:'失败',regex:false,timeout_ms:1234,save:'reply'}];app.customTask={id:44,type:'custom',name:'编辑任务',target:'@dummy',custom_trigger:JSON.stringify(trigger),custom_steps:JSON.stringify(steps),chain_retry:3,retries:1,enabled:1,link_credential_set:true};
-    ex('autos=[customTask];editAutoItem(44)');assert.deepStrictEqual(copy(ex('buildCustomTrigger()')),trigger);assert.deepStrictEqual(JSON.parse(q('#cSteps').value),steps);assert.strictEqual(q('#cUser').value,'');assert.strictEqual(q('#cSecret').value,'');assert.strictEqual(q('#stepCards').children[0].children[2].children[0].value,steps[0].text);
+    ex('autos=[customTask];editAutoItem(44)');assert.deepStrictEqual(copy(ex('buildCustomTrigger()')),trigger);assert.deepStrictEqual(JSON.parse(q('#cSteps').value),steps);assert.strictEqual(q('#cUser').value,'');assert.strictEqual(q('#cSecret').value,'');assert.strictEqual(q('#stepCards').children[0].children[3].children[0].value,steps[0].text);
     const requests=[];app.api=async(p,o)=>{requests.push([p,JSON.parse(o.body)]);return {ok:true}};app.loadAutos=async()=>{};await ex("saveAuto('custom')");assert.deepStrictEqual(requests,[['/api/autos/44',{type:'custom',name:'编辑任务',target:'@dummy',custom_trigger:JSON.stringify(trigger),custom_steps:JSON.stringify(steps),chain_retry:3,retries:1,enabled:1}]]);
     ex("cancelAutoEdit('custom')");assert.deepStrictEqual(copy(ex('buildCustomTrigger()')),{mode:'manual'});assert.strictEqual(q('#cSteps').value,'[]');assert.strictEqual(q('#cTarget').value,'');assert.strictEqual(ex('autoGroupSel.custom.size'),0);
   });
