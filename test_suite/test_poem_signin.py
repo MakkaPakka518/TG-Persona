@@ -29,13 +29,15 @@ class PoemSigninTests(unittest.IsolatedAsyncioTestCase):
         self.b['client'] = SimpleNamespace(send_message=AsyncMock(side_effect=send),
                                            get_messages=AsyncMock(return_value=[]))
         self.b['resolve_entity'] = AsyncMock(return_value='entity')
+        self.pick_library = self.b['_pick_library_poem_pair']
+        self.b['_pick_library_poem_pair'] = lambda: ('床前明月光', '疑是地上霜')
 
     def tearDown(self):
         self.b['conn'].close()
 
     async def create(self, **changes):
         values = dict(name='诗词签到', type='signin_poem', target='-1001234567890',
-                      command='夕阳无限好，', reply_text='只是近黄昏。', keywords='就位',
+                      command='', reply_text='', keywords='就位',
                       signin_poem_mode=1, click_btn=1, btn_text='盲盒', btn_emoji='🎁',
                       command_delay=1.5, result_timeout=6, poem_box_wait=0,
                       poem_delete_on_success=1)
@@ -58,7 +60,7 @@ class PoemSigninTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(asyncio, 'sleep', new=AsyncMock()):
             await self.b['_execute_auto'](aid, manual=True)
 
-        self.assertEqual([m.raw_text for m in self.sent], ['夕阳无限好，', '只是近黄昏。', '就位'])
+        self.assertEqual([m.raw_text for m in self.sent], ['床前明月光', '疑是地上霜', '就位'])
         own_box.click.assert_awaited_once()
         other_box.click.assert_not_awaited()
         self.sent[0].delete.assert_awaited_once()
@@ -109,9 +111,9 @@ class PoemSigninTests(unittest.IsolatedAsyncioTestCase):
         self.b['client'].get_messages = AsyncMock(return_value=[
             reply_message(403, '签到成功，获得积分 1', 102),
         ])
-        first = message(100, '夕阳无限好，', out=True)
+        first = message(100, '床前明月光', out=True)
         first.delete = AsyncMock(side_effect=RuntimeError('no permission'))
-        second = message(101, '只是近黄昏。', out=True)
+        second = message(101, '疑是地上霜', out=True)
         second.delete = AsyncMock()
         final = message(102, '就位', out=True)
         self.b['client'].send_message = AsyncMock(side_effect=[first, second, final])
@@ -120,19 +122,24 @@ class PoemSigninTests(unittest.IsolatedAsyncioTestCase):
         detail = self.b['conn'].execute('SELECT detail FROM hits ORDER BY id DESC').fetchone()[0]
         self.assertIn('no permission', detail)
 
-    async def test_multi_poem_pairs_choose_one_aligned_pair(self):
-        aid = await self.create(command='甲句|乙句', reply_text='丙句|丁句', click_btn=0, poem_delete_on_success=0)
-        first = message(100, '乙句', out=True)
-        second = message(101, '丁句', out=True)
+    async def test_library_pair_is_used_and_recorded(self):
+        aid = await self.create(click_btn=0, poem_delete_on_success=0)
         final = message(102, '就位', out=True)
-        self.b['client'].send_message = AsyncMock(side_effect=[first, second, final])
+        self.b['client'].send_message = AsyncMock(side_effect=[message(100, '床前明月光', out=True), message(101, '疑是地上霜', out=True), final])
         self.b['client'].get_messages = AsyncMock(return_value=[reply_message(303, '签到成功', 102)])
-        with patch.object(self.b['random'], 'randrange', return_value=1), patch.object(asyncio, 'sleep', new=AsyncMock()):
+        with patch.object(asyncio, 'sleep', new=AsyncMock()):
             await self.b['_execute_auto'](aid, manual=True)
-        self.assertEqual([c.args[1] for c in self.b['client'].send_message.await_args_list], ['乙句', '丁句', '就位'])
+        self.assertEqual([c.args[1] for c in self.b['client'].send_message.await_args_list], ['床前明月光', '疑是地上霜', '就位'])
         detail = self.b['conn'].execute('SELECT detail FROM hits ORDER BY id DESC').fetchone()[0]
-        self.assertIn('"poem_index": 2', detail)
-        self.assertIn('"poem_total": 2', detail)
+        self.assertIn('"poem_source": "library"', detail)
+        self.assertIn('"first": "床前明月光"', detail)
+
+    def test_library_picker_returns_clean_five_or_seven_char_couplet(self):
+        for _ in range(20):
+            first, second = self.pick_library()
+            self.assertEqual(len(first), len(second))
+            self.assertIn(len(first), (5, 7))
+            self.assertTrue(all('\u4e00' <= ch <= '\u9fff' for ch in first + second))
 
     async def test_standard_signin_path_is_unchanged(self):
         aid = await self.create(type='signin', signin_poem_mode=0, reply_text='', keywords='', click_btn=0,

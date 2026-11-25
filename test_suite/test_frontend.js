@@ -174,6 +174,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert(html.includes('onclick="openPoemForm()"'));
     assert(html.includes('<select id="pTarget" required>'));
     assert(!html.includes('id="pSecondWindow"'));
+    assert(!html.includes('id="pFirst"')&&!html.includes('id="pSecond"')&&html.includes('诗句来源：内置诗库'));
     assert(!formOf('signin').includes('sPoemMode'));
     run("openPoemForm()");
     assert.strictEqual(element('#pName').value,'群诗词签到');
@@ -186,7 +187,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('诗词签到保存为独立 signin_poem 类型并带删除开关',async()=>{
     run("openPoemForm()");
-    const values={'#pName':'诗词独立','#pTarget':'-1001234567890','#pFirst':'夕阳无限好，','#pSecond':'只是近黄昏。','#pFinal':'就位','#pBoxText':'盲盒','#pBoxEmoji':'🎁','#pBoxWait':'8','#pCommandDelay':'2','#pResultTimeout':'40','#pKw':'签到成功','#pFw':'失败','#pPts':'获得积分\\s*(\\d+)','#pRetries':'1'};
+    const values={'#pName':'诗词独立','#pTarget':'-1001234567890','#pFinal':'就位','#pBoxText':'盲盒','#pBoxEmoji':'🎁','#pBoxWait':'8','#pCommandDelay':'2','#pResultTimeout':'40','#pKw':'签到成功','#pFw':'失败','#pPts':'获得积分\\s*(\\d+)','#pRetries':'1'};
     for(const [id,value] of Object.entries(values))element(id).value=value;
     element('#pDelete').checked=true;
     let request;context.api=async(p,o)=>{request=[p,o];return {}};
@@ -194,7 +195,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     assert.strictEqual(request[0],'/api/autos');assert.strictEqual(request[1].method,'POST');
     const body=JSON.parse(request[1].body);
     assert.strictEqual(body.type,'signin_poem');assert.strictEqual(body.signin_poem_mode,1);
-    assert.strictEqual(body.command,'夕阳无限好，');assert.strictEqual(body.reply_text,'只是近黄昏。');
+    assert.strictEqual(body.command,'');assert.strictEqual(body.reply_text,'');
     assert.strictEqual(body.keywords,'就位');assert.strictEqual(body.poem_delete_on_success,1);
     assert.strictEqual(body.poem_box_wait,8);assert.strictEqual(body.is_chat,1);
   });

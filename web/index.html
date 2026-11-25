@@ -1305,7 +1305,7 @@ section.act,.fold.open .fold-b{animation:none}
         <div class="fold sub-fold">
       <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">群诗词签到</span><span class="cnt" id="aCntPoem">0</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
       <div class="fold-b">
-        <div class="hint">和 BOT 签到完全独立：分三条发送第一句、第二句和触发词，只认回复我们这三条消息的机器人结果，只点这些回复上的盲盒按钮。签到成功后可选删除刚发的两句诗词，不删「就位」。</div>
+        <div class="hint">和 BOT 签到完全独立：从内置诗库随机抽一联，连同触发词分三条发送；只认回复我们这三条消息的机器人结果，只点这些回复上的盲盒按钮。签到成功后可选删除刚发的两句诗词，不删「就位」。</div>
         <button class="btn addtask" type="button" onclick="openPoemForm()">＋ 添加诗词签到任务</button>
         <div id="aListPoem"></div>
         <div class="empty" id="aEmptyPoem">暂无诗词签到任务,点上面按钮添加</div>
@@ -1313,9 +1313,7 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="pName">任务名称</label><input type="text" id="pName" maxlength="100" placeholder="如: 稳健杂货铺诗词签到">
           <label for="pTarget">目标群（从当前账号的监听群中选择）</label><select id="pTarget" required></select>
           <div class="hint">只列出当前账号已监听的群；要新增群请先去「群组」页添加并监听。</div>
-          <label for="pFirst">第一句诗词（多组用 | 或换行分隔）</label><textarea id="pFirst" maxlength="3000" rows="3" placeholder="夕阳无限好，&#10;海内存知己，&#10;或写成：夕阳无限好，| 海内存知己，"></textarea>
-          <label for="pSecond">第二句诗词（与第一句按顺序一一对应）</label><textarea id="pSecond" maxlength="3000" rows="3" placeholder="只是近黄昏。&#10;天涯若比邻。&#10;每组每次随机选一对发送"></textarea>
-          <div class="hint">第一句和第二句按顺序配对；每次执行随机选一组，不再每天发同一首。只填一组时就是固定这一组。</div>
+          <div class="hint"><b>诗句来源：内置诗库</b><br>直接复用「古诗填空」OCR 签到的同一份诗库，每次执行随机抽一联五言或七言，不用自己填诗。</div>
           <label for="pFinal">触发词（最后单独发送）</label><input type="text" id="pFinal" maxlength="100" value="就位" placeholder="如: 就位">
           <label class="check"><input type="checkbox" id="pBox" checked onchange="togglePoemBoxFields()"> 自动领取「回复我们消息」上的幸运盲盒</label>
           <div id="pBoxFields">
@@ -3136,8 +3134,7 @@ function autoDesc(a){
     const mode=signinRecognitionMode(a),recognition=mode==='captcha'?' · 验证码识别':mode==='poem'?' · 古诗填空点选':mode==='image'?(a.signin_image_action==='click'?' · 图片识别点选':' · 图片识别回复'):'';
     if(a.type==='signin_poem'){
       const daily=Number(a.signin_total_slots||1)>1?' · 今日 '+Number(a.signin_done_slots||0)+'/'+Number(a.signin_total_slots)+' 次':a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'');
-      const pool=poemGroupSize(a.command);
-      return `诗词群签到 · 群 ${esc(a.target)} · ${pool>1?pool+' 组随机':'「'+esc(a.command)+'」「'+esc(a.reply_text)+'」'} · 触发「${esc(a.keywords)}」${a.click_btn?' · 只领取我们消息的盲盒（'+esc(a.btn_text||'盲盒')+'）':''}${a.poem_delete_on_success?' · 成功后删前两句':''} · 间隔 ${esc(String(a.command_delay??1.6))}秒 · 等回复 ${esc(String(a.result_timeout??30))}秒${a.points_pat?' · 提取积分':''}${daily}`;
+      return `诗词群签到 · 群 ${esc(a.target)} · 内置诗库随机整联 · 触发「${esc(a.keywords)}」${a.click_btn?' · 只领取我们消息的盲盒（'+esc(a.btn_text||'盲盒')+'）':''}${a.poem_delete_on_success?' · 成功后删前两句':''} · 间隔 ${esc(String(a.command_delay??1.6))}秒 · 等回复 ${esc(String(a.result_timeout??30))}秒${a.points_pat?' · 提取积分':''}${daily}`;
     }
     const daily=Number(a.signin_total_slots||1)>1?' · 今日 '+Number(a.signin_done_slots||0)+'/'+Number(a.signin_total_slots)+' 次':a.signed_today?' · 今日已签':(a.last_at?' · 上次成功 '+esc(a.last_at):'');
     return `${esc(a.target)} · ${esc(a.command)} · ${esc(autoWindow(a))}${a.is_chat?' · 群签':''}${a.click_btn?' · 点按钮 · '+buttonModeLabel(a.button_mode)+' · '+(Number(a.refresh_buttons??1)===0?'复用同一按钮':'刷新按钮状态'):''} · 命令后 ${esc(String(a.command_delay??1.6))}秒 · 按钮后 ${esc(String(a.button_delay??2))}秒 · 结果判断前延迟 ${esc(String(a.result_delay??0))}秒 · 等待最终回复上限 ${esc(String(a.result_timeout??30))}秒${recognition}${a.success_kw?' · 判'+esc(a.success_kw):''}${a.fail_kw?' · 败'+esc(a.fail_kw):''}${a.points_pat?' · 积分':''}${daily}`;
@@ -3760,8 +3757,6 @@ function closeAutoForm(type){
   cancelAutoEdit(type);
   if(typeof tpClose==='function')tpClose(); // 顺手关掉可能还开着的时间滚轮
 }
-function poemLineParts(text){return String(text||'').split(/[|\n]/).map(x=>x.trim()).filter(Boolean)}
-function poemGroupSize(text){return poemLineParts(text).length}
 function renderPoemGroupOptions(selected=$('#pTarget').value){
   const groups=(typeof watchedGroups!=='undefined'&&Array.isArray(watchedGroups))?watchedGroups:[],sel=String(selected||''),valid=!sel||groups.some(g=>String(g.chat_id)===sel);
   const rows=groups.map(g=>`<option value="${esc(String(g.chat_id))}">${esc(g.name||String(g.chat_id))} · ${esc(String(g.chat_id))}</option>`).join('');
@@ -3785,7 +3780,7 @@ function showPoemForm(){
 }
 function cancelPoemEdit(){
   editAuto=null;editAutoAccount=null;
-  $('#pName').value='';$('#pTarget').value='';renderPoemGroupOptions('');$('#pFirst').value='';$('#pSecond').value='';
+  $('#pName').value='';$('#pTarget').value='';renderPoemGroupOptions('');
   $('#pFinal').value='就位';$('#pBox').checked=true;$('#pBoxText').value='盲盒';$('#pBoxEmoji').value='🎁';
   $('#pBoxWait').value=12;$('#pDelete').checked=false;
   $('#pWinStart').value='08:00';$('#pWinEnd').value='12:00';$('#pIndependent').checked=false;
@@ -3800,7 +3795,7 @@ function openPoemForm(){
 function editPoemItem(id){
   const a=autos.find(x=>x.id===id);if(!a)return;
   cancelPoemEdit();editAuto=a;editAutoAccount=accountContext();
-  $('#pName').value=a.name||'';renderPoemGroupOptions(a.target||'');$('#pFirst').value=a.command||'';$('#pSecond').value=a.reply_text||'';
+  $('#pName').value=a.name||'';renderPoemGroupOptions(a.target||'');
   $('#pFinal').value=a.keywords||'就位';$('#pBox').checked=!!a.click_btn;$('#pBoxText').value=a.btn_text||'盲盒';$('#pBoxEmoji').value=a.btn_emoji||'🎁';
   $('#pBoxWait').value=a.poem_box_wait??12;$('#pDelete').checked=!!a.poem_delete_on_success;
   $('#pWinStart').value=a.win_start||'08:00';$('#pWinEnd').value=a.win_end||'12:00';
@@ -3852,7 +3847,7 @@ async function saveAuto(type){
   }else if(type==='poem'){
     const wait=$('#pBoxWait').value.trim()===''?12:Number($('#pBoxWait').value);
     body={type:'signin_poem',name:$('#pName').value.trim(),target:$('#pTarget').value.trim(),
-      command:$('#pFirst').value.trim(),reply_text:$('#pSecond').value.trim(),keywords:$('#pFinal').value.trim(),
+      command:'',reply_text:'',keywords:$('#pFinal').value.trim(),
       is_chat:1,click_btn:$('#pBox').checked?1:0,btn_text:$('#pBoxText').value.trim()||'盲盒',btn_emoji:$('#pBoxEmoji').value.trim(),
       signin_poem_mode:1,poem_box_wait:wait,poem_delete_on_success:$('#pDelete').checked?1:0,
       win_start:$('#pWinStart').value.trim(),win_end:$('#pWinEnd').value.trim(),
@@ -3863,9 +3858,7 @@ async function saveAuto(type){
       success_kw:$('#pKw').value.trim()||'签到成功',fail_kw:$('#pFw').value.trim(),
       points_pat:$('#pPts').value.trim()||'获得积分\\s*(\\d+)',retries:$('#pRetries').value.trim()===''?2:Number($('#pRetries').value),
       signin_recognition_mode:'none',signin_captcha:0,button_mode:'script',click_times:1,click_interval:300,refresh_buttons:1};
-    if(!body.name||!body.target||!body.command||!body.reply_text||!body.keywords)return toast('请选择目标群并填写名称、第一句、第二句和触发词',1);
-    const firstCount=poemGroupSize(body.command),secondCount=poemGroupSize(body.reply_text);
-    if(firstCount!==secondCount)return toast('第一句和第二句的组数需一致（当前 '+firstCount+' / '+secondCount+' 组）',1);
+    if(!body.name||!body.target||!body.keywords)return toast('请选择目标群并填写名称和触发词',1);
     if(!Number.isInteger(wait)||wait<0||wait>120)return toast('盲盒等待须为 0–120 秒',1);
     if(!Number.isFinite(body.command_delay)||body.command_delay<0||body.command_delay>120||Math.abs(body.command_delay*10-Math.round(body.command_delay*10))>1e-7)return toast('两条消息间隔须为 0–120 秒，步进 0.1 秒',1);
     if(!Number.isInteger(body.result_timeout)||body.result_timeout<1||body.result_timeout>300)return toast('等待机器人回复上限须为 1–300 秒',1);
