@@ -7493,14 +7493,26 @@ async def _message_buttons(message):
         return getattr(message, "buttons", None) or []
 
 
+def _poem_line_pool(text):
+    return [part.strip() for part in re.split(r"[|\n]+", str(text or "")) if part.strip()]
+
+
+def _pick_poem_pair(first_text, second_text):
+    firsts, seconds = _poem_line_pool(first_text), _poem_line_pool(second_text)
+    if not firsts or len(firsts) != len(seconds):
+        return None
+    index = random.randrange(len(firsts))
+    return firsts[index], seconds[index], index, len(firsts)
+
+
 async def _run_poem_group_signin(a):
     """群诗词签到：第一句、第二句、触发词分三条发送；只认回复我们这三条的消息。"""
     target = str(a["target"] or "").strip()
-    first = str(a["command"] or "").strip()
-    second = str(a["reply_text"] or "").strip()
+    pair = _pick_poem_pair(a["command"], a["reply_text"])
     final = str(a["keywords"] or "").strip()
-    if not all((target, first, second, final)):
-        return _task_failure(a, "诗词群签到缺少目标、第一句、第二句或触发词")
+    if not all((target, final)) or pair is None:
+        return _task_failure(a, "诗词群签到缺少目标/触发词，或第一句与第二句组数不一致")
+    first, second, poem_index, poem_total = pair
     ent = await resolve_entity(target)
     if ent is None:
         return _task_failure(a, "诗词群签到目标解析失败", first)
@@ -7624,6 +7636,7 @@ async def _run_poem_group_signin(a):
 
     detail = {"kind": "signin", "task": a["name"], "bot": target, "mode": "poem_group",
               "sent_messages": sent_ids, "first": first, "second": second, "final": final,
+              "poem_index": poem_index + 1, "poem_total": poem_total,
               "reply": success_text or fail_text or last_text, "points": points,
               "box": box_state, "box_button": box_button_text, "box_reply": box_popup,
               "deleted_messages": deleted, "delete_errors": delete_errors,
@@ -11981,6 +11994,10 @@ def _valid_auto(body: AutoIn):
         if body.type == "signin_poem":
             if not body.reply_text.strip() or not body.keywords.strip():
                 raise HTTPException(400, "诗词群签到需要填写第一句、第二句诗词和触发词（如：就位）")
+            firsts = [part.strip() for part in re.split(r"[|\n]+", body.command) if part.strip()]
+            seconds = [part.strip() for part in re.split(r"[|\n]+", body.reply_text) if part.strip()]
+            if not firsts or len(firsts) != len(seconds):
+                raise HTTPException(400, "第一句和第二句的诗词组数需一致")
             if body.signin_recognition_mode.strip() not in ("", "none"):
                 raise HTTPException(400, "诗词群签到不能同时启用图片处理")
         if _win_minutes(body.win_start) is None or _win_minutes(body.win_end) is None:

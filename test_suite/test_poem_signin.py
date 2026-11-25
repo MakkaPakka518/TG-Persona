@@ -120,6 +120,20 @@ class PoemSigninTests(unittest.IsolatedAsyncioTestCase):
         detail = self.b['conn'].execute('SELECT detail FROM hits ORDER BY id DESC').fetchone()[0]
         self.assertIn('no permission', detail)
 
+    async def test_multi_poem_pairs_choose_one_aligned_pair(self):
+        aid = await self.create(command='甲句|乙句', reply_text='丙句|丁句', click_btn=0, poem_delete_on_success=0)
+        first = message(100, '乙句', out=True)
+        second = message(101, '丁句', out=True)
+        final = message(102, '就位', out=True)
+        self.b['client'].send_message = AsyncMock(side_effect=[first, second, final])
+        self.b['client'].get_messages = AsyncMock(return_value=[reply_message(303, '签到成功', 102)])
+        with patch.object(self.b['random'], 'randrange', return_value=1), patch.object(asyncio, 'sleep', new=AsyncMock()):
+            await self.b['_execute_auto'](aid, manual=True)
+        self.assertEqual([c.args[1] for c in self.b['client'].send_message.await_args_list], ['乙句', '丁句', '就位'])
+        detail = self.b['conn'].execute('SELECT detail FROM hits ORDER BY id DESC').fetchone()[0]
+        self.assertIn('"poem_index": 2', detail)
+        self.assertIn('"poem_total": 2', detail)
+
     async def test_standard_signin_path_is_unchanged(self):
         aid = await self.create(type='signin', signin_poem_mode=0, reply_text='', keywords='', click_btn=0,
                                 command='/checkin', success_kw='签到成功')

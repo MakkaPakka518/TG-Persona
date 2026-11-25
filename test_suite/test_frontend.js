@@ -172,11 +172,17 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   await test('诗词签到是独立分组和独立表单，BOT表单不再含诗词字段',async()=>{
     assert(html.includes('id="aCntPoem"')&&html.includes('id="aListPoem"')&&html.includes('id="af-poem"'));
     assert(html.includes('onclick="openPoemForm()"'));
+    assert(html.includes('<select id="pTarget" required>'));
+    assert(!html.includes('id="pSecondWindow"'));
     assert(!formOf('signin').includes('sPoemMode'));
     run("openPoemForm()");
     assert.strictEqual(element('#pName').value,'群诗词签到');
     assert.strictEqual(element('#pFinal').value,'就位');
     assert.strictEqual(element('#pDelete').checked,false);
+    run("watchedGroups=[{chat_id:'-1001',name:'有效群'},{chat_id:'-1002',name:'<坏群>'}];renderPoemGroupOptions('-1001')");
+    assert(element('#pTarget').innerHTML.includes('有效群'));
+    assert(element('#pTarget').innerHTML.includes('&lt;坏群&gt;'));
+    assert.strictEqual(element('#pTarget').value,'-1001');
   });
   await test('诗词签到保存为独立 signin_poem 类型并带删除开关',async()=>{
     run("openPoemForm()");
