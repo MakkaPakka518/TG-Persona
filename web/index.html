@@ -247,6 +247,12 @@ input[type=time],input[type=date],input[type=datetime-local]{min-width:0}
 .flex>div{flex:1;min-width:130px}
 input[type=time],input[type=date],input[type=datetime-local]{max-width:100%;min-width:0}
 .hint{font-size:11.5px;color:var(--dim);margin-top:8px;line-height:1.6}
+.tg-login-loading{display:flex;align-items:center;gap:12px;padding:22px 4px;min-height:96px}
+.tg-spinner{width:22px;height:22px;border-radius:50%;border:2px solid var(--hair2);border-top-color:var(--acc);animation:tgspin .8s linear infinite;flex:none}
+.tg-loading-title{font-size:14px;font-weight:600;color:var(--txt)}
+.tg-loading-sub{font-size:11.5px;color:var(--dim);margin-top:2px}
+@keyframes tgspin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.tg-spinner{animation-duration:1.8s}}
 .form-actions{display:flex;gap:10px;margin-top:18px}#waterAiCard .form-actions button{min-width:44px}
 .form-actions .btn{flex:1}
 .timed-history-toggle input{width:18px!important;height:18px;flex:none}
@@ -1895,15 +1901,14 @@ section.act,.fold.open .fold-b{animation:none}
           <label for="accountSettings">当前账号</label>
           <select id="accountSettings" onchange="switchAccount(this.value)"><option value="default">默认账号</option></select>
           <div id="accountStatus" class="hint" role="status" aria-live="polite">默认账号</div>
-          <label for="accountLabel">账号备注</label><input id="accountLabel" maxlength="80" placeholder="如：工作号、小号">
           <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:12px">
-            <button class="btn" id="accountCreate" onclick="manageAccount('create')">添加账号并登录</button>
+            <button class="ghost" id="accountNew" onclick="startNewAccount()">登录新账号</button>
             <button class="ghost" id="accountRename" onclick="manageAccount('rename')">修改当前备注</button>
             <button class="ghost" id="accountReload" onclick="loadAccounts()">刷新</button>
             <button class="danger" id="accountDelete" disabled onclick="manageAccount('delete')">删除当前</button>
           </div>
           <div id="accountResult" class="hint" role="status" aria-live="polite"></div>
-          <div class="hint">默认账号不能删除；其他账号删除时会同时移除对应配置和登录会话。</div>
+          <div class="hint">登录新账号不会影响已有账号；备注留空时，登录成功后使用 TG 昵称。默认账号不能删除；其他账号删除时会同时移除对应配置和登录会话。</div>
           <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
           <div id="tgCard"><div class="empty">加载中...</div></div>
         </div>
@@ -2161,6 +2166,7 @@ const DEFAULT_REGISTRATION_AI_FLOCK_PROMPT='你是刚抢到注册码的普通群
 function toast(msg,err){if(!msg)return;const t=$('#toast');t.textContent=msg;t.classList.add('show');t.classList.toggle('err',!!err);setTimeout(()=>t.classList.remove('show'),2600)}
 // ---------- 账号请求范围 ----------
 let selectedAccount='default', accountEpoch=0;
+let tgPhase='idle', tgBusy=false, tgBusyAccount='', tgBusyEpoch=0, tgBusyText='', tgPhoneDraft='', tgCodeDraft='', tgRemarkDraft='', tgAddMode=false, tgLoginAccountId='', tgAutoRename=false;
 try{selectedAccount=localStorage.getItem('tgp_selected_id')||'default'}catch(e){}
 function accountContext(){return {id:selectedAccount,epoch:accountEpoch}}
 function isCurrentAccount(c){return c.id===selectedAccount&&c.epoch===accountEpoch}
@@ -2212,7 +2218,7 @@ function renderAccounts(){
   $('#accountStatus').textContent=String(a.label||a.id)+' · '+(a.logged_in?(a.paused?'已登录 · 已暂停':'已登录 · 运行中'):'未登录')+(phase?' · '+phase:'');
   $('#accountDelete').disabled=accountsBusy||selectedAccount==='default';
 }
-function syncAccountButtons(){for(const id of ['accountReload','accountCreate','accountRename'])$('#'+id).disabled=accountsBusy;renderAccounts()}
+function syncAccountButtons(){for(const id of ['accountReload','accountNew','accountRename'])$('#'+id).disabled=accountsBusy;renderAccounts()}
 async function loadAccounts(){
   const seq=++accountsLoadSeq;
   try{
@@ -2250,35 +2256,51 @@ function resetAccountCaches(){
 function switchAccount(id){
   id=String(id||'default');if(id===selectedAccount){renderAccounts();return}
   selectedAccount=id;accountEpoch++;
+  tgPhase='idle';tgBusy=false;tgBusyAccount='';tgBusyEpoch=0;tgBusyText='';tgPhoneDraft='';tgCodeDraft='';tgRemarkDraft='';tgAddMode=false;tgLoginAccountId='';tgAutoRename=false;
   try{localStorage.setItem('tgp_selected_id',id)}catch(e){}
   resetAccountCaches();renderAccounts();
   loadState();loadSettings();loadAutos();loadWebSignins();loadRules();loadRuleGroups();loadDialogs();loadLogs();renderTgCard();loadEmbyTemplates();loadEmbyAccounts();
 }
 async function manageAccount(action){
   if(accountsBusy)return;
-  const id=selectedAccount,label=$('#accountLabel').value.trim();
+  const id=selectedAccount;
+  let label='';
   if(action==='delete'){
     if(id==='default')return;
     const a=accounts.find(x=>x.id===id);
     if(!window.confirm('删除账号「'+String(a?.label||id)+'」及其配置和会话？不可恢复。'))return;
     if(!window.confirm('再次确认：永久删除此账号，不会删除默认账号。确定继续？'))return;
-  }else if(!label||label.length>80){$('#accountResult').textContent='请输入 1–80 字的账号标签';return}
-  if(!['create','rename','delete'].includes(action))return;
+  }else if(action==='rename'){
+    const a=accounts.find(x=>x.id===id);
+    let input=null;
+    if(typeof window.prompt==='function')input=window.prompt('账号备注（最多 80 字）',String(a?.label||''));
+    else{const legacy=$('#accountLabel');input=legacy?legacy.value:null}
+    if(input===null)return;
+    label=input.trim().slice(0,80);
+    if(!label){$('#accountResult').textContent='账号备注不能为空';return}
+  }else return;
   accountsBusy=true;syncAccountButtons();
   try{
-    const url='/api/accounts'+(action==='create'?'':'/'+encodeURIComponent(id));
-    const d=await api(url,{method:action==='create'?'POST':action==='rename'?'PUT':'DELETE',...(action==='delete'?{}:{body:JSON.stringify({label})})});
-    if(action==='create'&&d.id){
-      switchAccount(d.id);await loadAccounts();await renderTgCard();
-      $('#accountResult').textContent='账号已添加，请输入手机号继续登录';
-      $('#foldTg').classList.add('open');
-      setTimeout(()=>{const field=$('#tgPhone');if(field){field.focus();field.scrollIntoView({behavior:'smooth',block:'center'})}},100);
-    }
+    const url='/api/accounts/'+encodeURIComponent(id);
+    await api(url,{method:action==='rename'?'PUT':'DELETE',...(action==='delete'?{}:{body:JSON.stringify({label})})});
     if(action==='delete'&&selectedAccount===id)switchAccount('default');
-    $('#accountLabel').value='';
-    if(action!=='create'){await loadAccounts();$('#accountResult').textContent='账号操作成功'}
+    await loadAccounts();
+    $('#accountResult').textContent=action==='delete'?'账号已删除':'账号备注已更新';
   }catch(e){$('#accountResult').textContent='账号操作失败，可重试：'+e.message}
   finally{accountsBusy=false;syncAccountButtons()}
+}
+function startNewAccount(){
+  if(accountsBusy)return;
+  tgAddMode=true;tgPhase='idle';tgBusy=false;tgBusyAccount='';tgBusyEpoch=0;tgBusyText='';
+  tgPhoneDraft='';tgCodeDraft='';tgRemarkDraft='';tgLoginAccountId='';tgAutoRename=false;
+  renderTgCard();
+  $('#foldTg').classList.add('open');
+  setTimeout(()=>{const field=$('#tgPhone');if(field){field.focus();field.scrollIntoView({behavior:'smooth',block:'center'})}},100);
+}
+function cancelNewAccount(){
+  if(tgIsBusy())return;
+  tgAddMode=false;tgPhoneDraft='';tgCodeDraft='';tgRemarkDraft='';tgLoginAccountId='';tgAutoRename=false;
+  renderTgCard();
 }
 
 // ---------- 执行、回放与学习中心 ----------
@@ -4458,16 +4480,43 @@ async function panelLogin(){
 }
 
 // ---------- Telegram 账号登录(设置页内) ----------
-let tgPhase='idle';
+function tgIsBusy(){const c=accountContext();return tgBusy&&tgBusyAccount===c.id&&tgBusyEpoch===c.epoch}
+function tgBeginBusy(text){const c=accountContext();tgBusy=true;tgBusyAccount=c.id;tgBusyEpoch=c.epoch;tgBusyText=text;renderTgCard()}
+function tgEndBusy(c){if(tgBusyAccount===c.id&&tgBusyEpoch===c.epoch){tgBusy=false;tgBusyText=''}if(isCurrentAccount(c))renderTgCard()}
 async function renderTgCard(){
   const c=accountContext(),el=$('#tgCard'); if(!el)return;
   const current=accounts.find(a=>a.id===c.id),label=String(current?.label||c.id);
+  const apiReady=/^\d{4,10}$/.test($('#tgApiId').value.trim())&&$('#tgApiHash').value.trim().length>=10;
+  if(tgIsBusy()){
+    el.innerHTML=`
+      <div class="tg-login-loading" role="status" aria-live="polite">
+        <span class="tg-spinner" aria-hidden="true"></span>
+        <div><div class="tg-loading-title">${esc(tgBusyText||'正在处理…')}</div><div class="tg-loading-sub">请稍候，不要重复点击</div></div>
+      </div>`;
+    return;
+  }
+  if(tgAddMode){
+    el.innerHTML=`
+      <div class="hint">登录新账号：填写手机号，备注可留空。当前已登录的账号不会受影响。</div>
+      <label>账号备注（可选）</label>
+      <input type="text" id="tgRemark" maxlength="80" placeholder="如：工作号、小号；留空用 TG 昵称" value="${esc(tgRemarkDraft)}" oninput="tgRemarkDraft=this.value">
+      <div class="hint">不填备注时，登录成功后会自动使用该 TG 账号的昵称。</div>
+      <label style="margin-top:12px">手机号（带国家码）</label>
+      <input type="text" id="tgPhone" placeholder="8613800138000" inputmode="numeric" value="${esc(tgPhoneDraft)}" oninput="tgPhoneDraft=this.value">
+      <button class="btn" style="width:100%;margin-top:10px" onclick="sendTgCode()" ${apiReady?'':'disabled'}>发送验证码</button>
+      <button class="ghost" style="width:100%;margin-top:8px" onclick="cancelNewAccount()">取消</button>
+      <div class="hint">验证码可能直接发到你已经登录的 Telegram 客户端（Telegram 官方服务消息），不一定是短信。请先打开 Telegram 查看，只点一次，不要连续点。</div>`;
+    return;
+  }
   if(state.logged_in){
     const av=state.tg.me.avatar||'';
     el.innerHTML=`
       <div class="flex" style="gap:12px;align-items:center">
         <div class="avatar" id="tgAvatar" style="width:42px;height:42px">?</div>
         <div class="grow"><div class="t">${esc(label)}：${esc(state.tg.me.name||'--')}</div><div class="s mono">@${esc(state.tg.me.username||state.tg.me.phone||'--')}</div></div>
+      </div>
+      <div class="flex" style="margin-top:12px">
+        <button class="ghost" onclick="startNewAccount()">登录新账号</button>
         <button class="danger" onclick="logoutTG()">退出登录</button>
       </div>
       <div style="margin-top:12px">
@@ -4481,26 +4530,27 @@ async function renderTgCard(){
     setAvatar($('#tgAvatar'), av, state.tg.me.name);
     return;
   }
-  const apiReady=/^\d{4,10}$/.test($('#tgApiId').value.trim())&&$('#tgApiHash').value.trim().length>=10;
   const serverPhase=state.tg?.phase;
   if(serverPhase==='code_sent'||serverPhase==='need_password')tgPhase=serverPhase;
   el.innerHTML=`
     <div class="hint">正在登录：${esc(label)}${apiReady?'':'。请先保存上方共用 API'}</div>
     <div id="tgS1" style="display:${tgPhase==='need_password'?'none':'block'};margin-top:12px">
       <label>手机号（带国家码）</label>
-      <input type="text" id="tgPhone" placeholder="8613800138000" inputmode="numeric">
+      <input type="text" id="tgPhone" placeholder="8613800138000" inputmode="numeric" value="${esc(tgPhoneDraft)}" oninput="tgPhoneDraft=this.value">
       <button class="btn" style="width:100%;margin-top:10px" onclick="sendTgCode()" ${apiReady?'':'disabled'}>发送验证码</button>
-      <div class="hint">Telegram 会给该手机号发送登录验证码</div>
+      <div class="hint">验证码可能直接发到你已经登录的 Telegram 客户端（Telegram 官方服务消息），不一定是短信。请先打开 Telegram 查看，只点一次，不要连续点。</div>
     </div>
     <div id="tgS2" style="display:${tgPhase==='code_sent'?'block':'none'};margin-top:16px">
       <label>验证码</label>
-      <input type="text" id="tgCode" placeholder="6 位数字" inputmode="numeric">
+      <input type="text" id="tgCode" placeholder="6 位数字" inputmode="numeric" value="${esc(tgCodeDraft)}" oninput="tgCodeDraft=this.value">
       <button class="btn" style="width:100%;margin-top:10px" onclick="verifyTgCode()">验证并登录</button>
+      <div class="hint">点一次后请等待，正在检查该账号是否需要两步验证。</div>
     </div>
     <div id="tgS3" style="display:${tgPhase==='need_password'?'block':'none'};margin-top:16px">
       <label>两步验证密码(Cloud 密码)</label>
       <input type="password" id="tg2fa" placeholder="账号开启两步验证时需要">
       <button class="btn" style="width:100%;margin-top:10px" onclick="verifyTg2fa()">完成登录</button>
+      <div class="hint">此账号确认开启了两步验证；提交后请稍候，不要重复提交。</div>
     </div>`;
 }
 async function saveTgApi(){
@@ -4515,35 +4565,77 @@ async function saveTgApi(){
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function sendTgCode(){
+  if(tgIsBusy())return;
   const phone=$('#tgPhone').value.trim();
+  tgPhoneDraft=phone;
   if(!phone)return toast('请填写手机号',1);
-  const c=accountContext();
+  let c=accountContext();
   try{
+    if(tgAddMode){
+      const remark=tgRemarkDraft.trim();
+      tgBeginBusy('正在创建新账号…');
+      const created=await api('/api/accounts',{method:'POST',body:JSON.stringify({label:remark||'TG 账号'})});
+      if(!created.id)throw new Error('创建账号失败');
+      await loadAccounts();
+      switchAccount(created.id);
+      c=accountContext();
+      try{await loadState()}catch(e){}
+      tgAddMode=false;tgPhoneDraft=phone;tgRemarkDraft=remark;
+      tgLoginAccountId=c.id;tgAutoRename=!remark;
+      tgBeginBusy('正在发送验证码…');
+    }else{
+      if(tgLoginAccountId!==c.id)tgAutoRename=false;
+      tgLoginAccountId=c.id;
+      tgBeginBusy('正在发送验证码…');
+    }
     await api('/api/tg/send_code',{method:'POST',body:JSON.stringify({phone}),_account:c});
     if(!isCurrentAccount(c))return;
-    tgPhase='code_sent'; renderTgCard(); toast('验证码已发送,请在 Telegram 查收');
+    tgPhase='code_sent'; tgCodeDraft=''; toast('验证码已发送，请优先查看 Telegram 客户端（不一定是短信）');
     setTimeout(()=>{if(!isCurrentAccount(c))return;const f=$('#tgCode');if(f)f.focus()},80);
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
+  finally{tgEndBusy(c)}
 }
 async function verifyTgCode(){
+  if(tgIsBusy())return;
+  const code=$('#tgCode').value.trim();
+  tgCodeDraft=code;
+  if(!code)return toast('请填写验证码',1);
   const c=accountContext();
+  tgBeginBusy('正在验证验证码，并检查两步验证…');
   try{
-    const d=await api('/api/tg/verify_code',{method:'POST',body:JSON.stringify({code:$('#tgCode').value.trim()}),_account:c});
+    const d=await api('/api/tg/verify_code',{method:'POST',body:JSON.stringify({code}),_account:c});
     if(!isCurrentAccount(c))return;
-    if(d.need_password){tgPhase='need_password';renderTgCard();return}
-    afterTgLogin();
+    if(d.need_password){tgPhase='need_password';return}
+    await afterTgLogin();
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
+  finally{tgEndBusy(c)}
 }
 async function verifyTg2fa(){
+  if(tgIsBusy())return;
+  const password=$('#tg2fa').value;
+  if(!password)return toast('请填写两步验证密码',1);
   const c=accountContext();
+  tgBeginBusy('正在完成两步验证…');
   try{
-    await api('/api/tg/verify_password',{method:'POST',body:JSON.stringify({password:$('#tg2fa').value}),_account:c});
+    await api('/api/tg/verify_password',{method:'POST',body:JSON.stringify({password}),_account:c});
     if(!isCurrentAccount(c))return;
-    afterTgLogin();
+    await afterTgLogin();
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
+  finally{tgEndBusy(c)}
 }
-function afterTgLogin(){
-  tgPhase='ready'; toast('登录成功,人形分身已上线'); loadState();
+async function afterTgLogin(){
+  const c=accountContext();
+  tgPhase='ready'; tgPhoneDraft=''; tgCodeDraft=''; window._prevLoggedIn=null; toast('登录成功,人形分身已上线');
+  try{await loadState()}catch(e){}
+  const nickname=String(state.tg?.me?.name||'').trim().slice(0,80);
+  if(tgAutoRename&&tgLoginAccountId===c.id&&nickname){
+    try{
+      await api('/api/accounts/'+encodeURIComponent(c.id),{method:'PUT',body:JSON.stringify({label:nickname})});
+      await loadAccounts();
+    }catch(e){}
+  }
+  tgAddMode=false;tgRemarkDraft='';tgAutoRename=false;tgLoginAccountId='';
+  renderTgCard();
 }
 
 // ---------- 头像 ----------
@@ -5441,9 +5533,10 @@ async function saveTz(){
   catch(e){toast(e.message,1)}
 }
 async function logoutTG(){
+  if(tgIsBusy())return toast('登录流程进行中，请稍候',1);
   const c=accountContext();
   if(!confirm('确认退出 Telegram 账号?已保存的会话会被清除'))return;
-  try{await api('/api/tg/logout',{method:'POST',_account:c});if(!isCurrentAccount(c))return;tgPhase='idle';window._prevLoggedIn=null;toast('已退出 TG');loadState();renderTgCard()}
+  try{await api('/api/tg/logout',{method:'POST',_account:c});if(!isCurrentAccount(c))return;tgPhase='idle';tgPhoneDraft='';tgCodeDraft='';tgBusy=false;tgBusyAccount='';tgBusyEpoch=0;tgBusyText='';window._prevLoggedIn=null;toast('已退出 TG');loadState();renderTgCard()}
   catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
 async function saveAvatar(){

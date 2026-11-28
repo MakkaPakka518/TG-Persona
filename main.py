@@ -11015,19 +11015,27 @@ async def tg_send_code(body: SendCode):
     if not re.fullmatch(r"\d{8,15}", phone):
         raise HTTPException(400, "手机号格式不对,请带国家码,如 8613800138000")
     await ensure_client()
+    runtime = get_runtime()
+    if getattr(runtime, "_tg_send_inflight", False):
+        raise HTTPException(429, "验证码正在发送，请稍候，不要重复点击")
+    runtime._tg_send_inflight = True
     try:
-        await get_runtime().client.send_code_request(phone)
-        get_runtime().tg_phone = phone
-        get_runtime().tg_state.update({"phase": "code_sent", "phone": phone, "err": None})
+        await runtime.client.send_code_request(phone)
+        runtime.tg_phone = phone
+        runtime.tg_state.update({"phase": "code_sent", "phone": phone, "err": None})
         return {"ok": True}
     except errors.PhoneNumberInvalidError:
         raise HTTPException(400, "手机号无效,请带国家码")
     except errors.ApiIdInvalidError:
         raise HTTPException(400, "API_ID 或 API_HASH 无效")
+    except errors.SendCodeUnavailableError:
+        raise HTTPException(429, "该号码的验证码发送通道已用完，请等待一段时间再试；不要连续点击发送")
     except errors.FloodWaitError as e:
         raise HTTPException(429, f"请求太频繁,请等 {e.seconds} 秒")
     except Exception as e:
         raise HTTPException(500, f"发送验证码失败: {e}")
+    finally:
+        runtime._tg_send_inflight = False
 
 
 @app.post("/api/tg/verify_code")

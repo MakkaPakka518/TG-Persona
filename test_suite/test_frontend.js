@@ -967,16 +967,40 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('账号管理和登录合并，共用API只保存一次',async()=>{
     assert.strictEqual((html.match(/id="foldTg"/g)||[]).length,1);assert.strictEqual((html.match(/id="tgCard"/g)||[]).length,1);
-    assert(html.includes('添加账号并登录'));assert(html.includes('所有 Telegram 账号共用这一套 API'));assert(!html.includes('Telegram 多账号'));
+    assert(html.includes('登录新账号'));assert(html.includes('所有 Telegram 账号共用这一套 API'));assert(!html.includes('添加账号并登录'));assert(!html.includes('Telegram 多账号'));
     q('#tgApiId').value='12345';q('#tgApiHash').value='dummy-shared-api-hash';const requests=[];
     app.api=async(p,o)=>{requests.push([p,o]);return {}};await ex('saveTgApi()');
     assert.deepStrictEqual(requests.map(x=>x[0]),['/api/settings']);assert.deepStrictEqual(JSON.parse(requests[0][1].body),{api_id:'12345',api_hash:'dummy-shared-api-hash'});
   });
-  await test('填写备注添加账号后自动切换并进入手机号登录',async()=>{
-    const oldSwitch=app.switchAccount,oldLoad=app.loadAccounts,oldRender=app.renderTgCard;let switched='',rendered=0;
-    app.switchAccount=id=>{switched=id};app.loadAccounts=async()=>{};app.renderTgCard=async()=>{rendered++};app.api=async(p,o)=>{assert.strictEqual(p,'/api/accounts');assert.strictEqual(JSON.parse(o.body).label,'测试小号');return {id:'new-account'}};
-    q('#accountLabel').value='测试小号';await ex("manageAccount('create')");assert.strictEqual(switched,'new-account');assert.strictEqual(rendered,1);assert(q('#accountResult').textContent.includes('请输入手机号'));
-    app.switchAccount=oldSwitch;app.loadAccounts=oldLoad;app.renderTgCard=oldRender;
+  await test('登录新账号在发送验证码时才创建并切换账号',async()=>{
+    const oldApi=app.api,oldSwitch=app.switchAccount,oldLoad=app.loadAccounts,oldRender=app.renderTgCard;
+    let created=null,switched='',sent=[];
+    app.api=async(p,o)=>{if(p==='/api/accounts'){created=JSON.parse(o.body);return {ok:true,id:'new-account'}}if(p==='/api/tg/send_code'){sent.push(o);return {ok:true}}throw new Error('unexpected '+p)};
+    app.loadAccounts=async()=>{};app.switchAccount=id=>{switched=id;ex("selectedAccount='"+id+"';accountEpoch++")};app.renderTgCard=async()=>{};
+    ex("selectedAccount='default';accountEpoch++;tgAddMode=true;tgRemarkDraft='测试小号';tgPhoneDraft='8613800138000';tgLoginAccountId='';tgAutoRename=false");q('#tgPhone').value='8613800138000';
+    await ex('sendTgCode()');
+    assert.strictEqual(created.label,'测试小号');assert.strictEqual(switched,'new-account');assert.strictEqual(sent.length,1);assert.strictEqual(sent[0]._account.id,'new-account');
+    assert.strictEqual(ex('tgLoginAccountId'),'new-account');assert.strictEqual(ex('tgAutoRename'),false);assert.strictEqual(ex('tgAddMode'),false);
+    app.api=oldApi;app.switchAccount=oldSwitch;app.loadAccounts=oldLoad;app.renderTgCard=oldRender;
+  });
+  await test('登录新账号备注留空时创建后自动用 TG 昵称',async()=>{
+    const oldApi=app.api,oldSwitch=app.switchAccount,oldLoad=app.loadAccounts,oldRender=app.renderTgCard;
+    let created=null;
+    app.api=async(p,o)=>{if(p==='/api/accounts'){created=JSON.parse(o.body);return {ok:true,id:'new-account'}}if(p==='/api/tg/send_code')return {ok:true};throw new Error('unexpected '+p)};
+    app.loadAccounts=async()=>{};app.switchAccount=id=>{ex("selectedAccount='"+id+"';accountEpoch++")};app.renderTgCard=async()=>{};
+    ex("selectedAccount='default';accountEpoch++;tgAddMode=true;tgRemarkDraft='';tgPhoneDraft='8613800138000';tgLoginAccountId='';tgAutoRename=false");q('#tgPhone').value='8613800138000';
+    await ex('sendTgCode()');
+    assert.strictEqual(created.label,'TG 账号');assert.strictEqual(ex('tgAutoRename'),true);
+    app.api=oldApi;app.switchAccount=oldSwitch;app.loadAccounts=oldLoad;app.renderTgCard=oldRender;
+  });
+  await test('已有账号重新登录不会自动用 TG 昵称覆盖备注',async()=>{
+    const oldApi=app.api,oldLoadState=app.loadState,oldLoadAccounts=app.loadAccounts,oldRender=app.renderTgCard,oldState=app.state;
+    let puts=[];
+    app.api=async(p,o)=>{puts.push([p,o]);return {ok:true}};app.loadState=async()=>{ex("state={logged_in:true,tg:{me:{name:'新昵称'}}}")};app.loadAccounts=async()=>{};app.renderTgCard=async()=>{};
+    ex("selectedAccount='work';accountEpoch++;tgAutoRename=false;tgLoginAccountId='work';tgAddMode=false");
+    await ex('afterTgLogin()');
+    assert.strictEqual(puts.length,0);assert.strictEqual(ex('tgAutoRename'),false);assert.strictEqual(ex('tgLoginAccountId'),'');
+    app.api=oldApi;app.loadState=oldLoadState;app.loadAccounts=oldLoadAccounts;app.renderTgCard=oldRender;app.state=oldState;
   });
   await test('定时抢注测试按钮真实调用测试接口但不调用立即执行',async()=>{
     ex("selectedAccount='default';accountEpoch++;autos=[{id:77,type:'scheduled_register',name:'测试抢注',enabled:1}];autoTestBusy.clear()");const requests=[];
