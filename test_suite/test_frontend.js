@@ -967,7 +967,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('账号管理和登录合并，共用API只保存一次',async()=>{
     assert.strictEqual((html.match(/id="foldTg"/g)||[]).length,1);assert.strictEqual((html.match(/id="tgCard"/g)||[]).length,1);
-    assert(html.includes('登录新账号'));assert(html.includes('所有 Telegram 账号共用这一套 API'));assert(!html.includes('添加账号并登录'));assert(!html.includes('Telegram 多账号'));
+    assert(html.includes('登录新账号'));assert(html.includes('登录表单默认使用内置公共 API'));assert(html.includes('扫码登录新账号'));assert(html.includes('使用自定义 API'));assert(!html.includes('添加账号并登录'));assert(!html.includes('Telegram 多账号'));
     q('#tgApiId').value='12345';q('#tgApiHash').value='dummy-shared-api-hash';const requests=[];
     app.api=async(p,o)=>{requests.push([p,o]);return {}};await ex('saveTgApi()');
     assert.deepStrictEqual(requests.map(x=>x[0]),['/api/settings']);assert.deepStrictEqual(JSON.parse(requests[0][1].body),{api_id:'12345',api_hash:'dummy-shared-api-hash'});
@@ -977,7 +977,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     let created=null,switched='',sent=[];
     app.api=async(p,o)=>{if(p==='/api/accounts'){created=JSON.parse(o.body);return {ok:true,id:'new-account'}}if(p==='/api/tg/send_code'){sent.push(o);return {ok:true}}throw new Error('unexpected '+p)};
     app.loadAccounts=async()=>{};app.switchAccount=id=>{switched=id;ex("selectedAccount='"+id+"';accountEpoch++")};app.renderTgCard=async()=>{};
-    ex("selectedAccount='default';accountEpoch++;tgAddMode=true;tgRemarkDraft='测试小号';tgPhoneDraft='8613800138000';tgLoginAccountId='';tgAutoRename=false");q('#tgPhone').value='8613800138000';
+    ex("selectedAccount='default';accountEpoch++;tgAddMode=true;tgRemarkDraft='测试小号';tgPhoneDraft='8613800138000';tgLoginAccountId='';tgAutoRename=false;tgUseCustomApi=false");q('#tgPhone').value='8613800138000';
     await ex('sendTgCode()');
     assert.strictEqual(created.label,'测试小号');assert.strictEqual(switched,'new-account');assert.strictEqual(sent.length,1);assert.strictEqual(sent[0]._account.id,'new-account');
     assert.strictEqual(ex('tgLoginAccountId'),'new-account');assert.strictEqual(ex('tgAutoRename'),false);assert.strictEqual(ex('tgAddMode'),false);
@@ -988,10 +988,33 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     let created=null;
     app.api=async(p,o)=>{if(p==='/api/accounts'){created=JSON.parse(o.body);return {ok:true,id:'new-account'}}if(p==='/api/tg/send_code')return {ok:true};throw new Error('unexpected '+p)};
     app.loadAccounts=async()=>{};app.switchAccount=id=>{ex("selectedAccount='"+id+"';accountEpoch++")};app.renderTgCard=async()=>{};
-    ex("selectedAccount='default';accountEpoch++;tgAddMode=true;tgRemarkDraft='';tgPhoneDraft='8613800138000';tgLoginAccountId='';tgAutoRename=false");q('#tgPhone').value='8613800138000';
+    ex("selectedAccount='default';accountEpoch++;tgAddMode=true;tgRemarkDraft='';tgPhoneDraft='8613800138000';tgLoginAccountId='';tgAutoRename=false;tgUseCustomApi=false");q('#tgPhone').value='8613800138000';
     await ex('sendTgCode()');
     assert.strictEqual(created.label,'TG 账号');assert.strictEqual(ex('tgAutoRename'),true);
     app.api=oldApi;app.switchAccount=oldSwitch;app.loadAccounts=oldLoad;app.renderTgCard=oldRender;
+  });
+  await test('API 选择默认公共，自定义 API 需有效才能提交',async()=>{
+    ex("tgUseCustomApi=false");q('#tgApiId').value='';q('#tgApiHash').value='';assert.strictEqual(ex('tgCanSubmit()'),true);
+    ex("tgUseCustomApi=true");assert.strictEqual(ex('tgCanSubmit()'),false);
+    q('#tgApiId').value='12345';q('#tgApiHash').value='custom-hash';assert.strictEqual(ex('tgCanSubmit()'),true);
+  });
+  await test('新账号扫码使用内置公共 API 并生成二维码状态',async()=>{
+    const oldApi=app.api,oldRender=app.renderTgCard,oldTick=app.tgQrStartTick,oldPoll=app.tgQrPoll;let body=null,tick=0,poll=0;
+    app.api=async(p,o)=>{if(p==='/api/tg/qr/start'){body=JSON.parse(o.body);return {qr_id:'q-test',image:'data:image/png;base64,AAAA',status:'waiting',expires_in:55}}throw new Error('unexpected '+p)};
+    app.renderTgCard=async()=>{};app.tgQrStartTick=()=>{tick++};app.tgQrPoll=()=>{poll++};
+    ex("selectedAccount='default';accountEpoch++;tgAddMode=true;tgUseCustomApi=false;tgRemarkDraft='扫码小号';tgApiId='';tgApiHash='';tgQrId=''");q('#tgApiId').value='';q('#tgApiHash').value='';
+    await ex('startTgQr()');
+    assert.strictEqual(body.new_account,true);assert.strictEqual(body.api_mode,'builtin');assert.strictEqual(body.label,'扫码小号');assert.strictEqual(body.api_id,undefined);assert.strictEqual(ex('tgQrId'),'q-test');assert.strictEqual(ex('tgQrStatus'),'waiting');assert.strictEqual(tick,1);assert.strictEqual(poll,1);
+    ex("tgQrId='';tgQrStatus=''");app.api=oldApi;app.renderTgCard=oldRender;app.tgQrStartTick=oldTick;app.tgQrPoll=oldPoll;
+  });
+  await test('已有账号扫码选择自定义 API 会先保存账号级模式',async()=>{
+    const oldApi=app.api,oldRender=app.renderTgCard,oldTick=app.tgQrStartTick,oldPoll=app.tgQrPoll;let calls=[];let qrBody=null;
+    app.api=async(p,o)=>{calls.push([p,JSON.parse(o.body||'{}')]);if(p==='/api/tg/api')return {};if(p==='/api/tg/qr/start'){qrBody=JSON.parse(o.body);return {qr_id:'q2',image:'data:image/png;base64,BBBB',status:'waiting',expires_in:55}}throw new Error('unexpected '+p)};
+    app.renderTgCard=async()=>{};app.tgQrStartTick=()=>{};app.tgQrPoll=()=>{};
+    ex("selectedAccount='work';accountEpoch++;tgAddMode=false;tgUseCustomApi=true;tgApiId='';tgApiHash='';tgQrId=''");q('#tgApiId').value='12345';q('#tgApiHash').value='custom-hash';
+    await ex('startTgQr()');
+    assert.strictEqual(calls[0][0],'/api/tg/api');assert.strictEqual(calls[0][1].tg_api_mode,'custom');assert.strictEqual(calls[0][1].api_id,'12345');assert.strictEqual(qrBody.api_mode,'custom');assert.strictEqual(qrBody.api_id,'12345');
+    ex("tgQrId='';tgQrStatus=''");app.api=oldApi;app.renderTgCard=oldRender;app.tgQrStartTick=oldTick;app.tgQrPoll=oldPoll;
   });
   await test('已有账号重新登录不会自动用 TG 昵称覆盖备注',async()=>{
     const oldApi=app.api,oldLoadState=app.loadState,oldLoadAccounts=app.loadAccounts,oldRender=app.renderTgCard,oldState=app.state;

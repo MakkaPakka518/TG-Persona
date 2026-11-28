@@ -67,6 +67,19 @@ class FakeTelegramClient:
         self.codes.append(phone)
         return SimpleNamespace(phone_code_hash='fake-' + phone)
 
+    async def qr_login(self):
+        await asyncio.sleep(0)
+        class FakeQr:
+            url = 'tg://login?token=fake-offline'
+            def __init__(self, client): self.client = client
+            async def wait(self, timeout=55):
+                await asyncio.sleep(0)
+                if self.client.need_password:
+                    raise errors.SessionPasswordNeededError(request=None)
+                self.client.authorized.add(self.client.session)
+                return await self.client.get_me()
+        return FakeQr(self)
+
     async def sign_in(self, phone=None, code=None, password=None):
         await asyncio.sleep(0)
         self.signins.append((phone, code, password))
@@ -708,6 +721,66 @@ class AccountsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(self.main.account_registry.accounts), {'default', healthy})
         self.assertTrue(self.main.session_ok(self.token))
         self.assertEqual((await self.req('GET', '/api/state', healthy)).status_code, 200)
+
+    async def test_account_api_mode_builtin_and_custom(self):
+        builtin = (await self.req('POST', '/api/accounts', json={
+            'label': 'builtin-api', 'api_mode': 'builtin'})).json()['id']
+        await self.req('POST', '/api/tg/send_code', builtin, json={'phone': '00000000001'})
+        client = next(c for c in FakeTelegramClient.instances
+                      if c.session == str(self.rt(builtin).directory / 'tg'))
+        self.assertEqual(client.api_id, self.main.BUILTIN_API_ID)
+        self.assertEqual(client.api_hash, self.main.BUILTIN_API_HASH)
+
+        custom = (await self.req('POST', '/api/accounts', json={
+            'label': 'custom-api', 'pending_login': True})).json()['id']
+        self.assertEqual((await self.req('POST', '/api/tg/api', custom, json={
+            'mode': 'custom', 'api_id': '12345', 'api_hash': 'custom-offline-hash'})).status_code, 200)
+        await self.req('POST', '/api/tg/send_code', custom, json={'phone': '00000000002'})
+        client = next(c for c in FakeTelegramClient.instances
+                      if c.session == str(self.rt(custom).directory / 'tg'))
+        self.assertEqual(client.api_id, 12345)
+        self.assertEqual(client.api_hash, 'custom-offline-hash')
+        row = self.rt().db.execute("SELECT value FROM settings WHERE key='api_id'").fetchone()
+        self.assertNotEqual(row['value'] if row else None, '12345')
+
+    async def test_pending_login_account_is_removed_after_five_minutes(self):
+        aid = (await self.req('POST', '/api/accounts', json={
+            'label': 'abandoned', 'pending_login': True})).json()['id']
+        now = int(self.main.time.time())
+        with use_runtime(self.rt(aid)):
+            self.main.set_setting('login_pending_at', str(now - 301))
+        await self.main.cleanup_pending_once(now)
+        self.assertNotIn(aid, self.main.account_registry.accounts)
+
+    async def test_qr_login_creates_account_only_after_authorization(self):
+        module = self.main
+        original = module.TelegramClient
+        class QrFake(FakeTelegramClient):
+            async def is_user_authorized(self):
+                if '/accounts/' in self.session and Path(self.session + '.session').exists():
+                    return True
+                return await super().is_user_authorized()
+        module.TelegramClient = QrFake
+        try:
+            start = await self.req('POST', '/api/tg/qr/start', json={
+                'new_account': True, 'label': '扫码小号', 'api_mode': 'builtin'})
+            self.assertEqual(start.status_code, 200, start.text)
+            data = start.json()
+            self.assertTrue(data['image'].startswith('data:image/png;base64,'))
+            status = {}
+            for _ in range(8):
+                await asyncio.sleep(0)
+                response = await self.req('POST', '/api/tg/qr/check', json={'qr_id': data['qr_id']})
+                self.assertEqual(response.status_code, 200, response.text)
+                status = response.json()
+                if status['status'] not in ('waiting', 'finalizing'):
+                    break
+            self.assertEqual(status.get('status'), 'success', status)
+            self.assertIn(status['account_id'], self.main.account_registry.accounts)
+            self.assertEqual(self.main.account_registry.select(status['account_id']).label, '扫码小号')
+            self.assertEqual(self.main.account_registry.select(status['account_id']).tg_state['phase'], 'ready')
+        finally:
+            module.TelegramClient = original
 
     async def test_legacy_profile_api_is_promoted_to_shared_settings(self):
         aid = await self.create('legacy api')

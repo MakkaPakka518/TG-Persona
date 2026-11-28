@@ -59,6 +59,10 @@ except ImportError:
     httpx = None  # 通知/AI 需要 httpx;缺失时降级 urllib
 
 from telethon import TelegramClient, errors, events
+try:
+    import qrcode
+except ImportError:  # 二维码是附加能力，缺少依赖时给出明确安装提示
+    qrcode = None
 from telethon.extensions import markdown as telethon_markdown
 from telethon.tl.functions.messages import SendReactionRequest
 from telethon.tl.types import DocumentAttributeFilename, ReactionEmoji
@@ -78,7 +82,7 @@ from custom_workflow import (canonical_steps, canonical_trigger, group_matches, 
                              render_template, search_pattern, uses_credentials,
                              uses_default_target, uses_trigger_context, validate_template)
 from account_runtime import (AccountError, AccountRegistry, account_locked,
-                             get_runtime, open_database, secure_files, use_runtime)
+                             get_runtime, open_database, secure_directory, secure_files, use_runtime)
 
 BASE = Path(__file__).resolve().parent
 _MIGRATION_BOOT = data_migration.prepare_startup_restore(BASE)
@@ -88,6 +92,9 @@ DB_PATH = DATA / "config.db"
 SESSION_PATH = str(DATA / "tg")           # Telethon 会话文件 (data/tg.session)
 PW_FILE = DATA / "panel_password.txt"
 AVATAR_FILE = DATA / "avatar.jpg"         # 登录时自动拉取的 TG 头像缓存
+# 公开客户端凭据仅作为“免申请”的便捷默认值；可用环境变量覆盖。自定义 API 始终优先。
+BUILTIN_API_ID = int(os.environ.get("TG_BUILTIN_API_ID", "2040"))
+BUILTIN_API_HASH = os.environ.get("TG_BUILTIN_API_HASH", "b18441a1ff607e10a989891a5462e627")
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
@@ -629,6 +636,47 @@ def migrate_shared_tg_api():
 
 
 migrate_shared_tg_api()
+
+
+def valid_custom_api(api_id, api_hash):
+    api_id = str(api_id or "").strip()
+    api_hash = str(api_hash or "").strip()
+    return bool(re.fullmatch(r"[1-9][0-9]{0,9}", api_id) and len(api_hash) >= 10), api_id, api_hash
+
+
+def account_api_config(mode=None):
+    """Return (mode, api_id, api_hash) for the current account.
+
+    Legacy accounts have no tg_api_mode and keep using the shared custom credentials.
+    New accounts explicitly choose builtin; custom values are stored per account and
+    may additionally update the shared custom defaults for future logins.
+    """
+    mode = str(mode or get_setting("tg_api_mode") or "custom").strip().lower()
+    if mode == "builtin":
+        return "builtin", BUILTIN_API_ID, BUILTIN_API_HASH
+    api_id = get_setting("tg_api_id") or get_setting("api_id")
+    api_hash = get_setting("tg_api_hash") or get_setting("api_hash")
+    return "custom", api_id, api_hash
+
+
+def set_account_api_choice(mode, api_id="", api_hash="", save_shared=True):
+    mode = str(mode or "").strip().lower()
+    if mode not in ("builtin", "custom"):
+        raise HTTPException(400, "API 模式无效")
+    if mode == "builtin":
+        set_setting("tg_api_mode", "builtin")
+        return "builtin", BUILTIN_API_ID, BUILTIN_API_HASH
+    ok, api_id, api_hash = valid_custom_api(api_id, api_hash)
+    if not ok:
+        raise HTTPException(400, "自定义 API_ID / API_HASH 无效")
+    set_setting("tg_api_mode", "custom")
+    set_setting("tg_api_id", api_id)
+    set_setting("tg_api_hash", api_hash)
+    if save_shared:
+        set_setting("api_id", api_id)
+        set_setting("api_hash", api_hash)
+    return "custom", api_id, api_hash
+
 
 # ---------------- 时区 ----------------
 def tz_name() -> str:
@@ -10740,6 +10788,52 @@ async def signin_loop():
 
 
 # ---------------- 生命周期 ----------------
+PENDING_LOGIN_TTL = 300
+
+
+async def cleanup_pending_once(now=None):
+    """One pass: delete only accounts explicitly created by a login attempt and left unverified."""
+    now = int(now if now is not None else time.time())
+    for runtime in list(account_registry.accounts.values()):
+        if runtime.id == "default" or runtime.closing or runtime.closed:
+            continue
+        with use_runtime(runtime):
+            pending = str(get_setting("login_pending_at") or "").strip()
+        if not pending.isdigit():
+            continue
+        try:
+            age = now - int(pending)
+        except ValueError:
+            continue
+        if age < PENDING_LOGIN_TTL:
+            continue
+        if runtime.tg_state["phase"] == "ready":
+            with use_runtime(runtime):
+                set_setting("login_pending_at", "")
+            continue
+        authorized = False
+        if runtime.client is not None:
+            try:
+                authorized = await runtime.client.is_user_authorized()
+            except Exception:
+                authorized = False
+        if authorized:
+            with use_runtime(runtime):
+                set_setting("login_pending_at", "")
+            continue
+        try:
+            await account_registry.delete(runtime.id)
+            log.info("已清理超过 5 分钟未登录的临时账号 %s", runtime.id)
+        except Exception as error:
+            log.warning("清理未登录临时账号 %s 失败: %s", runtime.id, type(error).__name__)
+
+
+async def cleanup_pending_accounts():
+    while True:
+        await asyncio.sleep(60)
+        await cleanup_pending_once()
+
+
 @asynccontextmanager
 async def lifespan(app):
     set_setting("uptime_since", get_setting("uptime_since", str(int(time.time()))))
@@ -10754,7 +10848,9 @@ async def lifespan(app):
                 _reconcile_group_configuration(runtime.db)
                 runtime.db.commit()
                 purge_hits()
-                if (runtime.directory / "tg.session").exists() and get_setting("api_id") and get_setting("api_hash"):
+                mode, api_id, api_hash = account_api_config()
+                api_ready = mode == "builtin" or valid_custom_api(api_id, api_hash)[0]
+                if (runtime.directory / "tg.session").exists() and api_ready:
                     async with runtime.lifecycle():
                         await ensure_client()
                         if runtime.tg_state["phase"] != "ready":
@@ -10781,11 +10877,12 @@ async def lifespan(app):
         friends_task = asyncio.create_task(friends_upload_loop())
         flock_task = asyncio.create_task(_flock_heartbeat_loop())
         feedback_task = asyncio.create_task(_flock_feedback_loop())
+        pending_cleanup_task = asyncio.create_task(cleanup_pending_accounts())
         yield
     finally:
         for task in (locals().get("backup_task"), locals().get("knowledge_task"),
                      locals().get("friends_task"), locals().get("flock_task"),
-                     locals().get("feedback_task")):
+                     locals().get("feedback_task"), locals().get("pending_cleanup_task")):
             try:
                 task.cancel()
             except AttributeError:
@@ -10852,6 +10949,10 @@ app.add_middleware(PanelAuthMiddleware)
 
 class AccountInput(BaseModel):
     label: str = Field(..., min_length=1, max_length=80)
+    pending_login: bool = False
+    api_mode: str = ""
+    api_id: str = ""
+    api_hash: str = ""
 
 
 @app.get("/api/accounts")
@@ -10868,7 +10969,20 @@ async def list_accounts():
 
 @app.post("/api/accounts")
 async def create_account(body: AccountInput):
+    if body.api_mode:
+        mode = str(body.api_mode or "").strip().lower()
+        if mode not in ("builtin", "custom"):
+            raise HTTPException(400, "API 模式无效")
+        if mode == "custom":
+            ok, _, _ = valid_custom_api(body.api_id, body.api_hash)
+            if not ok:
+                raise HTTPException(400, "自定义 API_ID / API_HASH 无效")
     runtime = await account_registry.create(body.label)
+    with use_runtime(runtime):
+        if body.pending_login:
+            set_setting("login_pending_at", str(int(time.time())))
+        if body.api_mode:
+            set_account_api_choice(body.api_mode, body.api_id, body.api_hash, save_shared=False)
     return {"ok": True, "id": runtime.id}
 
 
@@ -10964,6 +11078,33 @@ class VerifyPassword(BaseModel):
     password: str
 
 
+class ApiChoice(BaseModel):
+    mode: str
+    api_id: str = ""
+    api_hash: str = ""
+
+
+@app.post("/api/tg/api")
+@account_locked
+async def tg_api_choice(body: ApiChoice):
+    runtime = get_runtime()
+    if runtime.tg_state["phase"] == "ready":
+        raise HTTPException(409, "已登录账号不能切换 API，请先退出登录")
+    mode = str(body.mode or "").strip().lower()
+    before = account_api_config()
+    if mode == "custom":
+        ok, api_id, api_hash = valid_custom_api(body.api_id, body.api_hash)
+        if not ok:
+            raise HTTPException(400, "自定义 API_ID / API_HASH 无效")
+    else:
+        api_id, api_hash = "", ""
+    after = ("builtin", BUILTIN_API_ID, BUILTIN_API_HASH) if mode == "builtin" else ("custom", api_id, api_hash)
+    if before != after and runtime.client is not None:
+        await runtime.stop(secure_storage=False)
+    set_account_api_choice(mode, api_id, api_hash, save_shared=False)
+    return {"ok": True, "mode": mode}
+
+
 @app.post("/api/tg/init")
 @account_locked
 async def tg_init(body: TGInit):
@@ -10971,11 +11112,10 @@ async def tg_init(body: TGInit):
     if body.api_id <= 0 or len(body.api_hash) < 10:
         raise HTTPException(400, "API_ID 或 API_HASH 无效(在 my.telegram.org 获取)")
     runtime = get_runtime()
-    changed = (get_setting("api_id") != str(body.api_id) or get_setting("api_hash") != body.api_hash)
+    changed = (account_api_config("custom")[1:] != (str(body.api_id), body.api_hash))
     if changed and runtime.client is not None:
         await runtime.stop()
-    set_setting("api_id", str(body.api_id))
-    set_setting("api_hash", body.api_hash)
+    set_account_api_choice("custom", str(body.api_id), body.api_hash, save_shared=True)
     await ensure_client()
     return {"ok": True}
 
@@ -10991,10 +11131,14 @@ async def ensure_client():
             if await runtime.client.is_user_authorized():
                 await finish_login()
             return
-        api_id = int(get_setting("api_id", "0"))
-        api_hash = get_setting("api_hash", "")
-        if not api_id or not api_hash:
-            raise HTTPException(400, "请先填写 API_ID / API_HASH")
+        mode, api_id, api_hash = account_api_config()
+        if mode == "custom":
+            ok, api_id, api_hash = valid_custom_api(api_id, api_hash)
+            if not ok:
+                raise HTTPException(400, "请先填写自定义 API_ID / API_HASH，或取消勾选改用内置公共 API")
+            api_id = int(api_id)
+        else:
+            api_id = int(api_id)
         runtime.check_live()
         runtime.client = TelegramClient(runtime.session_path, api_id, api_hash)
         await runtime.client.connect()
@@ -11006,6 +11150,326 @@ async def ensure_client():
     except Exception as e:
         runtime.tg_state.update(phase="error", err=str(e))
         raise HTTPException(500, f"连接失败: {e}")
+
+
+QR_LOGIN_TTL = 55
+QR_SESSION_MAX_AGE = 600
+tg_qr_sessions = {}
+
+
+def qr_png_data_url(text):
+    if qrcode is None:
+        raise HTTPException(500, "缺少 qrcode 依赖，请先安装 qrcode")
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L,
+                       box_size=6, border=2)
+    qr.add_data(text)
+    qr.make(fit=True)
+    image = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+async def _dispose_qr_session(item, status=None):
+    if status:
+        item["status"] = status
+    task = item.get("task")
+    if task is not None and task is not asyncio.current_task() and not task.done():
+        task.cancel()
+    client = item.get("client")
+    item["client"] = None
+    if client is not None:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+    path = item.get("session_file")
+    if path:
+        candidates = [path, path + ".session", path + ".session-journal", path + ".session-wal",
+                      path + ".session-shm", path + "-journal", path + "-wal", path + "-shm"]
+        for candidate in candidates:
+            try:
+                Path(candidate).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def prune_qr_sessions():
+    now = time.time()
+    for qr_id, item in list(tg_qr_sessions.items()):
+        terminal = item.get("status") in ("success", "expired", "error")
+        if now - float(item.get("created_at", now)) > QR_SESSION_MAX_AGE and (terminal or item.get("status") == "waiting"):
+            try:
+                asyncio.create_task(_dispose_qr_session(item, "expired"))
+            except Exception:
+                pass
+            tg_qr_sessions.pop(qr_id, None)
+
+
+async def _wait_qr_login(item):
+    try:
+        user = await item["qr_login"].wait(timeout=QR_LOGIN_TTL)
+        item["me"] = user
+        item["status"] = "success"
+    except errors.SessionPasswordNeededError:
+        item["status"] = "need_2fa"
+    except asyncio.TimeoutError:
+        await _dispose_qr_session(item, "expired")
+        for candidate in (item.get("session_file") or "", (item.get("session_file") or "") + ".session"):
+            try:
+                if candidate:
+                    Path(candidate).unlink(missing_ok=True)
+            except OSError:
+                pass
+    except Exception as error:
+        item["status"] = "error"
+        item["error"] = str(error)
+        await _dispose_qr_session(item)
+
+
+async def _finalize_qr_login(item):
+    target_id = item.get("account_id")
+    me = item.get("me")
+    temp_client = item.get("client")
+    if temp_client is None:
+        raise HTTPException(410, "扫码会话已失效，请重新生成")
+    me = me or await temp_client.get_me()
+    nickname = (getattr(me, "first_name", "") + (" " + me.last_name if getattr(me, "last_name", None) else "")).strip()
+    item["me"] = me
+
+    runtime = None
+    created = False
+    if target_id:
+        runtime = account_registry.select(target_id)
+        if runtime.tg_state["phase"] == "ready":
+            raise HTTPException(409, "该账号已登录，扫码只会用于未登录账号")
+    else:
+        label = (item.get("label") or nickname or "TG 账号").strip()[:80]
+        runtime = await account_registry.create(label)
+        created = True
+        with use_runtime(runtime):
+            set_setting("login_pending_at", str(int(time.time())))
+
+    api_mode = item.get("api_mode") or "builtin"
+    api_id, api_hash = item.get("api_id"), item.get("api_hash")
+    with use_runtime(runtime):
+        set_account_api_choice(api_mode, api_id, api_hash, save_shared=False)
+
+    # Disconnect the temporary QR client so its SQLite session is flushed to disk.
+    try:
+        await temp_client.disconnect()
+    except Exception:
+        pass
+    src = Path(item["session_file"])
+    if not src.exists():
+        src = Path(str(item["session_file"]) + ".session")
+    if not src.exists():
+        src = Path(str(item["session_file"]) + ".session.session")
+    dst = Path(runtime.session_path + ".session")
+    secure_directory(runtime.directory)
+    if not src.exists():
+        raise HTTPException(500, "扫码会话文件未生成")
+    backup = None
+    if dst.exists():
+        backup = dst.with_name(dst.name + ".qr-backup")
+        try:
+            shutil.copy2(dst, backup)
+        except OSError:
+            backup = None
+    try:
+        shutil.copy2(src, dst)
+        try:
+            os.chmod(dst, 0o600)
+        except OSError:
+            pass
+        secure_files(runtime.directory)
+
+        async with runtime.lifecycle():
+            await runtime.stop(secure_storage=False)
+            runtime.client = TelegramClient(runtime.session_path, int(api_id), str(api_hash))
+        await runtime.client.connect()
+        if not await runtime.client.is_user_authorized():
+            raise HTTPException(500, "扫码授权未写入会话，请重新扫码")
+        with use_runtime(runtime):
+            await finish_login(me)
+    except Exception:
+        # 已有账号扫码失败时恢复原会话，避免一次失败覆盖旧登录态。
+        try:
+            await runtime.stop(secure_storage=False)
+        except Exception:
+            pass
+        try:
+            if backup is not None and backup.exists():
+                shutil.copy2(backup, dst)
+            else:
+                dst.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    finally:
+        if backup is not None:
+            try:
+                backup.unlink(missing_ok=True)
+            except OSError:
+                pass
+    item["status"] = "success"
+    item["account_id"] = runtime.id
+    item["label"] = runtime.label
+    item["error"] = None
+    await _dispose_qr_session(item)
+
+
+class QrStart(BaseModel):
+    new_account: bool = False
+    label: str = ""
+    api_mode: str = ""
+    api_id: str = ""
+    api_hash: str = ""
+
+
+class QrRef(BaseModel):
+    qr_id: str
+
+
+class QrPassword(BaseModel):
+    qr_id: str
+    password: str
+
+
+@app.post("/api/tg/qr/start")
+async def tg_qr_start(body: QrStart):
+    prune_qr_sessions()
+    runtime = get_runtime()
+    target_id = None if body.new_account else runtime.id
+    if target_id and runtime.tg_state["phase"] == "ready":
+        raise HTTPException(409, "该账号已登录，请先退出登录后再扫码")
+    mode = str(body.api_mode or "").strip().lower()
+    if not mode:
+        mode = "builtin" if body.new_account else account_api_config()[0]
+    if mode == "custom":
+        if body.api_id or body.api_hash:
+            ok, api_id, api_hash = valid_custom_api(body.api_id, body.api_hash)
+        else:
+            ok, api_id, api_hash = valid_custom_api(*account_api_config("custom")[1:])
+        if not ok:
+            raise HTTPException(400, "自定义 API_ID / API_HASH 无效")
+    elif mode == "builtin":
+        api_id, api_hash = BUILTIN_API_ID, BUILTIN_API_HASH
+    else:
+        raise HTTPException(400, "API 模式无效")
+
+    qr_dir = DATA / "qr"
+    secure_directory(qr_dir, create=True)
+    qr_id = "qr_" + secrets.token_hex(12)
+    session_file = str(qr_dir / qr_id)
+    client = None
+    try:
+        client = TelegramClient(session_file, int(api_id), str(api_hash))
+        await client.connect()
+        qr_login = await client.qr_login()
+    except Exception as error:
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+        try:
+            Path(session_file).unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise HTTPException(502, f"生成扫码失败: {error}") from None
+    try:
+        image = qr_png_data_url(qr_login.url)
+    except Exception:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        try:
+            Path(session_file).unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    item = {
+        "qr_id": qr_id, "session_file": session_file, "client": client, "qr_login": qr_login,
+        "status": "waiting", "created_at": time.time(),
+        "expires_at": time.time() + QR_LOGIN_TTL, "expires_in": QR_LOGIN_TTL,
+        "account_id": target_id, "label": str(body.label or "").strip()[:80],
+        "api_mode": mode, "api_id": api_id, "api_hash": api_hash,
+        "me": None, "error": None, "lock": asyncio.Lock(), "task": None,
+    }
+    tg_qr_sessions[qr_id] = item
+    item["task"] = asyncio.create_task(_wait_qr_login(item))
+    return {"ok": True, "qr_id": qr_id, "image": image,
+            "status": "waiting", "expires_in": QR_LOGIN_TTL}
+
+
+@app.post("/api/tg/qr/check")
+async def tg_qr_check(body: QrRef):
+    item = tg_qr_sessions.get(body.qr_id)
+    if item is None:
+        raise HTTPException(410, "扫码会话已过期，请重新生成")
+    async with item["lock"]:
+        if item["status"] == "waiting" and time.time() > item["expires_at"]:
+            await _dispose_qr_session(item, "expired")
+        if item["status"] == "success" and not item.get("account_id"):
+            item["status"] = "finalizing"
+            try:
+                await _finalize_qr_login(item)
+            except HTTPException as error:
+                item["status"] = "error"
+                item["error"] = str(error.detail)
+                await _dispose_qr_session(item)
+            except Exception as error:
+                item["status"] = "error"
+                item["error"] = str(error)
+                await _dispose_qr_session(item)
+        return {"status": item["status"], "account_id": item.get("account_id"),
+                "label": item.get("label"), "error": item.get("error"),
+                "expires_in": max(0, int(item["expires_at"] - time.time()))}
+
+
+@app.post("/api/tg/qr/2fa")
+async def tg_qr_2fa(body: QrPassword):
+    item = tg_qr_sessions.get(body.qr_id)
+    if item is None:
+        raise HTTPException(410, "扫码会话已过期，请重新生成")
+    async with item["lock"]:
+        if item["status"] != "need_2fa" or item.get("client") is None:
+            raise HTTPException(409, "当前扫码会话不需要或已结束两步验证")
+        try:
+            user = await item["client"].sign_in(password=body.password)
+        except errors.PasswordHashInvalidError:
+            raise HTTPException(400, "两步验证密码错误")
+        except Exception as error:
+            raise HTTPException(400, f"两步验证失败: {error}") from None
+        item["me"] = user
+        item["status"] = "finalizing"
+        try:
+            await _finalize_qr_login(item)
+        except HTTPException:
+            item["status"] = "error"
+            await _dispose_qr_session(item)
+            raise
+        except Exception as error:
+            item["status"] = "error"
+            item["error"] = str(error)
+            await _dispose_qr_session(item)
+            raise HTTPException(500, f"扫码登录失败: {error}") from None
+        return {"ok": True, "status": "success", "account_id": item.get("account_id"), "label": item.get("label")}
+
+
+@app.post("/api/tg/qr/cancel")
+async def tg_qr_cancel(body: QrRef):
+    item = tg_qr_sessions.get(body.qr_id)
+    if item is None:
+        return {"ok": True}
+    async with item["lock"]:
+        if item["status"] == "finalizing":
+            raise HTTPException(409, "扫码登录正在完成，请稍候")
+        await _dispose_qr_session(item, "expired")
+        tg_qr_sessions.pop(body.qr_id, None)
+    return {"ok": True}
 
 
 @app.post("/api/tg/send_code")
@@ -11079,6 +11543,7 @@ async def finish_login(me=None):
     me = me or await runtime.client.get_me()
     runtime.tg_state.update(phase="ready", err=None, health_error=None)
     runtime.session_alerted = False
+    set_setting("login_pending_at", "")
     runtime.tg_state["me"] = {
         "id": me.id,
         "name": getattr(me, "first_name", "") + (" " + me.last_name if getattr(me, "last_name", None) else ""),
@@ -13087,6 +13552,7 @@ async def delete_rule(rid: int):
 
 # ---------- 设置 ----------
 SETTING_KEYS = ["tz", "log_keep_days", "cooldown", "delay", "ignore_bots", "api_id", "api_hash", "theme", "avatar",
+                "tg_api_mode", "tg_api_id", "tg_api_hash",
                 "notify_bark", "notify_bt", "notify_bc", "notify_on_success", "notify_on_fail",
                 "ai_base", "ai_key", "ai_model", "ai_enabled", "ocr_enabled",
                 "flock_enabled", "flock_count", "flock_minutes", "flock_pool", "task_concurrency",

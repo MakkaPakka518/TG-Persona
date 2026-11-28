@@ -251,6 +251,11 @@ input[type=time],input[type=date],input[type=datetime-local]{max-width:100%;min-
 .tg-spinner{width:22px;height:22px;border-radius:50%;border:2px solid var(--hair2);border-top-color:var(--acc);animation:tgspin .8s linear infinite;flex:none}
 .tg-loading-title{font-size:14px;font-weight:600;color:var(--txt)}
 .tg-loading-sub{font-size:11.5px;color:var(--dim);margin-top:2px}
+.tg-qr-wrap{display:flex;justify-content:center;margin:14px 0 8px}
+.tg-qr-wrap img{width:min(62vw,240px);height:auto;border-radius:14px;border:1px solid var(--hair);background:#fff;padding:8px}
+.tg-qr-actions{display:flex;gap:8px;margin-top:10px}.tg-qr-actions .btn,.tg-qr-actions .ghost{flex:1}
+.checkline{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--txt);margin:10px 0 4px}
+.checkline input{width:16px!important;height:16px;flex:none;margin:0}
 @keyframes tgspin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.tg-spinner{animation-duration:1.8s}}
 .form-actions{display:flex;gap:10px;margin-top:18px}#waterAiCard .form-actions button{min-width:44px}
@@ -1890,13 +1895,13 @@ section.act,.fold.open .fold-b{animation:none}
       <div class="fold sub-fold" id="foldTg">
         <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>TG账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
         <div class="fold-b">
-          <h4 style="margin:0 0 8px">共用 Telegram API</h4>
+          <h4 style="margin:0 0 8px">自定义 Telegram API（可选）</h4>
           <div class="flex">
             <div><label for="tgApiId">API_ID</label><input type="text" id="tgApiId" placeholder="12345678" inputmode="numeric"></div>
             <div><label for="tgApiHash">API_HASH</label><input type="text" id="tgApiHash" placeholder="在 my.telegram.org 获取"></div>
           </div>
-          <button class="ghost" id="tgApiSave" style="margin-top:10px" onclick="saveTgApi()">保存共用 API</button>
-          <div class="hint">所有 Telegram 账号共用这一套 API，只需配置一次。</div>
+          <button class="ghost" id="tgApiSave" style="margin-top:10px" onclick="saveTgApi()">保存自定义 API</button>
+          <div class="hint">登录表单默认使用内置公共 API（公开共享凭据，重要账号建议自定义），勾选「使用自定义 API」才会使用这里保存的凭据。已有账号保持原来的自定义 API，不受影响。</div>
           <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
           <label for="accountSettings">当前账号</label>
           <select id="accountSettings" onchange="switchAccount(this.value)"><option value="default">默认账号</option></select>
@@ -2167,6 +2172,7 @@ function toast(msg,err){if(!msg)return;const t=$('#toast');t.textContent=msg;t.c
 // ---------- 账号请求范围 ----------
 let selectedAccount='default', accountEpoch=0;
 let tgPhase='idle', tgBusy=false, tgBusyAccount='', tgBusyEpoch=0, tgBusyText='', tgPhoneDraft='', tgCodeDraft='', tgRemarkDraft='', tgAddMode=false, tgLoginAccountId='', tgAutoRename=false;
+let tgUseCustomApi=false, tgQrId='', tgQrImage='', tgQrStatus='', tgQrError='', tgQrExpiresAt=0, tgQrTimer=null, tgQrTickTimer=null;
 try{selectedAccount=localStorage.getItem('tgp_selected_id')||'default'}catch(e){}
 function accountContext(){return {id:selectedAccount,epoch:accountEpoch}}
 function isCurrentAccount(c){return c.id===selectedAccount&&c.epoch===accountEpoch}
@@ -2255,8 +2261,9 @@ function resetAccountCaches(){
 }
 function switchAccount(id){
   id=String(id||'default');if(id===selectedAccount){renderAccounts();return}
+  stopTgQr(false);
   selectedAccount=id;accountEpoch++;
-  tgPhase='idle';tgBusy=false;tgBusyAccount='';tgBusyEpoch=0;tgBusyText='';tgPhoneDraft='';tgCodeDraft='';tgRemarkDraft='';tgAddMode=false;tgLoginAccountId='';tgAutoRename=false;
+  tgPhase='idle';tgBusy=false;tgBusyAccount='';tgBusyEpoch=0;tgBusyText='';tgPhoneDraft='';tgCodeDraft='';tgRemarkDraft='';tgAddMode=false;tgLoginAccountId='';tgAutoRename=false;tgUseCustomApi=false;
   try{localStorage.setItem('tgp_selected_id',id)}catch(e){}
   resetAccountCaches();renderAccounts();
   loadState();loadSettings();loadAutos();loadWebSignins();loadRules();loadRuleGroups();loadDialogs();loadLogs();renderTgCard();loadEmbyTemplates();loadEmbyAccounts();
@@ -2291,15 +2298,17 @@ async function manageAccount(action){
 }
 function startNewAccount(){
   if(accountsBusy)return;
+  stopTgQr(false);
   tgAddMode=true;tgPhase='idle';tgBusy=false;tgBusyAccount='';tgBusyEpoch=0;tgBusyText='';
-  tgPhoneDraft='';tgCodeDraft='';tgRemarkDraft='';tgLoginAccountId='';tgAutoRename=false;
+  tgPhoneDraft='';tgCodeDraft='';tgRemarkDraft='';tgLoginAccountId='';tgAutoRename=false;tgUseCustomApi=false;
   renderTgCard();
   $('#foldTg').classList.add('open');
   setTimeout(()=>{const field=$('#tgPhone');if(field){field.focus();field.scrollIntoView({behavior:'smooth',block:'center'})}},100);
 }
 function cancelNewAccount(){
   if(tgIsBusy())return;
-  tgAddMode=false;tgPhoneDraft='';tgCodeDraft='';tgRemarkDraft='';tgLoginAccountId='';tgAutoRename=false;
+  stopTgQr(false);
+  tgAddMode=false;tgPhoneDraft='';tgCodeDraft='';tgRemarkDraft='';tgLoginAccountId='';tgAutoRename=false;tgUseCustomApi=false;
   renderTgCard();
 }
 
@@ -4483,10 +4492,25 @@ async function panelLogin(){
 function tgIsBusy(){const c=accountContext();return tgBusy&&tgBusyAccount===c.id&&tgBusyEpoch===c.epoch}
 function tgBeginBusy(text){const c=accountContext();tgBusy=true;tgBusyAccount=c.id;tgBusyEpoch=c.epoch;tgBusyText=text;renderTgCard()}
 function tgEndBusy(c){if(tgBusyAccount===c.id&&tgBusyEpoch===c.epoch){tgBusy=false;tgBusyText=''}if(isCurrentAccount(c))renderTgCard()}
+function tgCustomApiReady(){
+  const id=($('#tgApiId')?.value||'').trim(), hash=($('#tgApiHash')?.value||'').trim();
+  return /^[1-9]\d{0,9}$/.test(id)&&hash.length>=10;
+}
+function tgCanSubmit(){return !tgUseCustomApi||tgCustomApiReady()}
+function tgSetCustomApi(value){
+  tgUseCustomApi=!!value;
+  const hint=$('#tgApiChoiceHint');
+  if(hint)hint.textContent=tgUseCustomApi?'使用上方「自定义 Telegram API」保存的凭据；无效时不能登录。':'默认使用内置公共 API，无需申请；共享凭据，重要账号建议自定义。';
+  for(const id of ['tgSendCodeBtn','tgQrBtn']){const b=$('#'+id);if(b)b.disabled=!tgCanSubmit()}
+}
+function tgApiChoiceHtml(){
+  return `<label class="checkline"><input type="checkbox" id="tgUseCustomApi" ${tgUseCustomApi?'checked':''} onchange="tgSetCustomApi(this.checked)"> 使用自定义 API</label>
+    <div class="hint" id="tgApiChoiceHint">${tgUseCustomApi?'使用上方「自定义 Telegram API」保存的凭据；无效时不能登录。':'默认使用内置公共 API，无需申请。'}</div>`;
+}
+function tgQrRemaining(){return Math.max(0,Math.ceil((tgQrExpiresAt-Date.now())/1000))}
 async function renderTgCard(){
   const c=accountContext(),el=$('#tgCard'); if(!el)return;
   const current=accounts.find(a=>a.id===c.id),label=String(current?.label||c.id);
-  const apiReady=/^\d{4,10}$/.test($('#tgApiId').value.trim())&&$('#tgApiHash').value.trim().length>=10;
   if(tgIsBusy()){
     el.innerHTML=`
       <div class="tg-login-loading" role="status" aria-live="polite">
@@ -4495,15 +4519,45 @@ async function renderTgCard(){
       </div>`;
     return;
   }
+  if(tgQrId){
+    if(tgQrStatus==='finalizing'){
+      el.innerHTML=`<div class="tg-login-loading" role="status" aria-live="polite"><span class="tg-spinner" aria-hidden="true"></span><div><div class="tg-loading-title">正在完成扫码登录…</div><div class="tg-loading-sub">正在保存会话，请稍候</div></div></div>`;
+      return;
+    }
+    if(tgQrStatus==='need_2fa'){
+      el.innerHTML=`
+        <div class="hint">已扫码，该账号开启了两步验证。请输入 Cloud 密码完成登录。</div>
+        <label>两步验证密码(Cloud 密码)</label>
+        <input type="password" id="tgQr2fa" placeholder="账号设置里的两步验证密码">
+        <div class="tg-qr-actions"><button class="btn" onclick="submitTgQr2fa()">完成登录</button><button class="ghost" onclick="cancelTgQr()">取消扫码</button></div>
+        <div class="hint">提交后请稍候，不要重复提交。</div>`;
+      return;
+    }
+    if(tgQrStatus==='expired'||tgQrStatus==='error'){
+      el.innerHTML=`
+        <div class="hint">${tgQrStatus==='expired'?'二维码已过期，请重新生成。':'扫码登录失败：'+esc(tgQrError||'请重新生成二维码')}</div>
+        <div class="tg-qr-actions"><button class="btn" onclick="startTgQr()">重新生成</button><button class="ghost" onclick="cancelTgQr()">取消</button></div>`;
+      return;
+    }
+    el.innerHTML=`
+      <div class="hint">${tgAddMode?'扫码登录新账号：':'扫码登录当前账号：'}请在手机 Telegram 中扫码授权。</div>
+      <div class="tg-qr-wrap"><img src="${tgQrImage}" alt="Telegram 登录二维码"></div>
+      <div class="hint" style="text-align:center" id="tgQrCountdown">二维码有效期约 ${tgQrRemaining()} 秒</div>
+      <div class="hint">路径：Telegram → 设置 → 设备 → 连接桌面设备。扫码后手机会提示确认登录。</div>
+      <div class="tg-qr-actions"><button class="ghost" onclick="cancelTgQr()">取消扫码</button></div>`;
+    return;
+  }
   if(tgAddMode){
     el.innerHTML=`
       <div class="hint">登录新账号：填写手机号，备注可留空。当前已登录的账号不会受影响。</div>
       <label>账号备注（可选）</label>
       <input type="text" id="tgRemark" maxlength="80" placeholder="如：工作号、小号；留空用 TG 昵称" value="${esc(tgRemarkDraft)}" oninput="tgRemarkDraft=this.value">
       <div class="hint">不填备注时，登录成功后会自动使用该 TG 账号的昵称。</div>
+      ${tgApiChoiceHtml()}
       <label style="margin-top:12px">手机号（带国家码）</label>
       <input type="text" id="tgPhone" placeholder="8613800138000" inputmode="numeric" value="${esc(tgPhoneDraft)}" oninput="tgPhoneDraft=this.value">
-      <button class="btn" style="width:100%;margin-top:10px" onclick="sendTgCode()" ${apiReady?'':'disabled'}>发送验证码</button>
+      <button class="btn" id="tgSendCodeBtn" style="width:100%;margin-top:10px" onclick="sendTgCode()" ${tgCanSubmit()?'':'disabled'}>发送验证码</button>
+      <button class="ghost" id="tgQrBtn" style="width:100%;margin-top:8px" onclick="startTgQr()" ${tgCanSubmit()?'':'disabled'}>扫码登录新账号</button>
       <button class="ghost" style="width:100%;margin-top:8px" onclick="cancelNewAccount()">取消</button>
       <div class="hint">验证码可能直接发到你已经登录的 Telegram 客户端（Telegram 官方服务消息），不一定是短信。请先打开 Telegram 查看，只点一次，不要连续点。</div>`;
     return;
@@ -4533,11 +4587,13 @@ async function renderTgCard(){
   const serverPhase=state.tg?.phase;
   if(serverPhase==='code_sent'||serverPhase==='need_password')tgPhase=serverPhase;
   el.innerHTML=`
-    <div class="hint">正在登录：${esc(label)}${apiReady?'':'。请先保存上方共用 API'}</div>
+    <div class="hint">正在登录：${esc(label)}</div>
+    ${tgApiChoiceHtml()}
     <div id="tgS1" style="display:${tgPhase==='need_password'?'none':'block'};margin-top:12px">
       <label>手机号（带国家码）</label>
       <input type="text" id="tgPhone" placeholder="8613800138000" inputmode="numeric" value="${esc(tgPhoneDraft)}" oninput="tgPhoneDraft=this.value">
-      <button class="btn" style="width:100%;margin-top:10px" onclick="sendTgCode()" ${apiReady?'':'disabled'}>发送验证码</button>
+      <button class="btn" id="tgSendCodeBtn" style="width:100%;margin-top:10px" onclick="sendTgCode()" ${tgCanSubmit()?'':'disabled'}>发送验证码</button>
+      <button class="ghost" id="tgQrBtn" style="width:100%;margin-top:8px" onclick="startTgQr()" ${tgCanSubmit()?'':'disabled'}>扫码登录当前账号</button>
       <div class="hint">验证码可能直接发到你已经登录的 Telegram 客户端（Telegram 官方服务消息），不一定是短信。请先打开 Telegram 查看，只点一次，不要连续点。</div>
     </div>
     <div id="tgS2" style="display:${tgPhase==='code_sent'?'block':'none'};margin-top:16px">
@@ -4553,37 +4609,133 @@ async function renderTgCard(){
       <div class="hint">此账号确认开启了两步验证；提交后请稍候，不要重复提交。</div>
     </div>`;
 }
+
 async function saveTgApi(){
   const id=$('#tgApiId').value.trim(), hash=$('#tgApiHash').value.trim();
-  if(!/^\d{4,10}$/.test(id)||hash.length<10)return toast('API_ID 或 API_HASH 无效(在 my.telegram.org 获取)',1);
+  if(!/^[1-9]\d{0,9}$/.test(id)||hash.length<10)return toast('API_ID 或 API_HASH 无效(在 my.telegram.org 获取)',1);
   const c=accountContext();
   try{
     await api('/api/settings',{method:'POST',body:JSON.stringify({api_id:id,api_hash:hash}),_account:c});
     if(!isCurrentAccount(c))return;
-    toast('共用 API 已保存，所有账号立即生效');renderTgCard();
+    toast('自定义 API 已保存；登录时勾选后使用');renderTgCard();
     setTimeout(()=>{if(!isCurrentAccount(c))return;const f=$('#tgPhone');if(f){f.focus();f.scrollIntoView({behavior:'smooth',block:'center'})}},80);
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
+function stopTgQr(notifyServer=false){
+  const id=tgQrId,c=accountContext();
+  if(tgQrTimer){clearTimeout(tgQrTimer);tgQrTimer=null}
+  if(tgQrTickTimer){clearInterval(tgQrTickTimer);tgQrTickTimer=null}
+  tgQrId='';tgQrImage='';tgQrStatus='';tgQrError='';tgQrExpiresAt=0;
+  if(notifyServer&&id){api('/api/tg/qr/cancel',{method:'POST',body:JSON.stringify({qr_id:id}),_account:c}).catch(()=>{})}
+}
+function cancelTgQr(){stopTgQr(true);renderTgCard()}
+function tgQrStartTick(){
+  if(tgQrTickTimer){clearInterval(tgQrTickTimer);tgQrTickTimer=null}
+  if(!tgQrId)return;
+  tgQrTickTimer=setInterval(()=>{
+    if(!tgQrId){clearInterval(tgQrTickTimer);tgQrTickTimer=null;return}
+    const left=tgQrRemaining(),el=$('#tgQrCountdown');
+    if(el)el.textContent='二维码有效期约 '+left+' 秒';
+    if(left<=0&&tgQrStatus==='waiting'){
+      tgQrStatus='expired';clearInterval(tgQrTickTimer);tgQrTickTimer=null;
+      if(tgQrTimer){clearTimeout(tgQrTimer);tgQrTimer=null}
+      renderTgCard();
+    }
+  },1000);
+}
+async function tgApplyApiChoice(c){
+  const body={tg_api_mode:tgUseCustomApi?'custom':'builtin'};
+  if(tgUseCustomApi){body.api_id=$('#tgApiId').value.trim();body.api_hash=$('#tgApiHash').value.trim()}
+  await api('/api/tg/api',{method:'POST',body:JSON.stringify(body),_account:c});
+}
+async function startTgQr(){
+  if(tgIsBusy())return;
+  if(!tgCanSubmit())return toast('请先填写有效的自定义 API，或取消勾选使用内置公共 API',1);
+  const c=accountContext(),isNew=tgAddMode;
+  const useCustom=tgUseCustomApi;
+  tgBeginBusy('正在生成登录二维码…');
+  try{
+    if(!isNew)await tgApplyApiChoice(c);
+    const body={new_account:isNew,label:(tgRemarkDraft||'').trim(),api_mode:useCustom?'custom':'builtin'};
+    if(useCustom){body.api_id=$('#tgApiId').value.trim();body.api_hash=$('#tgApiHash').value.trim()}
+    const d=await api('/api/tg/qr/start',{method:'POST',body:JSON.stringify(body),_account:c});
+    if(!isCurrentAccount(c))return;
+    tgQrId=d.qr_id;tgQrImage=d.image||'';tgQrStatus=d.status||'waiting';tgQrError='';
+    tgQrExpiresAt=Date.now()+Number(d.expires_in||55)*1000;
+    tgBusy=false;tgBusyText='';
+    renderTgCard();tgQrStartTick();tgQrPoll();
+  }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
+  finally{if(tgIsBusy())tgEndBusy(c)}
+}
+function tgQrPoll(){
+  if(tgQrTimer){clearTimeout(tgQrTimer);tgQrTimer=null}
+  if(!tgQrId)return;
+  const id=tgQrId,c=accountContext();
+  tgQrTimer=setTimeout(()=>tgQrCheck(id,c),1500);
+}
+async function tgQrCheck(id,c){
+  if(id!==tgQrId||!isCurrentAccount(c))return;
+  try{
+    const d=await api('/api/tg/qr/check',{method:'POST',body:JSON.stringify({qr_id:id}),_account:c});
+    if(id!==tgQrId||!isCurrentAccount(c))return;
+    tgQrStatus=d.status||'error';tgQrError=d.error||'';
+    if(d.status==='success'&&d.account_id){await finishTgQr(d);return}
+    renderTgCard();
+    if(d.status==='waiting'||d.status==='finalizing')tgQrPoll();
+  }catch(e){
+    if(id===tgQrId){tgQrStatus='error';tgQrError=e.message;renderTgCard()}
+  }
+}
+async function finishTgQr(d){
+  const target=d.account_id;
+  stopTgQr(false);
+  tgAddMode=false;tgPhoneDraft='';tgCodeDraft='';tgRemarkDraft='';tgLoginAccountId='';tgAutoRename=false;
+  await loadAccounts();
+  if(target&&target!==selectedAccount){switchAccount(target)}
+  else{await loadState();await loadSettings();renderTgCard()}
+  toast('扫码登录成功，人形分身已上线');
+}
+async function submitTgQr2fa(){
+  if(!tgQrId)return;
+  const password=$('#tgQr2fa').value;
+  if(!password)return toast('请填写两步验证密码',1);
+  const id=tgQrId,c=accountContext();
+  tgQrStatus='finalizing';renderTgCard();
+  try{
+    const d=await api('/api/tg/qr/2fa',{method:'POST',body:JSON.stringify({qr_id:id,password}),_account:c});
+    if(id!==tgQrId)return;
+    if(d.account_id){await finishTgQr(d);return}
+    tgQrStatus='need_2fa';renderTgCard();
+  }catch(e){
+    if(id===tgQrId){tgQrStatus='need_2fa';tgQrError=e.message;renderTgCard();toast(e.message,1)}
+  }
+}
 async function sendTgCode(){
   if(tgIsBusy())return;
+  if(!tgCanSubmit())return toast('请先填写有效的自定义 API，或取消勾选使用内置公共 API',1);
   const phone=$('#tgPhone').value.trim();
   tgPhoneDraft=phone;
   if(!phone)return toast('请填写手机号',1);
+  const useCustom=tgUseCustomApi;
   let c=accountContext();
   try{
     if(tgAddMode){
       const remark=tgRemarkDraft.trim();
       tgBeginBusy('正在创建新账号…');
-      const created=await api('/api/accounts',{method:'POST',body:JSON.stringify({label:remark||'TG 账号'})});
+      const createdBody={label:remark||'TG 账号',pending_login:true,api_mode:useCustom?'custom':'builtin'};
+      if(useCustom){createdBody.api_id=$('#tgApiId').value.trim();createdBody.api_hash=$('#tgApiHash').value.trim()}
+      const created=await api('/api/accounts',{method:'POST',body:JSON.stringify(createdBody)});
       if(!created.id)throw new Error('创建账号失败');
       await loadAccounts();
       switchAccount(created.id);
       c=accountContext();
       try{await loadState()}catch(e){}
+      tgUseCustomApi=useCustom;
       tgAddMode=false;tgPhoneDraft=phone;tgRemarkDraft=remark;
       tgLoginAccountId=c.id;tgAutoRename=!remark;
       tgBeginBusy('正在发送验证码…');
     }else{
+      await tgApplyApiChoice(c);
       if(tgLoginAccountId!==c.id)tgAutoRename=false;
       tgLoginAccountId=c.id;
       tgBeginBusy('正在发送验证码…');
@@ -5338,8 +5490,9 @@ async function loadSettings(){
   try{
     const s=await api('/api/settings',{_account:c});if(!isCurrentAccount(c))return;
     if(globalRevision===signinGlobalRevision)acceptSigninGlobalSettings(s);
-    $('#tgApiId').value=s.api_id||'';
-    $('#tgApiHash').value=s.api_hash||'';
+    $('#tgApiId').value=s.tg_api_id||s.api_id||'';
+    $('#tgApiHash').value=s.tg_api_hash||s.api_hash||'';
+    if(!tgAddMode)tgUseCustomApi=(s.tg_api_mode||'custom')!=='builtin';
     if(!state.logged_in)renderTgCard();
     $('#sCooldown').value=s.cooldown||20;
     $('#sDelay').value=s.delay||'1.0 3.0';
