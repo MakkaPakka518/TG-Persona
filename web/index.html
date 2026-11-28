@@ -1895,13 +1895,17 @@ section.act,.fold.open .fold-b{animation:none}
       <div class="fold sub-fold" id="foldTg">
         <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>TG账号</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
         <div class="fold-b">
-          <h4 style="margin:0 0 8px">自定义 Telegram API（可选）</h4>
-          <div class="flex">
-            <div><label for="tgApiId">API_ID</label><input type="text" id="tgApiId" placeholder="12345678" inputmode="numeric"></div>
-            <div><label for="tgApiHash">API_HASH</label><input type="text" id="tgApiHash" placeholder="在 my.telegram.org 获取"></div>
+          <div class="fold sub-fold" id="foldTgApi">
+            <h3 class="fold-h" onclick="foldToggle(this)"><span class="lbl">自定义 Telegram API（可选）</span><svg class="arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></h3>
+            <div class="fold-b">
+              <div class="flex">
+                <div><label for="tgApiId">API_ID</label><input type="text" id="tgApiId" placeholder="12345678" inputmode="numeric"></div>
+                <div><label for="tgApiHash">API_HASH</label><input type="text" id="tgApiHash" placeholder="在 my.telegram.org 获取"></div>
+              </div>
+              <button class="ghost" id="tgApiSave" style="margin-top:10px" onclick="saveTgApi()">保存自定义 API</button>
+              <div class="hint">登录表单默认使用内置公共 API（公开共享凭据，重要账号建议自定义），勾选「使用自定义 API」才会使用这里保存的凭据。已有账号保持原来的自定义 API，不受影响。</div>
+            </div>
           </div>
-          <button class="ghost" id="tgApiSave" style="margin-top:10px" onclick="saveTgApi()">保存自定义 API</button>
-          <div class="hint">登录表单默认使用内置公共 API（公开共享凭据，重要账号建议自定义），勾选「使用自定义 API」才会使用这里保存的凭据。已有账号保持原来的自定义 API，不受影响。</div>
           <hr style="border:0;border-top:1px solid var(--hair);margin:18px 0">
           <label for="accountSettings">当前账号</label>
           <select id="accountSettings" onchange="switchAccount(this.value)"><option value="default">默认账号</option></select>

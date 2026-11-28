@@ -967,7 +967,7 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
   });
   await test('账号管理和登录合并，自定义 API 只保存到当前账号',async()=>{
     assert.strictEqual((html.match(/id="foldTg"/g)||[]).length,1);assert.strictEqual((html.match(/id="tgCard"/g)||[]).length,1);
-    assert(html.includes('登录新账号'));assert(html.includes('登录表单默认使用内置公共 API'));assert(html.includes('扫码登录新账号'));assert(html.includes('使用自定义 API'));assert(!html.includes('添加账号并登录'));assert(!html.includes('Telegram 多账号'));
+    assert(html.includes('登录新账号'));assert(html.includes('登录表单默认使用内置公共 API'));assert(html.includes('扫码登录新账号'));assert(html.includes('使用自定义 API'));assert(html.includes('id="foldTgApi"'));assert(!/<div class="fold sub-fold open" id="foldTgApi"/.test(html));assert(!html.includes('添加账号并登录'));assert(!html.includes('Telegram 多账号'));
     q('#tgApiId').value='12345';q('#tgApiHash').value='dummy-shared-api-hash';const requests=[];
     app.api=async(p,o)=>{requests.push([p,o]);return {}};await ex('saveTgApi()');
     assert.deepStrictEqual(requests.map(x=>x[0]),['/api/tg/api']);assert.deepStrictEqual(JSON.parse(requests[0][1].body),{mode:'custom',api_id:'12345',api_hash:'dummy-shared-api-hash'});
