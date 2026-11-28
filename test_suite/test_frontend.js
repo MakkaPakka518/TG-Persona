@@ -965,12 +965,12 @@ async function test(name,fn){await fn();count++;console.log('通过：'+name)}
     ex("selectedAccount='work'");let prompts=0;app.window.confirm=()=>++prompts===1;await ex("manageAccount('delete')");assert.strictEqual(prompts,2);assert.strictEqual(sent,0);
     q('#accountLabel').value='重命名';app.api=async()=>{throw new Error('mock账号冲突')};await ex("manageAccount('rename')");assert(!q('#accountRename').disabled);assert(q('#accountResult').textContent.includes('mock账号冲突'));
   });
-  await test('账号管理和登录合并，共用API只保存一次',async()=>{
+  await test('账号管理和登录合并，自定义 API 只保存到当前账号',async()=>{
     assert.strictEqual((html.match(/id="foldTg"/g)||[]).length,1);assert.strictEqual((html.match(/id="tgCard"/g)||[]).length,1);
     assert(html.includes('登录新账号'));assert(html.includes('登录表单默认使用内置公共 API'));assert(html.includes('扫码登录新账号'));assert(html.includes('使用自定义 API'));assert(!html.includes('添加账号并登录'));assert(!html.includes('Telegram 多账号'));
     q('#tgApiId').value='12345';q('#tgApiHash').value='dummy-shared-api-hash';const requests=[];
     app.api=async(p,o)=>{requests.push([p,o]);return {}};await ex('saveTgApi()');
-    assert.deepStrictEqual(requests.map(x=>x[0]),['/api/settings']);assert.deepStrictEqual(JSON.parse(requests[0][1].body),{api_id:'12345',api_hash:'dummy-shared-api-hash'});
+    assert.deepStrictEqual(requests.map(x=>x[0]),['/api/tg/api']);assert.deepStrictEqual(JSON.parse(requests[0][1].body),{mode:'custom',api_id:'12345',api_hash:'dummy-shared-api-hash'});
   });
   await test('登录新账号在发送验证码时才创建并切换账号',async()=>{
     const oldApi=app.api,oldSwitch=app.switchAccount,oldLoad=app.loadAccounts,oldRender=app.renderTgCard;

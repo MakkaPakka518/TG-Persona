@@ -4615,9 +4615,9 @@ async function saveTgApi(){
   if(!/^[1-9]\d{0,9}$/.test(id)||hash.length<10)return toast('API_ID 或 API_HASH 无效(在 my.telegram.org 获取)',1);
   const c=accountContext();
   try{
-    await api('/api/settings',{method:'POST',body:JSON.stringify({api_id:id,api_hash:hash}),_account:c});
+    await api('/api/tg/api',{method:'POST',body:JSON.stringify({mode:'custom',api_id:id,api_hash:hash}),_account:c});
     if(!isCurrentAccount(c))return;
-    toast('自定义 API 已保存；登录时勾选后使用');renderTgCard();
+    toast('自定义 API 已保存到当前账号；登录时勾选后使用');renderTgCard();
     setTimeout(()=>{if(!isCurrentAccount(c))return;const f=$('#tgPhone');if(f){f.focus();f.scrollIntoView({behavior:'smooth',block:'center'})}},80);
   }catch(e){if(isCurrentAccount(c))toast(e.message,1)}
 }
